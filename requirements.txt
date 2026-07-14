@@ -1,0 +1,24 @@
+# Core
+numpy>=1.26,<3
+pyyaml>=6.0
+pydantic>=2.6,<3
+
+# Embeddings + retrieval
+sentence-transformers>=2.6
+faiss-cpu>=1.8 ; sys_platform != "darwin"
+# On Apple Silicon, install faiss via conda for ARM support.
+
+# Generator (optional — only needed when mock=false)
+# torch is intentionally unpinned; install the build matching your CUDA.
+torch>=2.2
+transformers>=4.41
+accelerate>=0.30
+# bitsandbytes>=0.43 ; sys_platform == "win32" and python_version >= "3.10"
+# Note: bitsandbytes on Windows requires Python 3.10+ and a CUDA build.
+
+# Testing
+pytest>=8.0
+
+# Web service (optional — only needed when serving via api/app.py)
+fastapi>=0.110
+uvicorn[standard]>=0.27

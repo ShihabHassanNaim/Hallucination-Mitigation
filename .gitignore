@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.puku/
+.puku/puku-embeddings.db
+
+# Project artefacts
+data/index/
+data/preds.jsonl
+data/metrics.json
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp

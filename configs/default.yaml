@@ -1,0 +1,101 @@
+# CRISP Phase 1 — default configuration.
+# Override any field from the CLI via env vars prefixed CRISP_, e.g.
+#   $env:CRISP_MOCK="1"            -> mock: true
+#   $env:CRISP_TOPK="10"           -> retrieval.top_k: 10
+
+mock: true                          # Set false to use real HF models.
+
+retrieval:
+  embedding_model: "BAAI/bge-large-en-v1.5"
+  top_k: 5
+  index_path: "data/index"
+  normalize_embeddings: true        # BGE requires L2-normalized vectors for cosine.
+  # Phase 4 — adaptive retrieval mode. "dense" preserves Phase 1-3 behaviour.
+  # "hybrid" builds a BM25 index alongside the dense one and runs the
+  # adaptive controller (expand / rewrite / multi-hop).
+  mode: "dense"
+  bm25_k1: 1.5
+  bm25_b: 0.75
+  rrf_k: 60.0                       # Cormack et al. (2009) default
+  weight_dense: 1.0
+  weight_bm25: 1.0
+
+# Phase 4 — adaptive retrieval controller. Off by default so existing
+# Phases 1-3 keep working unchanged. Flip enabled=true (or set
+# CRISP_ADAPTIVE=1) to engage expand/rewrite/multi-hop.
+adaptive_retrieval:
+  enabled: false
+  initial_k: 5
+  max_k: 20
+  expansion_score_threshold: 0.20    # top-1 below -> expand k
+  expansion_gap_threshold: 0.05      # top1-top2 below -> expand k
+  rewrite_variants: 2               # how many deterministic rewrites to try
+  multi_hop_max_entities: 3
+  multi_hop_min_entity_len: 3
+
+# Phase 5 — multi-hop evidence aggregation. Kicks in only when Phase 3
+# tags a claim as Provenance.AGGREGATED. The planner runs NER -> KG
+# link -> sub-query -> merge. Set CRISP_DISABLE_MULTIHOP=1 to turn it off.
+multi_hop:
+  enabled: true
+  ner_backend: "mock"                # "mock" or "spacy"
+  ner_model: "en_core_web_sm"
+  max_entities: 3                    # max entities resolved per claim
+  max_relations_per_entity: 2        # priority relations tried per entity
+  top_k_per_subquery: 3              # retriever top_k for each sub-query
+
+generator:
+  model_name: "meta-llama/Llama-3.1-8B-Instruct"
+  dtype: "fp16"                     # one of: "fp16", "bf16", "4bit", "fp32"
+  max_new_tokens: 256
+  temperature: 0.0                  # greedy for reproducibility in Phase 1
+  device: "cuda"                    # "cpu" forces CPU even if CUDA is available
+
+# Phase 2 — NLI-based hallucination detector.
+detector:
+  model_name: "microsoft/deberta-v3-large"
+  device: "auto"                    # "cpu", "cuda", or "auto"
+  max_evidence_chars: 4000
+
+# Phase 3 — atomic claim extraction + provenance tagging.
+#   mode: "synthetic" (default) is deterministic and CPU-only.
+#         "real" uses the configured embedder for provenance similarity.
+#   intrinsic_threshold: a claim whose cosine/Jaccard overlap with the
+#         question exceeds this is tagged INTRINSIC (does not need a passage).
+#   aggregated_threshold: a claim similar to two or more retrieved hits
+#         (but not peaked on any single one) is tagged AGGREGATED.
+claim_extractor:
+  mode: "synthetic"
+  intrinsic_threshold: 0.7
+  aggregated_threshold: 0.3
+
+# Phase 6 — EEDC confidence scorer. Run scripts/calibrate_eedc.py to fit
+# weights on a labelled dev set, then write them back here.
+# Sign convention: higher phi => more likely supported. alpha/beta/gamma
+# are NEGATIVE so high entropy, low retrieval top-1, or low self-consistency
+# each push phi toward 0. delta is POSITIVE so the all-confident case
+# crosses 0.5.
+eedc:
+  alpha: -1.0                       # weight on NLI predictive entropy
+  beta: -0.7                        # weight on (1 - retrieval_top1)
+  gamma: -0.5                       # weight on (1 - self_consistency)
+  delta: 1.0                        # bias
+  weights_path: "data/eedc_weights.json"
+
+prompt:
+  system: |
+    You are a precise assistant. Answer the user's question using ONLY the
+    information in the provided context. If the context does not contain the
+    answer, say "I don't know." Do not invent facts.
+  user_template: |
+    Context:
+    {context}
+
+    Question: {question}
+
+    Answer:
+
+pipeline:
+  max_iterations: 1                 # Phase 7 (AIC) will raise/lower this adaptively.
+  log_level: "INFO"
+  enable_detection: true            # Phase 2: toggle per-claim verification.
