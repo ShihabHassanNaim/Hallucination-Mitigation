@@ -19,7 +19,15 @@ from typing import List, Optional
 from .claim_extractor import Claim, ClaimExtractor, Provenance, attach_evidence, extract_claims
 from .config import AppConfig, load_config
 from .detector import NLIPrediction
-from .eedc import EEDCScorer, EEDCWeights, signals_from_prediction
+from .eedc import EEDCScorer, EEDCSignals, EEDCWeights, signals_from_prediction
+from .calibration import CalibratedEEDC, IdentityCalibrator, TemperatureScaler, IsotonicCalibrator
+from .editor import EditorMode, EvidenceGuidedEditor
+from .iteration_controller import (
+    Action as AICAction,
+    AdaptiveIterationController,
+    IterationConfig,
+    IterationRecord,
+)
 from .embeddings import Embedder
 from .generator import Generator
 from .retriever import Hit, Retriever
@@ -76,6 +84,10 @@ class RAGResult:
     # ``Provenance.AGGREGATED`` when ``multi_hop.enabled`` is true. Each
     # entry is a ``MultiHopTrace.to_dict()`` payload keyed by claim id.
     multi_hop_traces: List[dict] = field(default_factory=list)
+    # Phase 7 — Adaptive Iteration Controller trace.
+    iteration_history: List[dict] = field(default_factory=list)
+    # Phase 7 — final editor result (post-AIC).
+    edit_result: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -108,6 +120,8 @@ class RAGResult:
             "hallucination_rate": self.hallucination_rate,
             "retrieval_trace": self.retrieval_trace,
             "multi_hop_traces": list(self.multi_hop_traces),
+            "iteration_history": list(self.iteration_history),
+            "edit_result": self.edit_result,
         }
 
 
@@ -126,9 +140,11 @@ class Pipeline:
                  embedder: Optional[Embedder] = None,
                  detector=None,
                  claim_extractor: Optional[ClaimExtractor] = None,
-                 eedc_scorer: Optional[EEDCScorer] = None,
+                 eedc_scorer=None,
                  adaptive_retriever: Optional[AdaptiveRetriever] = None,
-                 multi_hop_planner: Optional[MultiHopPlanner] = None):
+                 multi_hop_planner: Optional[MultiHopPlanner] = None,
+                 iteration_controller: Optional[AdaptiveIterationController] = None,
+                 editor: Optional[EvidenceGuidedEditor] = None):
         self.config = config or load_config()
         self.embedder = embedder or Embedder(
             model_name=self.config.retrieval.embedding_model,
@@ -180,6 +196,27 @@ class Pipeline:
         self.multi_hop_planner = multi_hop_planner
         if self.multi_hop_planner is None and self.config.multi_hop.enabled:
             self.multi_hop_planner = self._build_default_multi_hop_planner()
+
+        # Phase 7 — Adaptive Iteration Controller (decision policy).
+        self.iteration_controller = iteration_controller
+        if self.iteration_controller is None and self.config.pipeline.enable_iteration_control:
+            self.iteration_controller = AdaptiveIterationController(
+                config=IterationConfig(
+                    max_iterations=self.config.pipeline.aic_max_iterations,
+                    accept_rate_threshold=self.config.pipeline.aic_accept_rate_threshold,
+                    max_edits_per_iteration=self.config.pipeline.aic_max_edits_per_iteration,
+                    accept_rate=self.config.pipeline.aic_accept_rate,
+                    regen_rate=self.config.pipeline.aic_regen_rate,
+                    min_improvement=self.config.pipeline.aic_min_improvement,
+                )
+            )
+        # Phase 7 — evidence-guided editor (only used when AIC is on).
+        self.editor = editor
+        if self.editor is None and self.iteration_controller is not None:
+            self.editor = EvidenceGuidedEditor(
+                mode=self.config.pipeline.editor_mode,
+                generator=self.generator,
+            )
 
     # ----- index wiring ------------------------------------------------------
 
@@ -320,6 +357,128 @@ class Pipeline:
                                 self.adaptive_retriever.last_trace.to_dict()
                             )
 
+        # ---- Phase 7 — Adaptive Iteration Controller loop ------------------
+        iteration_history: List[IterationRecord] = []
+        edit_result_payload: Optional[dict] = None
+        iterations_performed = 1
+
+        if self.iteration_controller is not None and self.config.pipeline.enable_detection:
+            history: List[IterationRecord] = []
+            current_answer = answer
+            current_verdicts = claim_verdicts
+            current_confidence = confidence
+            current_rate = hallucination_rate
+
+            for it in range(1, self.config.pipeline.aic_max_iterations + 1):
+                action, flagged = self.iteration_controller.decide(
+                    current_verdicts, current_confidence, iteration=it,
+                )
+                record_notes: List[str] = []
+                if action == AICAction.ACCEPT:
+                    history.append(IterationRecord(
+                        iteration=it,
+                        action=AICAction.ACCEPT.value,
+                        hallucination_rate=current_rate,
+                        num_flagged=len(flagged),
+                        confidence=current_confidence,
+                        edited_answer=current_answer,
+                        notes=["accept_threshold_met"],
+                    ))
+                    iterations_performed = it
+                    break
+                if action == AICAction.STOP:
+                    record_notes.append("max_iterations_or_no_improvement")
+                    history.append(IterationRecord(
+                        iteration=it,
+                        action=AICAction.STOP.value,
+                        hallucination_rate=current_rate,
+                        num_flagged=len(flagged),
+                        confidence=current_confidence,
+                        edited_answer=current_answer,
+                        notes=record_notes,
+                    ))
+                    iterations_performed = it
+                    break
+                if action == AICAction.EDIT:
+                    if self.editor is None:
+                        history.append(IterationRecord(
+                            iteration=it,
+                            action=AICAction.STOP.value,
+                            hallucination_rate=current_rate,
+                            num_flagged=len(flagged),
+                            confidence=current_confidence,
+                            edited_answer=current_answer,
+                            notes=["edit_requested_but_no_editor"],
+                        ))
+                        iterations_performed = it
+                        break
+                    edit_result = self.editor.edit(
+                        answer=current_answer, flagged_claims=flagged, hits=hits,
+                    )
+                    edit_result_payload = edit_result.to_dict()
+                    current_answer = edit_result.edited_answer
+                    record_notes.append(
+                        f"rewrote_{edit_result.num_edits}_spans"
+                    )
+                elif action == AICAction.REGEN:
+                    # Re-generate with the strongest evidence sentence
+                    # prepended to context; cheap fallback in mock mode.
+                    extra = ""
+                    if flagged:
+                        top = max(flagged, key=lambda v: v.evidence_score)
+                        if top.evidence_text:
+                            extra = f"\n[trusted evidence] {top.evidence_text}\n"
+                    new_user_prompt = (
+                        self.config.prompt.user_template.format(
+                            context=(context + extra) or "(no context retrieved)",
+                            question=query,
+                        )
+                    )
+                    current_answer = self.generator.generate(
+                        system_prompt=self.config.prompt.system,
+                        user_prompt=new_user_prompt,
+                    )
+                    record_notes.append("regenerated_with_evidence_hint")
+
+                # Re-score the (possibly edited / regenerated) answer.
+                t2 = time.perf_counter()
+                new_verdicts, new_conf, new_rate = self._detect_and_score(
+                    answer=current_answer, hits=hits, question=query,
+                )
+                t_detect += (time.perf_counter() - t2) * 1000
+                history.append(IterationRecord(
+                    iteration=it,
+                    action=action.value,
+                    hallucination_rate=new_rate,
+                    num_flagged=sum(1 for v in new_verdicts if v.hallucinated),
+                    confidence=new_conf,
+                    edited_answer=current_answer,
+                    notes=record_notes,
+                ))
+                iterations_performed = it
+                current_verdicts = new_verdicts
+                current_confidence = new_conf
+                current_rate = new_rate
+                claim_verdicts = new_verdicts
+                confidence = new_conf
+                hallucination_rate = new_rate
+                answer = current_answer
+
+                if self.iteration_controller.should_stop(history, current_rate):
+                    history.append(IterationRecord(
+                        iteration=it + 1,
+                        action=AICAction.STOP.value,
+                        hallucination_rate=current_rate,
+                        num_flagged=sum(1 for v in current_verdicts if v.hallucinated),
+                        confidence=current_confidence,
+                        edited_answer=current_answer,
+                        notes=["plateau_detected"],
+                    ))
+                    iterations_performed = it + 1
+                    break
+
+            iteration_history = list(history)
+
         t_total = (time.perf_counter() - t0) * 1000
 
         return RAGResult(
@@ -328,11 +487,13 @@ class Pipeline:
             retrieved_docs=hits,
             prompt=user_prompt,
             confidence=confidence,
-            iterations=1,            # Phase 7 (AIC) will adapt this.
+            iterations=iterations_performed,
             claim_verdicts=claim_verdicts,
             hallucination_rate=hallucination_rate,
             retrieval_trace=retrieval_trace,
             multi_hop_traces=multi_hop_traces,
+            iteration_history=[r.to_dict() for r in iteration_history],
+            edit_result=edit_result_payload,
             timings_ms={
                 "retrieve": round(t_retrieve, 2),
                 "prompt": round(t_prompt, 2),
@@ -416,25 +577,54 @@ class Pipeline:
         )
         return self._detector
 
-    def _build_default_scorer(self) -> EEDCScorer:
-        """Try to load calibrated weights from disk; fall back to defaults."""
+    def _build_default_scorer(self) -> CalibratedEEDC:
+        """Build the CalibratedEEDC scorer (Phase 6).
+
+        Tries to load linear weights + optional post-hoc calibrator from
+        ``eedc.weights_path``. Falls back to defaults if anything goes
+        wrong or the file is missing.
+        """
         weights_path = Path(self.config.eedc.weights_path)
         if weights_path.exists():
             try:
                 payload = json.loads(weights_path.read_text(encoding="utf-8"))
+                if isinstance(payload, dict) and "weights" in payload:
+                    return CalibratedEEDC.from_dict(payload)
+                # Backwards compatibility: file contains only linear weights.
                 w = EEDCWeights(**payload)
-                logger.info("Loaded EEDC weights from %s", weights_path)
-                return EEDCScorer(weights=w)
+                logger.info("Loaded EEDC weights from %s (no calibrator).", weights_path)
+                return CalibratedEEDC(
+                    scorer=EEDCScorer(weights=w),
+                    calibrator=self._calibrator_from_config(),
+                )
             except Exception as e:  # pragma: no cover
                 logger.warning("Failed to load EEDC weights (%s); using defaults.", e)
-        return EEDCScorer(
-            weights=EEDCWeights(
+        return CalibratedEEDC(
+            scorer=EEDCScorer(weights=EEDCWeights(
                 alpha=self.config.eedc.alpha,
                 beta=self.config.eedc.beta,
                 gamma=self.config.eedc.gamma,
                 delta=self.config.eedc.delta,
-            )
+            )),
+            calibrator=self._calibrator_from_config(),
         )
+
+    def _calibrator_from_config(self):
+        """Construct the post-hoc calibrator from config (Phase 6).
+
+        If ``min_examples`` is set we still return a *fresh untrained*
+        calibrator here — the fitting step happens in
+        ``scripts/calibrate_eedc.py`` on a labelled dev set, then weights
+        + calibrator are persisted to ``eedc.weights_path``.
+        """
+        method = self.config.eedc.calibration.method
+        if method == "none":
+            return IdentityCalibrator()
+        if method == "temperature":
+            return TemperatureScaler(temperature=1.0)
+        if method == "isotonic":
+            return IsotonicCalibrator()
+        return IdentityCalibrator()
 
     def _build_default_multi_hop_planner(self) -> MultiHopPlanner:
         """Construct the NER + KG + planner pipeline from config."""

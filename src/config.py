@@ -91,6 +91,17 @@ class ClaimExtractorConfig(BaseModel):
     aggregated_threshold: float = Field(0.3, ge=0.0, le=1.0)
 
 
+class CalibrationConfig(BaseModel):
+    """Phase 6 post-hoc confidence calibration policy."""
+    # None / identity  - pass-through (raw EEDC phi is the final score)
+    # temperature      - single-parameter temperature scaling (default)
+    # isotonic         - piecewise-constant PAV (needs >=1k examples)
+    method: Literal["none", "temperature", "isotonic"] = "temperature"
+    # Minimum examples before we trust a fitted calibrator; below this
+    # we fall back to the identity calibrator and just use raw EEDC.
+    min_examples: int = Field(50, ge=1)
+
+
 class EEDCConfig(BaseModel):
     """Phase 6 EEDC confidence scorer settings.
 
@@ -103,6 +114,8 @@ class EEDCConfig(BaseModel):
     gamma: float = -0.5
     delta: float = 1.0
     weights_path: str = "data/eedc_weights.json"
+    # Phase 6 - post-hoc calibration applied on top of the raw Platt phi.
+    calibration: CalibrationConfig = CalibrationConfig()
 
 
 class PipelineConfig(BaseModel):
@@ -110,6 +123,16 @@ class PipelineConfig(BaseModel):
     log_level: str = "INFO"
     # Phase 2: enable/disable per-claim verification + EEDC.
     enable_detection: bool = True
+    # Phase 7 — Adaptive Iteration Controller.
+    enable_iteration_control: bool = False
+    aic_max_iterations: int = Field(3, ge=1, le=10)
+    aic_accept_rate_threshold: float = Field(0.05, ge=0.0, le=1.0)
+    aic_max_edits_per_iteration: int = Field(2, ge=0, le=20)
+    aic_accept_rate: float = Field(0.10, ge=0.0, le=1.0)
+    aic_regen_rate: float = Field(0.40, ge=0.0, le=1.0)
+    aic_min_improvement: float = Field(0.02, ge=0.0, le=1.0)
+    # Phase 7 — Evidence-guided editor mode: "stub" | "evidence" | "regenerate"
+    editor_mode: Literal["stub", "evidence", "regenerate"] = "stub"
 
 
 class AppConfig(BaseModel):
@@ -186,7 +209,18 @@ def _apply_env_overrides(cfg: AppConfig) -> AppConfig:
         "CRISP_MAX_ITER": ("pipeline.max_iterations", int),
         "CRISP_LOG_LEVEL": ("pipeline.log_level", str),
         "CRISP_EEDC_WEIGHTS": ("eedc.weights_path", str),
+        "CRISP_CALIBRATION": ("eedc.calibration.method", str),
+        "CRISP_CALIBRATION_MIN": ("eedc.calibration.min_examples", int),
         "CRISP_DISABLE_DETECT": ("pipeline.enable_detection", bool),
+        # Phase 7 — AIC + editor
+        "CRISP_AIC": ("pipeline.enable_iteration_control", bool),
+        "CRISP_AIC_MAX_ITER": ("pipeline.aic_max_iterations", int),
+        "CRISP_AIC_ACCEPT_THRESHOLD": ("pipeline.aic_accept_rate_threshold", float),
+        "CRISP_AIC_MAX_EDITS": ("pipeline.aic_max_edits_per_iteration", int),
+        "CRISP_AIC_ACCEPT_RATE": ("pipeline.aic_accept_rate", float),
+        "CRISP_AIC_REGEN_RATE": ("pipeline.aic_regen_rate", float),
+        "CRISP_AIC_MIN_IMPROVEMENT": ("pipeline.aic_min_improvement", float),
+        "CRISP_EDITOR_MODE": ("pipeline.editor_mode", str),
     }
 
     raw = os.environ

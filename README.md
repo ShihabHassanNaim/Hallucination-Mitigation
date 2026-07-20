@@ -174,9 +174,9 @@ Query ─┐
 |   3   | Atomic claim extraction + provenance tagging                                 |   ✅   |
 |   4   | Adaptive evidence retrieval (BM25 + dense hybrid + controller)              |   ✅   |
 |   5   | Multi-hop evidence aggregation (NER + mini-KG + sub-queries)                 |   ✅   |
-|   6   | EEDC scorer refinements / deeper calibration                                 |   ⏳   |
-|   7   | Adaptive Iteration Controller + evidence-guided regeneration                |   ⏳   |
-|   8   | End-to-end final verification & reporting                                    |   ⏳   |
+|   6   | Post-hoc confidence calibration (temperature / isotonic) + ECE / Brier        |   ✅   |
+|   7   | Adaptive Iteration Controller + evidence-guided editor (span rewriting)       |   ✅   |
+|   8   | End-to-end reliability verdict + JSON / HTML / Markdown reports               |   ✅   |
 
 ---
 
@@ -419,6 +419,70 @@ The starting point: BGE embeddings → FAISS top-k → HF generator → answer.
 Faithful, well-instrumented, runs in MOCK mode without downloading
 models.
 
+### Phase 6 — Post-hoc confidence calibration
+
+Raw Platt weights from Phase 2 give a 0–1 score, but the absolute value
+is poorly calibrated (Sigmoid outputs are over-confident when the input
+is out-of-distribution). Phase 6 adds a post-hoc calibrator on top:
+
+* `TemperatureScaler` — single-parameter `T` that softens (T > 1) or
+  sharpens (T < 1) the Platt score. Fitted by maximising log-likelihood
+  via ternary refinement.
+* `IsotonicCalibrator` — non-parametric Pool-Adjacent-Violators (PAV)
+  on (raw_score, true_label) pairs. More flexible; needs more data.
+* `CalibratedEEDC` wraps an `EEDCScorer` + a calibrator behind the same
+  `.score(...)` API, so the rest of the pipeline doesn't change.
+
+Metrics live alongside: `expected_calibration_error` (10-bin ECE),
+`brier_score`, `log_loss`, `accuracy_at`. Pick a method via
+`CRISP_CALIBRATION` env var (`temperature` / `isotonic` / `none`) or
+`calibration.method` in `configs/default.yaml`.
+
+### Phase 7 — Adaptive iteration + evidence-guided editor
+
+Instead of one-shot RAG, Phase 7 closes the loop. After Phase 2 flags
+claims, the **Adaptive Iteration Controller (AIC)** picks one of four
+actions:
+
+| Action  | When                                                        |
+| ------- | ----------------------------------------------------------- |
+| ACCEPT  | hallucination rate ≤ `accept_rate_threshold`                |
+| EDIT    | a few spans are wrong; the `EvidenceGuidedEditor` patches them |
+| REGEN   | too many flags; regenerate the answer with extra evidence  |
+| STOP    | max iterations reached or rate plateaued                   |
+
+The editor locates each flagged claim's span in the answer (exact
+substring → 6-token prefix fallback) and rewrites only that span in one
+of three modes:
+
+| Mode         | Behaviour                                                    |
+| ------------ | ------------------------------------------------------------ |
+| `stub`       | replace span with `[unsupported: <claim>]` (mock-friendly)  |
+| `evidence`   | replace with best-matching evidence sentence (token overlap) |
+| `regenerate` | call the `Generator` for a faithful rewrite                 |
+
+Toggle the whole loop with `CRISP_AIC=1` and tweak thresholds with
+`CRISP_AIC_*` env vars. Each iteration is recorded in
+`RAGResult.iteration_history`.
+
+### Phase 8 — Reliability reports
+
+The last phase stitches everything together. `ReportBuilder` consumes a
+`RAGResult` and produces a `ReliabilityReport` with one of five labels:
+
+| Label             | Hallucination rate | Mean EEDC |
+| ----------------- | ------------------ | --------- |
+| `RELIABLE`        | ≤ 5 %              | ≥ 0.75    |
+| `MOSTLY_RELIABLE` | ≤ 20 %             | ≥ 0.55    |
+| `UNCERTAIN`       | ≤ 50 %             | any       |
+| `UNRELIABLE`      | > 50 %             | any       |
+| `UNVERIFIABLE`    | no claims          | —         |
+
+Each report renders to **JSON**, **Markdown**, and styled **HTML** (with
+verdict badges and per-claim tables). Batch stats land in
+`summary.json`. The CLI is `python scripts/report.py --in data/preds.jsonl
+--out-dir reports/ --format html`.
+
 ---
 
 ## Glossary
@@ -447,5 +511,6 @@ Research use only. Models retain their original licenses
 (Llama 3.1 Community License, BGE MIT, DeBERTa Apache-2.0, …).
 
 Built around the research proposal for the **CRISP** thesis framework.
-#   H a l l u c i n a t i o n - M i t i g a t i o n  
+#   H a l l u c i n a t i o n - M i t i g a t i o n 
+ 
  

@@ -294,11 +294,20 @@ def test_calibration_script_runs(tmp_path, monkeypatch):
 
     assert out_path.exists()
     payload = json.loads(out_path.read_text())
-    assert set(payload.keys()) == {"alpha", "beta", "gamma", "delta"}
+    # Phase 6 writes the composite {weights, calibrator} format by default.
+    # The ``weights`` field is a 4-element list [alpha, beta, gamma, delta]
+    # (see ``EEDCWeights.as_vector``).
+    assert "weights" in payload
+    assert "calibrator" in payload
+    weights = payload["weights"]
+    assert isinstance(weights, list) and len(weights) == 4
 
 
 def test_pipeline_loads_calibrated_weights(tmp_path, monkeypatch):
-    # Write a tiny weights file and ensure the pipeline picks it up.
+    # Write a tiny weights file in the legacy {alpha, beta, gamma, delta}
+    # format and ensure the pipeline picks it up via the
+    # backwards-compatibility branch (which wraps the linear weights in
+    # a CalibratedEEDC with an IdentityCalibrator).
     weights_path = tmp_path / "weights.json"
     weights_path.write_text(json.dumps(
         {"alpha": 0.1, "beta": 0.2, "gamma": 0.3, "delta": -0.1}
@@ -308,8 +317,11 @@ def test_pipeline_loads_calibrated_weights(tmp_path, monkeypatch):
     assert Path(cfg.eedc.weights_path) == weights_path
 
     from src.pipeline import Pipeline
+    from src.calibration import CalibratedEEDC
     pipeline = Pipeline(cfg)
-    assert pipeline.eedc_scorer.weights.alpha == pytest.approx(0.1)
-    assert pipeline.eedc_scorer.weights.beta == pytest.approx(0.2)
-    assert pipeline.eedc_scorer.weights.gamma == pytest.approx(0.3)
-    assert pipeline.eedc_scorer.weights.delta == pytest.approx(-0.1)
+    assert isinstance(pipeline.eedc_scorer, CalibratedEEDC)
+    w = pipeline.eedc_scorer.scorer.weights
+    assert w.alpha == pytest.approx(0.1)
+    assert w.beta == pytest.approx(0.2)
+    assert w.gamma == pytest.approx(0.3)
+    assert w.delta == pytest.approx(-0.1)

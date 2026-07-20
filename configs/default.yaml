@@ -95,7 +95,26 @@ prompt:
 
     Answer:
 
+# Phase 6 — post-hoc calibration. Override via CRISP_CALIBRATION.
+#   "none"        : identity (no calibration)
+#   "temperature" : single-parameter temperature scaling (default)
+#   "isotonic"    : Pool-Adjacent-Violators non-parametric
+calibration:
+  method: "temperature"
+  min_examples: 30                   # skip fit when below this many labelled rows
+
+# Phase 7 — Adaptive Iteration Controller. Off by default; flip
+# enable_iteration_control: true (or CRISP_AIC=1) to engage the loop.
 pipeline:
   max_iterations: 1                 # Phase 7 (AIC) will raise/lower this adaptively.
   log_level: "INFO"
   enable_detection: true            # Phase 2: toggle per-claim verification.
+  enable_iteration_control: false   # Phase 7: AIC loop on/off
+  aic_max_iterations: 3
+  aic_accept_rate_threshold: 0.05
+  aic_max_edits_per_iteration: 2
+  aic_accept_rate: 0.10
+  aic_regen_rate: 0.40
+  aic_min_improvement: 0.02
+  # Editor mode: "stub" / "evidence" / "regenerate" (CRISP_EDITOR_MODE).
+  editor_mode: "stub"
