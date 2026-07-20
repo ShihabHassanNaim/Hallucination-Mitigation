@@ -511,6 +511,4 @@ Research use only. Models retain their original licenses
 (Llama 3.1 Community License, BGE MIT, DeBERTa Apache-2.0, …).
 
 Built around the research proposal for the **CRISP** thesis framework.
-#   H a l l u c i n a t i o n - M i t i g a t i o n 
- 
- 
+#
