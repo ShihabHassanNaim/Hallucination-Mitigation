@@ -118,3 +118,11 @@ pipeline:
   aic_min_improvement: 0.02
   # Editor mode: "stub" / "evidence" / "regenerate" (CRISP_EDITOR_MODE).
   editor_mode: "stub"
+
+# Step 7 — Optional cross-encoder reranking. Off by default; flip on with
+# ``CRISP_RERANKER=1`` or ``reranker.enabled: true`` here. Use as an ablation
+# enhancement on top of the Phase 4 hybrid retriever.
+reranker:
+  enabled: false
+  model_name: "BAAI/bge-reranker-v2-m3"
+  top_k: 5

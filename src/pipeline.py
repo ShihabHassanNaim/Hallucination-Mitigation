@@ -36,6 +36,7 @@ from .hybrid_retriever import HybridConfig, HybridRetriever
 from .multi_hop import MultiHopPlanner, MultiHopTrace
 from .ner import NER
 from .kg_linker import KGLinker
+from .reranker import CrossEncoderReranker, RerankTrace
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,9 @@ class RAGResult:
     iteration_history: List[dict] = field(default_factory=list)
     # Phase 7 — final editor result (post-AIC).
     edit_result: Optional[dict] = None
+    # Step 7 — optional cross-encoder reranking trace. Populated only when
+    # ``Pipeline.reranker`` is configured; ``None`` otherwise.
+    rerank_trace: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -122,6 +126,7 @@ class RAGResult:
             "multi_hop_traces": list(self.multi_hop_traces),
             "iteration_history": list(self.iteration_history),
             "edit_result": self.edit_result,
+            "rerank_trace": self.rerank_trace,
         }
 
 
@@ -144,7 +149,8 @@ class Pipeline:
                  adaptive_retriever: Optional[AdaptiveRetriever] = None,
                  multi_hop_planner: Optional[MultiHopPlanner] = None,
                  iteration_controller: Optional[AdaptiveIterationController] = None,
-                 editor: Optional[EvidenceGuidedEditor] = None):
+                 editor: Optional[EvidenceGuidedEditor] = None,
+                 reranker: Optional[CrossEncoderReranker] = None):
         self.config = config or load_config()
         self.embedder = embedder or Embedder(
             model_name=self.config.retrieval.embedding_model,
@@ -216,6 +222,17 @@ class Pipeline:
             self.editor = EvidenceGuidedEditor(
                 mode=self.config.pipeline.editor_mode,
                 generator=self.generator,
+            )
+
+        # Step 7 — optional cross-encoder reranker. Lazy default: build only
+        # when ``reranker.enabled`` is true (CRISP_RERANKER=1). When off we
+        # leave ``self.reranker = None`` so ``Pipeline.run`` skips the step.
+        self.reranker = reranker
+        if self.reranker is None and self.config.reranker.enabled:
+            self.reranker = CrossEncoderReranker(
+                model_name=self.config.reranker.model_name,
+                top_k=self.config.reranker.top_k,
+                mock=self.config.mock,
             )
 
     # ----- index wiring ------------------------------------------------------
@@ -292,6 +309,21 @@ class Pipeline:
         else:
             hits = self.retriever.retrieve(query)
         t_retrieve = (time.perf_counter() - t) * 1000
+
+        # Step 7 — optional cross-encoder reranking. Sits between Phase 4
+        # retrieval and Phase 8 verification. Off by default; controlled by
+        # ``reranker.enabled`` in YAML / ``CRISP_RERANKER=1``.
+        rerank_trace_payload: Optional[dict] = None
+        if self.reranker is not None:
+            t = time.perf_counter()
+            # Honour the reranker's own ``top_k`` when one is configured on it
+            # (so an injected reranker keeps its trimmed behaviour); otherwise
+            # fall back to the YAML / env value.
+            k = self.reranker.top_k or self.config.reranker.top_k
+            hits = self.reranker.rerank(query, hits, top_k=k)
+            if self.reranker.last_trace is not None:
+                rerank_trace_payload = self.reranker.last_trace.to_dict()
+            t_retrieve += (time.perf_counter() - t) * 1000
 
         # 2. build prompt
         t = time.perf_counter()
@@ -494,6 +526,7 @@ class Pipeline:
             multi_hop_traces=multi_hop_traces,
             iteration_history=[r.to_dict() for r in iteration_history],
             edit_result=edit_result_payload,
+            rerank_trace=rerank_trace_payload,
             timings_ms={
                 "retrieve": round(t_retrieve, 2),
                 "prompt": round(t_prompt, 2),

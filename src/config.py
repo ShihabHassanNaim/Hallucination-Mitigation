@@ -118,6 +118,18 @@ class EEDCConfig(BaseModel):
     calibration: CalibrationConfig = CalibrationConfig()
 
 
+class RerankerConfig(BaseModel):
+    """Step 7 — Optional cross-encoder reranker (BGE-Reranker-v2 by default).
+
+    The reranker sits between Phase 4 retrieval and Phase 8 verification.
+    Off by default; enable via ``reranker.enabled: true`` in YAML or
+    ``CRISP_RERANKER=1`` on the command line.
+    """
+    enabled: bool = False
+    model_name: str = "BAAI/bge-reranker-v2-m3"
+    top_k: int = Field(5, ge=1, le=50)
+
+
 class PipelineConfig(BaseModel):
     max_iterations: int = Field(1, ge=1, le=10)
     log_level: str = "INFO"
@@ -150,6 +162,8 @@ class AppConfig(BaseModel):
         user_template="Context:\n{context}\n\nQuestion: {question}\n\nAnswer:",
     )
     pipeline: PipelineConfig = PipelineConfig()
+    # Step 7 — optional cross-encoder reranker. Off by default.
+    reranker: RerankerConfig = RerankerConfig()
 
 
 # --- loader ------------------------------------------------------------------
@@ -221,6 +235,10 @@ def _apply_env_overrides(cfg: AppConfig) -> AppConfig:
         "CRISP_AIC_REGEN_RATE": ("pipeline.aic_regen_rate", float),
         "CRISP_AIC_MIN_IMPROVEMENT": ("pipeline.aic_min_improvement", float),
         "CRISP_EDITOR_MODE": ("pipeline.editor_mode", str),
+        # Step 7 — optional cross-encoder reranker.
+        "CRISP_RERANKER": ("reranker.enabled", bool),
+        "CRISP_RERANKER_MODEL": ("reranker.model_name", str),
+        "CRISP_RERANKER_TOPK": ("reranker.top_k", int),
     }
 
     raw = os.environ

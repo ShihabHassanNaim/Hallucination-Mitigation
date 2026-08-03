@@ -18,7 +18,7 @@
 4. [What is in this repository?](#what-is-in-this-repository)
 5. [Quick start — try it in 30 seconds (mock mode)](#quick-start--try-it-in-30-seconds-mock-mode)
 6. [Quick start — try it with real AI models](#quick-start--try-it-with-real-ai-models)
-7. [The 8 phases, explained simply](#the-8-phases-explained-simply)
+7. [The phases, explained simply](#the-phases-explained-simply)
 8. [Configuration reference](#configuration-reference)
 9. [REST API reference](#rest-api-reference)
 10. [Running the test suite](#running-the-test-suite)
@@ -222,13 +222,16 @@ Hallucination/
 |   +-- kg_linker.py                  # Phase 5: mini knowledge-graph linker
 |   +-- multi_hop.py                  # Phase 5: 2-hop retrieval planner
 |   +-- reporting.py                  # Phase 8: reliability verdict + renderers
+|   +-- reranker.py                   # Step 7: optional cross-encoder reranker (mock fallback)
+|   +-- evaluation_metrics.py         # Step 13: full evaluation module
 +-- scripts/                          # CLI entry points.
 |   +-- build_index.py                # embed a corpus -> FAISS index on disk
 |   +-- run_inference.py              # run RAG on a dataset -> JSONL predictions
 |   +-- evaluate.py                   # score predictions -> JSON metrics
 |   +-- calibrate_eedc.py             # fit EEDC weights + post-hoc calibrator
 |   +-- report.py                     # Phase 8: render reports from preds.jsonl
-+-- tests/                            # Pytest suite (224 tests, mock-friendly).
+|   +-- evaluate_full.py              # Step 13 CLI: 7 metric categories -> JSON + MD
++-- tests/                            # Pytest suite (248 tests, mock-friendly).
 |   +-- test_pipeline.py              # Phase 1 smoke (no downloads)
 |   +-- test_phase2.py                # Phase 2 NLI + EEDC
 |   +-- test_phase3.py                # Phase 3 claim extraction + provenance
@@ -237,6 +240,7 @@ Hallucination/
 |   +-- test_phase6.py                # Phase 6 calibration
 |   +-- test_phase7.py                # Phase 7 editor + AIC
 |   +-- test_phase8.py                # Phase 8 reporting
+|   +-- test_phase9.py                # Step 7 reranker + Step 13 evaluation
 |   +-- test_api.py                   # Phase 5+ FastAPI service
 +-- data/                             # datasets and indices land here (gitignored)
 +-- README.md                         # you are here
@@ -355,22 +359,26 @@ python scripts/run_inference.py --dataset halueval --data data/halueval.json --i
 
 ---
 
-## The 8 phases, explained simply
+## The phases, explained simply
 
-CRISP is built in **8 phases**. Each phase adds one capability. Every
+CRISP is built in **phases**. Each phase adds one capability. Every
 phase sits behind a stable interface so later phases plug in without
-breaking the earlier ones.
+breaking the earlier ones. The eight pipeline phases (1–8) ship with
+the codebase; **Phase 9** layers on the optional Step 7 reranker and
+the Step 13 Evaluation Module.
 
-| Phase | One-line description                                                                  |
-| :---: | ------------------------------------------------------------------------------------- |
-| **1** | Retrieve top-k passages, prompt the LLM, return the answer.                          |
-| **2** | Check every atomic claim against its evidence with an NLI model and score confidence. |
-| **3** | Split the answer into atomic claims and tag where each one needs verification.        |
-| **4** | If the top hit isn't good enough, expand k, rewrite the query, or fall back to BM25.   |
-| **5** | For claims combining multiple passages, run NER → KG link → 2-hop sub-query.          |
-| **6** | Re-calibrate raw confidence so 0.7 actually means 70% supported, not 95%.              |
-| **7** | Decide whether to accept, edit a span, regenerate the whole answer, or stop.          |
-| **8** | Roll every signal into one reliability verdict and render it.                         |
+|  Phase  | One-line description                                                                  |
+| :-----: | ------------------------------------------------------------------------------------- |
+| **1**   | Retrieve top-k passages, prompt the LLM, return the answer.                          |
+| **2**   | Check every atomic claim against its evidence with an NLI model and score confidence. |
+| **3**   | Split the answer into atomic claims and tag where each one needs verification.        |
+| **4**   | If the top hit isn't good enough, expand k, rewrite the query, or fall back to BM25.   |
+| **5**   | For claims combining multiple passages, run NER → KG link → 2-hop sub-query.          |
+| **6**   | Re-calibrate raw confidence so 0.7 actually means 70% supported, not 95%.              |
+| **7**   | Decide whether to accept, edit a span, regenerate the whole answer, or stop.          |
+| **8**   | Roll every signal into one reliability verdict and render it.                         |
+| **9a**  | **Optional** — re-score and re-order retrieved evidence with a cross-encoder (Step 7).|
+| **9b**  | **Evaluation Module** — 7 metric categories over the whole framework (Step 13).       |
 
 ### Phase 1 — Baseline RAG (the starting point)
 
@@ -534,6 +542,66 @@ python scripts/report.py --in data/preds.jsonl --out-dir reports/ --format html
 **Plain-English summary:** roll every signal into one of five reliability
 labels and pretty-print it as a PDF/HTML report.
 
+### Phase 9a — Optional cross-encoder reranking (Step 7)
+
+Step 7 is an *enhancement*, not a mandatory stage. After the hybrid
+retriever returns its top-K evidence (`src/reranker.py`), a
+**cross-encoder** re-scores each `(query, evidence)` pair and re-orders
+the list so the strongest evidence sits on top of the prompt. The
+default model is `BAAI/bge-reranker-v2-m3`; in `CRISP_MOCK=1` mode a
+deterministic token-overlap fallback is used so the test suite stays
+fast and offline.
+
+Enable it with any one of:
+
+```yaml
+# configs/default.yaml
+pipeline:
+  reranker:
+    enabled: true
+    model_name: BAAI/bge-reranker-v2-m3
+    top_k: 5
+```
+
+or from the environment:
+
+```bash
+CRISP_RERANKER=1 CRISP_RERANKER_TOPK=5
+```
+
+Every rerank call populates `RAGResult.rerank_trace` with the model
+name, input/output top-K, and the per-hit scores — perfect for an
+ablation study that compares the pipeline with and without reranking.
+
+### Phase 9b — Evaluation Module (Step 13)
+
+Step 13 is the umbrella **Evaluation Module** (`src/evaluation_metrics.py`)
+that scores a full run over a dataset. It computes seven metric
+categories from a `preds.jsonl` produced by `scripts/run_inference.py`:
+
+| Category           | Metrics                                                                            |
+| :----------------- | :--------------------------------------------------------------------------------- |
+| **Detection**      | Accuracy, Precision, Recall, F1, ROC-AUC, 2x2 confusion matrix.                    |
+| **Verification**   | 3-way confusion matrix (Supported/Contradicted/Unknown) + per-class PRF + micro/macro. |
+| **Retrieval**      | Recall@K, Precision@K, MRR, nDCG@K.                                                |
+| **Regeneration**   | HRR (Hallucination Reduction Rate), CCR (Claim Correction Rate), VSR.              |
+| **Generation**     | EM, BLEU, ROUGE-L, BERTScore (or token-cosine proxy).                              |
+| **Overall**        | End-to-End Accuracy, average confidence, average latency.                          |
+| **I/O**            | `load_predictions`, `write_metrics`, `render_markdown_summary` helpers.            |
+
+CLI:
+
+```bash
+python scripts/evaluate_full.py \
+    --preds data/preds.jsonl \
+    --out  data/metrics_full.json \
+    --md
+```
+
+All metrics are deterministic and mock-friendly (no GPU required). The
+output is a single JSON bundle plus an optional Markdown summary you can
+paste straight into a thesis chapter.
+
 ---
 
 ## Configuration reference
@@ -561,6 +629,9 @@ overridden from the environment by uppercasing the path and prefixing
 | `pipeline.enable_iteration_control`        | `CRISP_AIC`                   |
 | `pipeline.aic_max_iterations`              | `CRISP_AIC_MAX_ITER`          |
 | `pipeline.editor_mode`                     | `CRISP_EDITOR_MODE`           |
+| `pipeline.reranker.enabled`                | `CRISP_RERANKER`              |
+| `pipeline.reranker.model_name`             | `CRISP_RERANKER_MODEL`        |
+| `pipeline.reranker.top_k`                  | `CRISP_RERANKER_TOPK`         |
 
 Load a non-default config from disk with:
 
