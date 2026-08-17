@@ -1,0 +1,107 @@
+{
+  "n_queries": 7,
+  "per_query": [
+    {
+      "query": "What is the capital of France?",
+      "decision": "ABSTAIN",
+      "confidence": 0.1498,
+      "retrieval_recall_at_5": 0.0,
+      "retrieval_precision_at_5": 0.0,
+      "retrieval_mrr": 0.0,
+      "retrieval_ndcg": 0.0,
+      "claim_precision": 0.0,
+      "verification_success_rate": 1.0,
+      "end_to_end_accuracy": 0.0
+    },
+    {
+      "query": "Who wrote 1984?",
+      "decision": "ABSTAIN",
+      "confidence": -0.0519,
+      "retrieval_recall_at_5": 0.0,
+      "retrieval_precision_at_5": 0.0,
+      "retrieval_mrr": 0.0,
+      "retrieval_ndcg": 0.0,
+      "claim_precision": 0.0,
+      "verification_success_rate": 1.0,
+      "end_to_end_accuracy": 0.0
+    },
+    {
+      "query": "At what temperature does water boil?",
+      "decision": "ABSTAIN",
+      "confidence": -0.063,
+      "retrieval_recall_at_5": 0.0,
+      "retrieval_precision_at_5": 0.0,
+      "retrieval_mrr": 0.0,
+      "retrieval_ndcg": 0.0,
+      "claim_precision": 0.0,
+      "verification_success_rate": 1.0,
+      "end_to_end_accuracy": 0.0
+    },
+    {
+      "query": "Which planet is fourth from the Sun?",
+      "decision": "ABSTAIN",
+      "confidence": 0.1207,
+      "retrieval_recall_at_5": 0.0,
+      "retrieval_precision_at_5": 0.0,
+      "retrieval_mrr": 0.0,
+      "retrieval_ndcg": 0.0,
+      "claim_precision": 0.0,
+      "verification_success_rate": 1.0,
+      "end_to_end_accuracy": 0.0
+    },
+    {
+      "query": "What is PyTorch?",
+      "decision": "ABSTAIN",
+      "confidence": 0.0591,
+      "retrieval_recall_at_5": 0.0,
+      "retrieval_precision_at_5": 0.0,
+      "retrieval_mrr": 0.0,
+      "retrieval_ndcg": 0.0,
+      "claim_precision": 0.0,
+      "verification_success_rate": 1.0,
+      "end_to_end_accuracy": 0.0
+    },
+    {
+      "query": "Is Eric Arthur Blair British?",
+      "decision": "ABSTAIN",
+      "confidence": 0.1258,
+      "retrieval_recall_at_5": 0.0,
+      "retrieval_precision_at_5": 0.0,
+      "retrieval_mrr": 0.0,
+      "retrieval_ndcg": 0.0,
+      "claim_precision": 0.0,
+      "verification_success_rate": 1.0,
+      "end_to_end_accuracy": 0.0
+    },
+    {
+      "query": "French capital?",
+      "decision": "ABSTAIN",
+      "confidence": -0.0951,
+      "retrieval_recall_at_5": 0.0,
+      "retrieval_precision_at_5": 0.0,
+      "retrieval_mrr": 0.0,
+      "retrieval_ndcg": 0.0,
+      "claim_precision": 0.0,
+      "verification_success_rate": 1.0,
+      "end_to_end_accuracy": 0.0
+    }
+  ],
+  "aggregate": {
+    "mean_claim_precision": 0.0,
+    "stdev_claim_precision": 0.0,
+    "mean_retrieval_recall_at_5": 0.0,
+    "stdev_retrieval_recall_at_5": 0.0,
+    "mean_retrieval_precision_at_5": 0.0,
+    "stdev_retrieval_precision_at_5": 0.0,
+    "mean_retrieval_mrr": 0.0,
+    "stdev_retrieval_mrr": 0.0,
+    "mean_retrieval_ndcg": 0.0,
+    "stdev_retrieval_ndcg": 0.0,
+    "mean_verification_success_rate": 1.0,
+    "stdev_verification_success_rate": 0.0,
+    "mean_end_to_end_accuracy": 0.0,
+    "stdev_end_to_end_accuracy": 0.0,
+    "mean_confidence": 0.035057142857142856,
+    "stdev_confidence": 0.09519196930628215
+  }
+}

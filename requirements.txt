@@ -3,22 +3,38 @@ numpy>=1.26,<3
 pyyaml>=6.0
 pydantic>=2.6,<3
 
+# Models (HF)
+transformers>=4.41
+sentencepiece>=0.2
+tokenizers>=0.19
+accelerate>=0.30
+# bitsandbytes>=0.43   # optional 4bit quantisation
+
 # Embeddings + retrieval
 sentence-transformers>=2.6
 faiss-cpu>=1.8 ; sys_platform != "darwin"
-# On Apple Silicon, install faiss via conda for ARM support.
+rank_bm25>=0.2
 
-# Generator (optional — only needed when mock=false)
-# torch is intentionally unpinned; install the build matching your CUDA.
-torch>=2.2
-transformers>=4.41
-accelerate>=0.30
-# bitsandbytes>=0.43 ; sys_platform == "win32" and python_version >= "3.10"
-# Note: bitsandbytes on Windows requires Python 3.10+ and a CUDA build.
+# XGBoost classifier (Step 3) with sklearn fallback
+xgboost>=2.0
+scikit-learn>=1.4
 
-# Testing
-pytest>=8.0
+# NER + NLI
+spacy>=3.7
+# python -m spacy download en_core_web_sm
+gliner>=0.2
 
-# Web service (optional — only needed when serving via api/app.py)
+# Scoring
+scipy>=1.11
+
+# Evaluation
+nltk>=3.8
+rouge-score>=0.1
+bert-score>=0.3.13
+
+# API
 fastapi>=0.110
 uvicorn[standard]>=0.27
+
+# Tests
+pytest>=8.0

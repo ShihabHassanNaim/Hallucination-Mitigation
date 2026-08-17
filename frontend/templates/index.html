@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hallucination Pipeline — Demo UI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo"></span>
+      <div>
+        <h1>Hallucination Pipeline</h1>
+        <p class="sub">13-step RAG fact-verifier — query, verify, explain.</p>
+      </div>
+    </div>
+    <nav class="nav">
+      <a href="/" class="active">Demo</a>
+      <a href="/structure">Project</a>
+    </nav>
+    <div class="status" id="status">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text">starting…</span>
+      <span class="mode-badge" id="mode-badge" title="pipeline mode">…</span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="card" id="card-index">
+      <h2>1. Documents</h2>
+      <p class="muted">Paste one paragraph per line. These will be chunked, embedded, and indexed.</p>
+      <textarea id="docs" rows="8" placeholder="Paris is the capital of France.&#10;George Orwell wrote 1984.&#10;Water boils at 100 degrees Celsius."></textarea>
+      <div class="row">
+        <button id="btn-index" class="primary">Build index</button>
+        <span class="muted small" id="index-meta"></span>
+      </div>
+    </section>
+
+    <section class="card" id="card-query">
+      <h2>2. Query</h2>
+      <p class="muted">Ask a question. The pipeline returns the answer, per-claim verdicts, evidence, confidence, and the final decision (PASS / REGEN / ABSTAIN).</p>
+      <input id="query" type="text" placeholder="What is the capital of France?" />
+      <button id="btn-query" class="primary">Run pipeline</button>
+    </section>
+
+    <section class="card wide" id="card-status">
+      <div class="card-header">
+        <h2>3. Model Status</h2>
+        <button id="btn-status-refresh" class="ghost">Refresh</button>
+      </div>
+      <p class="muted small">Live view of the 6 first-class pipeline components. <span id="status-mode">checking…</span> · <span id="status-summary">—</span></p>
+      <div class="status-table-wrap">
+        <table class="status-table" id="status-table">
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Backend</th>
+              <th>Model</th>
+              <th>Status</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody id="status-tbody">
+            <tr><td colspan="5" class="muted small">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card wide" id="card-accuracy">
+      <div class="card-header">
+        <h2>4. Accuracy</h2>
+        <button id="btn-acc-refresh" class="ghost">Refresh</button>
+      </div>
+      <p class="muted small" id="acc-meta">
+        <span id="acc-source">—</span>
+        · <span id="acc-row-count">0</span> queries
+        · last updated <span id="acc-last-updated">never</span>
+      </p>
+
+      <div class="acc-headline" id="acc-headline">
+        <div class="acc-tile acc-tile-na" id="acc-tile-e2e">
+          <div class="acc-tile-label">End-to-end accuracy</div>
+          <div class="acc-tile-value">—</div>
+          <div class="acc-tile-sub">fraction of queries answered correctly</div>
+        </div>
+        <div class="acc-tile acc-tile-na" id="acc-tile-detection">
+          <div class="acc-tile-label">Detection accuracy</div>
+          <div class="acc-tile-value">—</div>
+          <div class="acc-tile-sub">classifier correctness on hallucination labels</div>
+        </div>
+        <div class="acc-tile acc-tile-na" id="acc-tile-claim">
+          <div class="acc-tile-label">Claim F1</div>
+          <div class="acc-tile-value">—</div>
+          <div class="acc-tile-sub">atomic claim verification quality</div>
+        </div>
+        <div class="acc-tile acc-tile-na" id="acc-tile-verif">
+          <div class="acc-tile-label">Verification success</div>
+          <div class="acc-tile-value">—</div>
+          <div class="acc-tile-sub">claims successfully verified</div>
+        </div>
+      </div>
+
+      <div class="acc-breakdown" id="acc-breakdown">
+        <div class="acc-donut-wrap">
+          <div class="acc-donut" id="acc-donut">
+            <svg viewBox="0 0 120 120" width="160" height="160" aria-hidden="true">
+              <circle cx="60" cy="60" r="52" stroke="var(--panel-2)" stroke-width="14" fill="none" />
+              <circle id="acc-donut-arc" cx="60" cy="60" r="52" stroke="var(--green)"
+                      stroke-width="14" fill="none" stroke-linecap="round"
+                      stroke-dasharray="0 327" transform="rotate(-90 60 60)" />
+            </svg>
+            <div class="acc-donut-center">
+              <div class="acc-donut-value" id="acc-donut-value">—</div>
+              <div class="acc-donut-label">correct</div>
+            </div>
+          </div>
+          <div class="acc-legend">
+            <div class="acc-legend-item">
+              <span class="acc-swatch swatch-green"></span>
+              <span>Correct: <b id="acc-correct-count">0</b></span>
+            </div>
+            <div class="acc-legend-item">
+              <span class="acc-swatch swatch-red"></span>
+              <span>Incorrect: <b id="acc-incorrect-count">0</b></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="acc-decision-bars" id="acc-decision-bars">
+          <div class="acc-decision-row">
+            <span class="acc-decision-tag tag pass">PASS</span>
+            <span class="acc-bar"><span class="acc-bar-fill fill-pass" id="acc-bar-pass" style="width:0%"></span></span>
+            <span class="acc-bar-count" id="acc-count-pass">0</span>
+          </div>
+          <div class="acc-decision-row">
+            <span class="acc-decision-tag tag regen">REGEN</span>
+            <span class="acc-bar"><span class="acc-bar-fill fill-regen" id="acc-bar-regen" style="width:0%"></span></span>
+            <span class="acc-bar-count" id="acc-count-regen">0</span>
+          </div>
+          <div class="acc-decision-row">
+            <span class="acc-decision-tag tag abstain">ABSTAIN</span>
+            <span class="acc-bar"><span class="acc-bar-fill fill-abstain" id="acc-bar-abstain" style="width:0%"></span></span>
+            <span class="acc-bar-count" id="acc-count-abstain">0</span>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="section-subhead">Per-query accuracy</h3>
+      <div class="status-table-wrap eval-table-wrap">
+        <table class="status-table eval-table" id="acc-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Query</th>
+              <th>Decision</th>
+              <th>Correct?</th>
+              <th>E2E Acc.</th>
+              <th>Claim F1</th>
+              <th>Conf.</th>
+            </tr>
+          </thead>
+          <tbody id="acc-rows">
+            <tr><td colspan="7" class="muted small">No rows.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card wide" id="card-evaluation">
+      <div class="card-header">
+        <h2>5. Evaluation</h2>
+        <button id="btn-eval-refresh" class="ghost">Refresh</button>
+      </div>
+      <p class="muted small" id="eval-meta">
+        data/metrics.json · <span id="eval-row-count">0</span> rows
+        · last updated <span id="eval-last-updated">never</span>
+        · source: <span id="eval-source">—</span>
+      </p>
+      <h3 class="section-subhead">Aggregate metrics</h3>
+      <div class="metric-grid" id="eval-aggregate-grid">
+        <div class="empty-note">No metrics available.</div>
+      </div>
+    </section>
+
+    <section class="card wide" id="card-result">
+      <h2>6. Result</h2>
+      <div id="result"></div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

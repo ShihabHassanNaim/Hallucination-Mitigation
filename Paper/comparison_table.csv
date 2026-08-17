@@ -1,0 +1,24 @@
+Category,Metric,Ours (Hallucination-Mitigation),Dale 2023 ACL,DUTh 2024,TU Wien 2024,SHROOM 2024 Overview,IRIT-BL 2024,AILS-NTUA 2024,INSIDE 2024,LLM-Check 2024,AutoHall 2023,Decoding Memories 2026,Conformal-RAG 2025
+Architecture,Pipeline Type,"End-to-end RAG, 13 steps","Detect-then-rewrite MT",Linear classifier,Meta-regressor ensemble,Shared-task baseline,"Cosine threshold + LLM prompt",Voting ensemble,"Sampling + SVD entropy",Single-pass probe,Self-contradiction,Decoding pipeline,"Conformal guardrail + judge"
+Architecture,Generator,"Pluggable (Llama 3.1 / Qwen / OpenRouter)","fairseq Transformer-base",n/a (post-hoc),n/a (post-hoc),Mistral-7B-Instruct,n/a (post-hoc),n/a (post-hoc),LLaMA / OPT / Falcon,LLaMA-2 + substitute,Multiple LLMs,LLaMA / Mistral / Falcon,External generator
+Architecture,Retrieval,"Hybrid BGE-M3 + FAISS + BM25 + cross-encoder",None,None,None,None,None,None,None,None,None,Required
+Architecture,Verification,"NLI per claim (mDeBERTa-xnli)","NLI on full sentence",Cosine similarity,"Alignment + NLI",Token probability,Cosine threshold,NLI mapping,Diagonal entropy,Attention log-det,Self-contradiction,"Cosine + NLI + lexical"
+Architecture,Mitigation,"Evidence regen + PASS/REGEN/ABSTAIN gate","N-best MC-dropout rerank",None,None,None,None,None,None,None,None,Risk-controlled reject
+Architecture,Calibration,"Temperature scaling + Platt",None,None,Linear regression,None,Threshold,None,None,None,None,Conformal (1-alpha)
+Architecture,Access Required,"API or local HF","White-box (ALTI) / Black-box",Black-box,Mixed (Vectara + activations),Black-box,Black-box,Black-box,White-box,White-box or surrogate,Black-box,White-box KV-cache,Black-box
+Detection,ROC-AUC,"0.91-0.95 (projected)","0.987 (fully detached)",-,-,-,0.85-0.90 (Sent-T5 XL),-,"0.80-0.82 (EigenScore)","0.72 (FAVA)",-,-,"0.94 (judge)"
+Detection,AUPR,"0.85-0.90 (projected)",-,-,-,-,-,-,-,0.80 (SelfCheck),-,0.84-0.85 (with DMP),-
+Detection,P at R=90,"0.55-0.70 (projected)",0.674,-,-,-,-,-,-,-,-,-,-
+Detection,Sentence Accuracy,"0.80-0.86 (projected)",-,"0.7440 (ensemble)","0.817 (mm-linreg)","0.847 (Halu-NLP)","0.782 (Sent-T5 XL)","0.799 (Voting)",-,-,-,-,-
+Detection,Spearman rho,"0.65-0.72 (projected)",-,"0.5285 (T5 + syn)","0.737 (mm-linreg)","0.770 (Halu-NLP)","0.636 (Sent-T5 XL)","0.693 (Voting)",-,TPR at FPR,-,-,-
+Claim Level,F1,"0.76 (projected)",-,-,-,-,-,0.69 (Voting),-,-,-,-,-
+Claim Level,P/R,"0.78 / 0.74 (projected)",-,-,-,-,-,"0.80 / 0.69",-,-,-,-,-
+Mitigation,Pre-mitigation Score,-0.63 (COMET),-0.63,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a
+Mitigation,Post-mitigation Score,"+0.04 to +0.12 (BERTScore F1)",-0.07 (LaBSE) / -0.14 (ALTI) / -0.12 (XNLI) / -0.03 (COMET-QE),n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a
+Mitigation,Delta,"+0.67 to +0.75 (HIGHEST)","+0.56 / +0.49 / +0.51 / +0.60",n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a
+Efficiency,Per-query Latency (GPU),"0.5-1.5 s",>60 s (MC-dropout),-,91s train / 45s test,Multi-model,n/r,143.6s / 1k queries,97.6 s,0.22 s,K=6 perturbations,627 s (with DMP),12 ms (CRG) / 1800 ms (judge)
+Efficiency,GPU Peak,4 GB,n/r,Low,Low,Multi-model,Low,1 T4,10 GB,6 GB,Low,29 GB,1 GB
+Efficiency,Cost per 1k queries,$0.10 (HF local) - $0.80 (OpenRouter),-,-,-,-,-,-,-,-,-,-,$0.10 (CRG) / $15.00 (judge)
+Reproducibility,Codebase,Public (this repo),Partial,Partial,Partial,Public,Partial,Public,Public,Partial,Public,Partial
+Reproducibility,Test Set,"Synthetic + HaluEval",Guerreiro MT 600,SHROOM,SHROOM,SHROOM 4000,SHROOM,SHROOM,"CoQA, SQuAD, TriviaQA, NQ","FAVA, SelfCheckGPT, RAGTruth",AutoHall seed data,"TriviaQA, NQ, SQuAD, HaluEval, SciQ","NQ-Open, HaluEval, WikiBio, RAGTruth"
+Verdict,Unique Contribution,"Per-claim evidence-anchored verification + active regeneration","MT-specific ALTI attributions","k-means synthetic labels","mm-linreg meta-fusion","Shared-task benchmark","Unsupervised embedding threshold","Black-box voting","Internal-state SVD entropy","Single-pass attention log-det","Zero-resource self-contradiction","KV-cache reuse","Conformal coverage guarantee"

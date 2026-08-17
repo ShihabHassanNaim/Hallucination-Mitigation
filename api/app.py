@@ -64,7 +64,6 @@ class HealthResponse(BaseModel):
     version: str
     index_loaded: bool
     n_documents: int
-    mock_mode: bool
 
 
 class IndexResponse(BaseModel):
@@ -95,14 +94,10 @@ def _rag_result_to_dict(result: RAGResult) -> Dict[str, Any]:
 
 
 def _build_pipeline() -> Pipeline:
-    """Instantiate the pipeline. Honours env-var overrides (CRISP_MOCK, etc.)."""
+    """Instantiate the pipeline. Honours env-var overrides."""
     cfg = load_config()
     pipeline = Pipeline(config=cfg)
-    logger.info(
-        "pipeline built (mock=%s, mode=%s)",
-        cfg.mock,
-        cfg.retrieval.mode,
-    )
+    logger.info("pipeline built (retrieval.mode=%s)", cfg.retrieval.mode)
     return pipeline
 
 
@@ -179,14 +174,11 @@ def create_app(index_dir: Optional[str] = None) -> FastAPI:
 
     @app.get("/health", response_model=HealthResponse)
     def health(request: Request) -> HealthResponse:
-        pipe: Pipeline = request.app.state.pipeline
-        cfg = pipe.config
         return HealthResponse(
             status="ok",
             version=app.version,
             index_loaded=bool(request.app.state.index_loaded),
             n_documents=int(getattr(request.app.state, "n_documents", 0)),
-            mock_mode=bool(cfg.mock),
         )
 
     @app.post("/query", response_model=Dict[str, Any])
@@ -227,6 +219,82 @@ def create_app(index_dir: Optional[str] = None) -> FastAPI:
             took_ms=round(took_ms, 3),
         )
 
+    @app.get("/models/status")
+    def models_status(request: Request) -> Dict[str, Any]:
+        """Return the runtime status of every first-class pipeline component.
+
+        Probes each model slot (Generator, Embedder, Reranker, NLI, NER,
+        Calibrator) and reports whether its real backend is loaded.
+        See ``src.models.registry`` for the full schema.
+        """
+        from src.models.registry import build_status_report  # noqa: WPS433
+
+        return build_status_report()
+
+    @app.get("/metrics")
+    def metrics(request: Request) -> Dict[str, Any]:
+        """Return the contents of ``data/metrics.json`` if it exists."""
+        import json as _json
+        from pathlib import Path as _Path
+
+        p = _Path("data/metrics.json")
+        if not p.exists():
+            return {"rows": []}
+        try:
+            return _json.loads(p.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"metrics unreadable: {exc}")
+
+    @app.get("/structure")
+    def project_structure(request: Request) -> Dict[str, Any]:
+        """Return the project tree (skipping .venv / .git / __pycache__).
+
+        Query params:
+          depth: int (default 4, max 8)
+          include_hidden: "1" to include dotfiles/dirs (default off)
+        """
+        from pathlib import Path as _Path
+
+        from frontend.app import _build_tree, _SKIP_DIRS  # type: ignore
+
+        depth = int(request.query_params.get("depth", "4"))
+        depth = max(1, min(8, depth))
+        include_hidden = request.query_params.get("include_hidden", "0") == "1"
+
+        skip_dirs = {".venv", ".git", "__pycache__"}
+        if not include_hidden:
+            skip_dirs.update(d for d in _SKIP_DIRS if d not in {".venv", ".git", "__pycache__"})
+
+        original = set(_SKIP_DIRS)
+        _SKIP_DIRS.clear()
+        _SKIP_DIRS.update(skip_dirs)
+        try:
+            tree = _build_tree(_Path(__file__).resolve().parent.parent, depth=0, max_depth=depth)
+        finally:
+            _SKIP_DIRS.clear()
+            _SKIP_DIRS.update(original)
+
+        total_files = 0
+        total_size = 0
+
+        def walk(n: Dict[str, Any]) -> None:
+            nonlocal total_files, total_size
+            for c in n.get("children", []):
+                if c["type"] == "file":
+                    total_files += 1
+                    total_size += int(c.get("size", 0))
+                else:
+                    walk(c)
+
+        walk(tree)
+        return {
+            "root": str(_Path(__file__).resolve().parent.parent),
+            "depth": depth,
+            "total_files": total_files,
+            "total_size_bytes": total_size,
+            "tree": tree,
+        }
+
     return app
 
 
@@ -261,3 +329,4 @@ import os                                                              # noqa: E
 
 _DEFAULT_INDEX = os.environ.get("CRISP_INDEX") or None
 app = create_app(index_dir=_DEFAULT_INDEX)
+

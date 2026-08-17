@@ -1,267 +1,119 @@
-"""Centralised configuration for CRISP.
+"""Configuration loader.
 
-Loads configs/default.yaml, then overlays CRISP_* environment variables and
-optional --config overrides. Pydantic validation catches typos at startup
-rather than mid-pipeline.
+Reads configs/default.yaml and layers environment overrides on top.
+Every key can be overridden via HALLUC_<UPPER_DOTTED_KEY>, e.g.
+
+    HALLUC_STEP06_RETRIEVAL_TOPK=10
 """
+
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
 
 
-# --- pydantic models ---------------------------------------------------------
-
-class RetrievalConfig(BaseModel):
-    embedding_model: str = "BAAI/bge-large-en-v1.5"
-    top_k: int = Field(5, ge=1, le=100)
-    index_path: str = "data/index"
-    normalize_embeddings: bool = True
-    # Phase 4 — adaptive retrieval mode. "dense" keeps the Phase 1
-    # dense-only behaviour; "hybrid" fuses dense + BM25 with RRF and
-    # runs the adaptive controller (expand / rewrite / multi-hop).
-    mode: Literal["dense", "hybrid"] = "dense"
-    # BM25 knobs (only used when mode == "hybrid").
-    bm25_k1: float = Field(1.5, ge=0.0, le=5.0)
-    bm25_b: float = Field(0.75, ge=0.0, le=1.0)
-    # Hybrid fusion knobs.
-    rrf_k: float = Field(60.0, ge=1.0, le=200.0)
-    weight_dense: float = Field(1.0, ge=0.0, le=5.0)
-    weight_bm25: float = Field(1.0, ge=0.0, le=5.0)
+_DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "configs" / "default.yaml"
 
 
-class AdaptiveRetrievalConfig(BaseModel):
-    """Phase 4 adaptive controller policy knobs."""
-    enabled: bool = False
-    initial_k: int = Field(5, ge=1, le=50)
-    max_k: int = Field(20, ge=1, le=100)
-    expansion_score_threshold: float = Field(0.20, ge=-1.0)
-    expansion_gap_threshold: float = Field(0.05, ge=-1.0)
-    rewrite_variants: int = Field(2, ge=0, le=5)
-    multi_hop_max_entities: int = Field(3, ge=0, le=10)
-    multi_hop_min_entity_len: int = Field(3, ge=1, le=20)
+def _env_overrides() -> dict[str, str]:
+    return {k.removeprefix("HALLUC_"): v for k, v in os.environ.items() if k.startswith("HALLUC_")}
 
 
-class MultiHopConfig(BaseModel):
-    """Phase 5 multi-hop evidence aggregation policy.
-
-    Only kicks in for claims tagged ``Provenance.AGGREGATED`` by Phase 3.
-    The planner runs NER -> KG link -> sub-query -> merge.
-    """
-    enabled: bool = True
-    # NER backend: "mock" (laptop-runnable, default) or "spacy".
-    ner_backend: Literal["mock", "spacy"] = "mock"
-    ner_model: str = "en_core_web_sm"
-    # KG: max entities to consider per claim.
-    max_entities: int = Field(3, ge=1, le=10)
-    # KG: how many priority relations to try per entity.
-    max_relations_per_entity: int = Field(2, ge=0, le=10)
-    # Retriever: top_k for each sub-query.
-    top_k_per_subquery: int = Field(3, ge=1, le=20)
-
-
-class GeneratorConfig(BaseModel):
-    model_name: str = "meta-llama/Llama-3.1-8B-Instruct"
-    dtype: Literal["fp32", "fp16", "bf16", "4bit"] = "fp16"
-    max_new_tokens: int = Field(256, ge=1, le=4096)
-    temperature: float = Field(0.0, ge=0.0, le=2.0)
-    device: Literal["cpu", "cuda", "auto"] = "auto"
-
-
-class PromptConfig(BaseModel):
-    system: str
-    user_template: str
-
-
-class DetectorConfig(BaseModel):
-    """Phase 2 NLI detector settings."""
-    model_name: str = "microsoft/deberta-v3-large"
-    device: Literal["cpu", "cuda", "auto"] = "auto"
-    max_evidence_chars: int = 4000
-
-
-class ClaimExtractorConfig(BaseModel):
-    """Phase 3 atomic claim extraction + provenance tagging."""
-    mode: Literal["synthetic", "real"] = "synthetic"
-    intrinsic_threshold: float = Field(0.7, ge=0.0, le=1.0)
-    aggregated_threshold: float = Field(0.3, ge=0.0, le=1.0)
-
-
-class CalibrationConfig(BaseModel):
-    """Phase 6 post-hoc confidence calibration policy."""
-    # None / identity  - pass-through (raw EEDC phi is the final score)
-    # temperature      - single-parameter temperature scaling (default)
-    # isotonic         - piecewise-constant PAV (needs >=1k examples)
-    method: Literal["none", "temperature", "isotonic"] = "temperature"
-    # Minimum examples before we trust a fitted calibrator; below this
-    # we fall back to the identity calibrator and just use raw EEDC.
-    min_examples: int = Field(50, ge=1)
-
-
-class EEDCConfig(BaseModel):
-    """Phase 6 EEDC confidence scorer settings.
-
-    Default weights give an uncalibrated but monotonic scorer. Run
-    `scripts/calibrate_eedc.py` on FEVER-dev to fit better weights and
-    write them back to this file.
-    """
-    alpha: float = -1.0
-    beta: float = -0.7
-    gamma: float = -0.5
-    delta: float = 1.0
-    weights_path: str = "data/eedc_weights.json"
-    # Phase 6 - post-hoc calibration applied on top of the raw Platt phi.
-    calibration: CalibrationConfig = CalibrationConfig()
-
-
-class RerankerConfig(BaseModel):
-    """Step 7 — Optional cross-encoder reranker (BGE-Reranker-v2 by default).
-
-    The reranker sits between Phase 4 retrieval and Phase 8 verification.
-    Off by default; enable via ``reranker.enabled: true`` in YAML or
-    ``CRISP_RERANKER=1`` on the command line.
-    """
-    enabled: bool = False
-    model_name: str = "BAAI/bge-reranker-v2-m3"
-    top_k: int = Field(5, ge=1, le=50)
-
-
-class PipelineConfig(BaseModel):
-    max_iterations: int = Field(1, ge=1, le=10)
-    log_level: str = "INFO"
-    # Phase 2: enable/disable per-claim verification + EEDC.
-    enable_detection: bool = True
-    # Phase 7 — Adaptive Iteration Controller.
-    enable_iteration_control: bool = False
-    aic_max_iterations: int = Field(3, ge=1, le=10)
-    aic_accept_rate_threshold: float = Field(0.05, ge=0.0, le=1.0)
-    aic_max_edits_per_iteration: int = Field(2, ge=0, le=20)
-    aic_accept_rate: float = Field(0.10, ge=0.0, le=1.0)
-    aic_regen_rate: float = Field(0.40, ge=0.0, le=1.0)
-    aic_min_improvement: float = Field(0.02, ge=0.0, le=1.0)
-    # Phase 7 — Evidence-guided editor mode: "stub" | "evidence" | "regenerate"
-    editor_mode: Literal["stub", "evidence", "regenerate"] = "stub"
-
-
-class AppConfig(BaseModel):
-    mock: bool = True
-    retrieval: RetrievalConfig = RetrievalConfig()
-    adaptive_retrieval: AdaptiveRetrievalConfig = AdaptiveRetrievalConfig()
-    # Phase 5 — multi-hop evidence aggregation planner.
-    multi_hop: MultiHopConfig = MultiHopConfig()
-    generator: GeneratorConfig = GeneratorConfig()
-    detector: DetectorConfig = DetectorConfig()
-    claim_extractor: ClaimExtractorConfig = ClaimExtractorConfig()
-    eedc: EEDCConfig = EEDCConfig()
-    prompt: PromptConfig = PromptConfig(
-        system="You are a helpful assistant.",
-        user_template="Context:\n{context}\n\nQuestion: {question}\n\nAnswer:",
-    )
-    pipeline: PipelineConfig = PipelineConfig()
-    # Step 7 — optional cross-encoder reranker. Off by default.
-    reranker: RerankerConfig = RerankerConfig()
-
-
-# --- loader ------------------------------------------------------------------
-
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "configs" / "default.yaml"
-
-
-def _apply_env_overrides(cfg: AppConfig) -> AppConfig:
-    """Map CRISP_* env vars onto nested config fields.
-
-    Only a few common knobs are wired here; anything exotic should be edited
-    in configs/default.yaml directly.
-    """
-    data = cfg.model_dump()
-
-    def _set(d: dict, dotted: str, value: object) -> None:
-        node = d
-        parts = dotted.split(".")
-        for p in parts[:-1]:
-            node = node[p]
-        node[parts[-1]] = value
-
-    env_map = {
-        "CRISP_MOCK": ("mock", bool),
-        "CRISP_TOPK": ("retrieval.top_k", int),
-        "CRISP_INDEX_PATH": ("retrieval.index_path", str),
-        "CRISP_GENERATOR": ("generator.model_name", str),
-        "CRISP_DTYPE": ("generator.dtype", str),
-        "CRISP_DEVICE": ("generator.device", str),
-        "CRISP_DETECTOR": ("detector.model_name", str),
-        "CRISP_CLAIM_MODE": ("claim_extractor.mode", str),
-        "CRISP_CLAIM_INTRINSIC": ("claim_extractor.intrinsic_threshold", float),
-        "CRISP_CLAIM_AGGREGATED": ("claim_extractor.aggregated_threshold", float),
-        # Phase 4 — adaptive retrieval
-        "CRISP_RETRIEVAL_MODE": ("retrieval.mode", str),
-        "CRISP_BM25_K1": ("retrieval.bm25_k1", float),
-        "CRISP_BM25_B": ("retrieval.bm25_b", float),
-        "CRISP_RRF_K": ("retrieval.rrf_k", float),
-        "CRISP_W_DENSE": ("retrieval.weight_dense", float),
-        "CRISP_W_BM25": ("retrieval.weight_bm25", float),
-        "CRISP_ADAPTIVE": ("adaptive_retrieval.enabled", bool),
-        "CRISP_ADAPTIVE_K_INIT": ("adaptive_retrieval.initial_k", int),
-        "CRISP_ADAPTIVE_K_MAX": ("adaptive_retrieval.max_k", int),
-        "CRISP_ADAPTIVE_SCORE": ("adaptive_retrieval.expansion_score_threshold", float),
-        "CRISP_ADAPTIVE_GAP": ("adaptive_retrieval.expansion_gap_threshold", float),
-        "CRISP_ADAPTIVE_REWRITES": ("adaptive_retrieval.rewrite_variants", int),
-        "CRISP_ADAPTIVE_MULTIHOP": ("adaptive_retrieval.multi_hop_max_entities", int),
-        # Phase 5 — multi-hop evidence aggregation
-        "CRISP_DISABLE_MULTIHOP": ("multi_hop.enabled", bool),
-        "CRISP_NER_BACKEND": ("multi_hop.ner_backend", str),
-        "CRISP_NER_MODEL": ("multi_hop.ner_model", str),
-        "CRISP_MULTIHOP_ENTS": ("multi_hop.max_entities", int),
-        "CRISP_MULTIHOP_RELS": ("multi_hop.max_relations_per_entity", int),
-        "CRISP_MULTIHOP_TOPK": ("multi_hop.top_k_per_subquery", int),
-        "CRISP_MAX_NEW": ("generator.max_new_tokens", int),
-        "CRISP_TEMP": ("generator.temperature", float),
-        "CRISP_MAX_ITER": ("pipeline.max_iterations", int),
-        "CRISP_LOG_LEVEL": ("pipeline.log_level", str),
-        "CRISP_EEDC_WEIGHTS": ("eedc.weights_path", str),
-        "CRISP_CALIBRATION": ("eedc.calibration.method", str),
-        "CRISP_CALIBRATION_MIN": ("eedc.calibration.min_examples", int),
-        "CRISP_DISABLE_DETECT": ("pipeline.enable_detection", bool),
-        # Phase 7 — AIC + editor
-        "CRISP_AIC": ("pipeline.enable_iteration_control", bool),
-        "CRISP_AIC_MAX_ITER": ("pipeline.aic_max_iterations", int),
-        "CRISP_AIC_ACCEPT_THRESHOLD": ("pipeline.aic_accept_rate_threshold", float),
-        "CRISP_AIC_MAX_EDITS": ("pipeline.aic_max_edits_per_iteration", int),
-        "CRISP_AIC_ACCEPT_RATE": ("pipeline.aic_accept_rate", float),
-        "CRISP_AIC_REGEN_RATE": ("pipeline.aic_regen_rate", float),
-        "CRISP_AIC_MIN_IMPROVEMENT": ("pipeline.aic_min_improvement", float),
-        "CRISP_EDITOR_MODE": ("pipeline.editor_mode", str),
-        # Step 7 — optional cross-encoder reranker.
-        "CRISP_RERANKER": ("reranker.enabled", bool),
-        "CRISP_RERANKER_MODEL": ("reranker.model_name", str),
-        "CRISP_RERANKER_TOPK": ("reranker.top_k", int),
-    }
-
-    raw = os.environ
-    for var, (dotted, caster) in env_map.items():
-        if var not in raw:
-            continue
-        val = raw[var]
-        if caster is bool:
-            val = val.lower() in ("1", "true", "yes", "on")
-            # CRISP_DISABLE_*=1 means "set the corresponding ``enabled`` to False".
-            if var in {"CRISP_DISABLE_DETECT", "CRISP_DISABLE_MULTIHOP"}:
-                val = not val
+def _apply_env_overrides(cfg: dict[str, Any], overrides: dict[str, str]) -> dict[str, Any]:
+    """Recursively apply HALLUC_A_B_C=value into cfg["a"]["b"]["c"]."""
+    for key, raw in overrides.items():
+        parts = key.lower().split("__")
+        cursor = cfg
+        for part in parts[:-1]:
+            cursor = cursor.setdefault(part, {})
+            if not isinstance(cursor, dict):
+                cursor = {}
+        leaf = parts[-1]
+        coerced: Any = raw
+        if raw.lower() in {"true", "false"}:
+            coerced = raw.lower() == "true"
         else:
-            val = caster(val)
-        _set(data, dotted, val)
+            try:
+                coerced = int(raw)
+            except ValueError:
+                try:
+                    coerced = float(raw)
+                except ValueError:
+                    pass
+        cursor[leaf] = coerced
+    return cfg
 
-    return AppConfig(**data)
+
+@dataclass
+class _Namespace:
+    """Read-only attribute view over a dict (for ``cfg.retrieval.mode`` lookups)."""
+
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    def __getattr__(self, name: str) -> Any:
+        if name in self.raw:
+            v = self.raw[name]
+            if isinstance(v, dict):
+                return _Namespace(raw=v)
+            return v
+        return None
 
 
-def load_config(path: str | os.PathLike[str] | None = None) -> AppConfig:
-    """Load config from YAML, validate, then apply env overrides."""
-    cfg_path = Path(path) if path else DEFAULT_CONFIG_PATH
-    with cfg_path.open("r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
-    cfg = AppConfig(**raw)
-    return _apply_env_overrides(cfg)
+@dataclass
+class Config:
+    """A flat wrapper around the loaded YAML mapping."""
+
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    def __getitem__(self, key: str) -> Any:
+        return self.raw[key]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.raw.get(key, default)
+
+    @property
+    def models(self) -> dict[str, str]:
+        return self.raw.get("models", {})
+
+    @property
+    def prompt(self) -> dict[str, str]:
+        return self.raw.get("prompt", {})
+
+    @property
+    def retrieval(self) -> _Namespace:
+        return _Namespace(raw=self.raw.get("retrieval", {}))
+
+    def __getattr__(self, name: str) -> Any:
+        """Allow ``cfg.<name>`` for any top-level key, returning a Namespace."""
+        if name.startswith("_"):
+            raise AttributeError(name)
+        v = self.raw.get(name)
+        if isinstance(v, dict):
+            return _Namespace(raw=v)
+        return v
+
+    def step(self, n: int) -> dict[str, Any]:
+        """Return the config block for step_n_<name>."""
+        prefix = f"step{n:02d}_"
+        for k, v in self.raw.items():
+            if k.startswith(prefix):
+                return v  # type: ignore[return-value]
+        return {}
+
+    def as_dict(self) -> dict[str, Any]:
+        return self.raw
+
+
+def load_config(path: str | os.PathLike[str] | None = None) -> Config:
+    """Load default config, apply env overrides."""
+    p = Path(path) if path else _DEFAULT_CONFIG_PATH
+    if not p.exists():
+        raise FileNotFoundError(f"Config file not found: {p}")
+    with p.open("r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f) or {}
+    cfg = _apply_env_overrides(cfg, _env_overrides())
+    return Config(raw=cfg)

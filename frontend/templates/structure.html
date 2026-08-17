@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Project Structure — Hallucination Pipeline</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo"></span>
+      <div>
+        <h1>Project Structure</h1>
+        <p class="sub" id="root-line">loading…</p>
+      </div>
+    </div>
+    <nav class="nav">
+      <a href="/">Demo</a>
+      <a href="/structure" class="active">Project</a>
+    </nav>
+    <div class="status">
+      <span class="dot ok"></span>
+      <span id="status-text" class="muted small">live</span>
+    </div>
+  </header>
+
+  <main class="grid one">
+    <section class="card">
+      <div class="row" style="justify-content:space-between;">
+        <h2 style="margin:0;">File tree</h2>
+        <div class="row">
+          <button id="btn-refresh">Refresh</button>
+          <label class="muted small">
+            depth
+            <input id="depth" type="number" min="1" max="8" value="4" style="width:60px;" />
+          </label>
+          <label class="muted small">
+            <input id="hidden" type="checkbox" />
+            show hidden
+          </label>
+          <input id="filter" type="text" placeholder="filter…" style="width:160px;" />
+        </div>
+      </div>
+      <div class="muted small" id="summary"></div>
+      <div id="tree" class="tree muted">loading…</div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/structure.js') }}"></script>
+</body>
+</html>
