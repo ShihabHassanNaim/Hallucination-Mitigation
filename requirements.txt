@@ -38,3 +38,5 @@ uvicorn[standard]>=0.27
 
 # Tests
 pytest>=8.0
+flask
+
