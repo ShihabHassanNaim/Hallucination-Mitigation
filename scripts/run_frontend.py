@@ -48,9 +48,9 @@ def main() -> None:
     port = int(os.environ.get("PORT", "5000"))
     debug = bool(int(os.environ.get("DEBUG", "0")))
     from frontend.app import app  # noqa: WPS433 — late import after path bootstrap
-    print(f"[run_frontend] starting Flask on http://127.0.0.1:{port}/")
+    print(f"[run_frontend] starting Flask on http://0.0.0.0:{port}/")
     print(f"[run_frontend] HF token loaded: {bool(os.environ.get('HUGGINGFACE_HUB_TOKEN'))}")
-    app.run(host="127.0.0.1", port=port, debug=debug, use_reloader=False)
+    app.run(host="0.0.0.0", port=port, debug=debug, use_reloader=False)
 
 
 if __name__ == "__main__":

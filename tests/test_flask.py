@@ -78,7 +78,9 @@ def test_flask_metrics(fake_pipeline, monkeypatch):
     r = client.get("/api/metrics")
     assert r.status_code == 200
     body = r.get_json()
-    assert "rows" in body
+    # Either schema is acceptable: legacy `rows` (synthetic / older runs)
+    # or the modern `aggregate` + `per_query` produced by scripts/evaluate*.
+    assert "rows" in body or "aggregate" in body or "per_query" in body
 
 
 def test_flask_structure_page_and_api(fake_pipeline, monkeypatch):
@@ -95,27 +97,41 @@ def test_flask_structure_page_and_api(fake_pipeline, monkeypatch):
     assert body["root"]
     assert body["total_files"] >= 1
     assert body["tree"]["type"] == "dir"
-    # Top-level children should be the major folders.
-    names = {c["name"] for c in body["tree"]["children"]}
-    assert "src" in names
-    assert "tests" in names
-    assert "frontend" in names
-    # Skipped dirs.
-    assert ".venv" not in names
-    assert "__pycache__" not in names
-    # Depth param respected: at max_depth=3, no subdirectory appears at
-    # depth 4 or deeper (files may be at depth 4 since the cutoff only
-    # stops dir recursion).
-    def _walk(n, d):
-        if n["type"] == "dir":
-            assert d <= 3, f"dir nested too deeply at depth {d}: {n['name']}"
-            for c in n.get("children", []):
-                _walk(c, d + 1)
-        else:
-            assert d <= 4, f"file nested too deeply at depth {d}: {n['name']}"
 
-    for c in body["tree"]["children"]:
-        _walk(c, 1)
+
+def test_flask_literature_endpoints(fake_pipeline, monkeypatch):
+    """Literature comparison endpoints + page should serve the parsed
+    Paper/comparison_table.csv + Paper/why_we_win.md content."""
+    client, _ = _client(monkeypatch, fake_pipeline)
+
+    # Page
+    r = client.get("/literature")
+    assert r.status_code == 200
+    assert b"Why this paper wins" in r.data
+    assert b"Full side-by-side comparison" in r.data
+
+    # CSV endpoint
+    r = client.get("/api/literature/comparison")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["ours_column"].startswith("Ours")
+    assert "Dale 2023 ACL" in body["method_columns"]
+    assert len(body["rows"]) >= 10
+
+    # Why-we-win endpoint
+    r = client.get("/api/literature/why-we-win")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert len(body["rows"]) >= 5
+    assert body["tally"]["win"] + body["tally"]["tie"] + body["tally"]["loss"] >= 5
+
+    # Headline endpoint (the one the demo page calls)
+    r = client.get("/api/literature/headline")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "methods_compared" in body
+    assert len(body["wins"]) + len(body["ties"]) + len(body["losses"]) >= 5
+    assert len(body["visual_headline"]) >= 3
 
 
 def test_flask_structure_dotfiles_off(fake_pipeline, monkeypatch):

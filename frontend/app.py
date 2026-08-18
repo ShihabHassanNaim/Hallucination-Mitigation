@@ -78,7 +78,13 @@ def _build_tree(root: Path, depth: int = 0, max_depth: int = _MAX_DEPTH) -> dict
 
 
 def create_app(index_dir: str | None = None) -> Flask:
-    """Build the Flask app and bootstrap a single Pipeline instance."""
+    """Build the Flask app and bootstrap a single Pipeline instance.
+
+    The Pipeline is loaded lazily on the first call to ``get_pipeline()``
+    so the server can come up and serve the lightweight JSON endpoints
+    (``/api/evaluation*``, ``/api/structure``, ``/api/health``)
+    immediately while the heavy HF models download in the background.
+    """
     app = Flask(
         __name__,
         template_folder=str(Path(__file__).parent / "templates"),
@@ -89,17 +95,31 @@ def create_app(index_dir: str | None = None) -> Flask:
         index_dir = os.environ.get("HALLUC_INDEX") or None
 
     cfg = load_config()
-    pipeline = Pipeline(cfg=cfg)
-    app.extensions["pipeline"] = pipeline
+    app.extensions["pipeline"] = None  # set lazily
+    app.extensions["pipeline_lock"] = False
     app.extensions["index_loaded"] = False
     app.extensions["n_documents"] = 0
     app.extensions["project_root"] = str(_ROOT)
 
-    if index_dir:
+    def get_pipeline() -> Pipeline:
+        """Lazy pipeline bootstrap — loads models on first use."""
+        if app.extensions.get("pipeline") is not None:
+            return app.extensions["pipeline"]
+        if app.extensions.get("pipeline_lock"):
+            raise RuntimeError("pipeline is already being initialised")
+        app.extensions["pipeline_lock"] = True
         try:
-            _try_load_index(pipeline, index_dir)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("failed to load index %s: %s", index_dir, exc)
+            pipe = Pipeline(cfg=cfg)
+            app.extensions["pipeline"] = pipe
+            if index_dir:
+                try:
+                    _try_load_index(pipe, index_dir)
+                    app.extensions["index_loaded"] = True
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("failed to load index %s: %s", index_dir, exc)
+            return pipe
+        finally:
+            app.extensions["pipeline_lock"] = False
 
     # ---- Pages ----------------------------------------------------------
     @app.get("/")
@@ -109,6 +129,14 @@ def create_app(index_dir: str | None = None) -> Flask:
     @app.get("/structure")
     def structure_page():
         return render_template("structure.html")
+
+    @app.get("/evaluation")
+    def evaluation_page():
+        return render_template("evaluation.html")
+
+    @app.get("/literature")
+    def literature_page():
+        return render_template("literature.html")
 
     # ---- JSON API -------------------------------------------------------
     @app.get("/api/health")
@@ -130,6 +158,11 @@ def create_app(index_dir: str | None = None) -> Flask:
             return jsonify({"error": "documents must be a non-empty list"}), 422
         if not all(isinstance(d, str) and d.strip() for d in docs):
             return jsonify({"error": "every document must be a non-empty string"}), 422
+        try:
+            pipeline = get_pipeline()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("pipeline init failed")
+            return jsonify({"error": f"pipeline init failed: {exc}"}), 500
         if pipeline.embedder is None:
             return jsonify({"error": "embedder not loaded"}), 500
         chunks = chunk_documents(docs, chunk_size=400, chunk_overlap=50)
@@ -153,6 +186,11 @@ def create_app(index_dir: str | None = None) -> Flask:
         query = (body.get("query") or "").strip()
         if not query:
             return jsonify({"error": "query must be a non-empty string"}), 422
+        try:
+            pipeline = get_pipeline()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("pipeline init failed")
+            return jsonify({"error": f"pipeline init failed: {exc}"}), 500
         if not app.extensions["index_loaded"] or pipeline.retriever is None:
             return jsonify({"error": "no index loaded — POST /api/index first"}), 409
         try:
@@ -171,10 +209,109 @@ def create_app(index_dir: str | None = None) -> Flask:
         Reads ``data/metrics.json`` and computes aggregate stats on the
         fly. Always returns 200 — empty fields if the file is missing
         so the UI can render an empty state without special-casing.
-        """
-        from src.evaluation.report import load_report  # noqa: WPS433
 
+        Query param ``dataset`` selects a registered dataset slug
+        (see ``DATASET_REGISTRY``). Defaults to the first available
+        dataset in the registry, falling back to ``data/metrics.json``
+        if none are registered.
+        """
+        from src.evaluation.report import (  # noqa: WPS433
+            DATASET_REGISTRY,
+            load_multi_report,
+            load_report,
+        )
+
+        slug = (request.args.get("dataset") or "").strip()
+        if slug and slug in DATASET_REGISTRY:
+            path = Path(DATASET_REGISTRY[slug]["path"])
+            return jsonify(load_report(path))
+
+        multi = load_multi_report()
+        if multi["datasets"]:
+            for d in multi["datasets"]:
+                if d["available"]:
+                    return jsonify(d["report"])
         return jsonify(load_report())
+
+    @app.get("/api/evaluation/datasets")
+    def api_evaluation_datasets():
+        """List registered datasets + their load status."""
+        from src.evaluation.report import load_multi_report  # noqa: WPS433
+
+        return jsonify(load_multi_report())
+
+    @app.get("/api/evaluation/comparison")
+    def api_evaluation_comparison():
+        """Side-by-side comparison table across all registered datasets.
+
+        Shape::
+
+            {
+              "rows": [
+                 { "metric": "Detection Acc.",
+                   "halueval": 0.83, "truthfulqa": 0.91, "delta": -0.08 },
+                 ...
+              ],
+              "datasets": [
+                 {"slug":"halueval","label":"HaluEval QA",...},
+                 ...
+              ],
+            }
+        """
+        from src.evaluation.report import DATASET_REGISTRY, load_multi_report  # noqa: WPS433
+
+        multi = load_multi_report()
+        slugs = list(DATASET_REGISTRY.keys())
+
+        # Metrics to surface in the comparison table (in display order).
+        comparison_keys = [
+            ("Detection Acc.",         "detection_accuracy"),
+            ("Detection Precision",    "detection_precision"),
+            ("Detection Recall",       "detection_recall"),
+            ("Detection F1",           "detection_f1"),
+            ("Detection ROC-AUC",      "detection_roc_auc"),
+            ("Hallucination Reduction","hallucination_reduction_rate"),
+            ("Claim Correction Rate",  "claim_correction_rate"),
+            ("End-to-End Accuracy",    "end_to_end_accuracy"),
+            ("Claim F1",               "claim_f1"),
+            ("Verification Success",   "verification_success_rate"),
+            ("Retrieval R@5",          "retrieval_recall_at_5"),
+            ("Retrieval P@5",          "retrieval_precision_at_5"),
+            ("Retrieval MRR",          "retrieval_mrr"),
+            ("Retrieval nDCG",         "retrieval_ndcg"),
+            ("Mean Confidence",        "mean_confidence"),
+        ]
+
+        rows: list[dict[str, Any]] = []
+        for label, key in comparison_keys:
+            row: dict[str, Any] = {"metric": label, "key": key}
+            values: list[float] = []
+            for slug in slugs:
+                ds = next((d for d in multi["datasets"] if d["slug"] == slug), None)
+                if ds is None:
+                    row[slug] = None
+                    continue
+                agg = ds["report"].get("aggregate") or {}
+                val = agg.get(key)
+                if val is None and not key.startswith("mean_"):
+                    val = agg.get(f"mean_{key}")
+                row[slug] = val
+                if isinstance(val, (int, float)):
+                    values.append(float(val))
+            if len(values) >= 2:
+                row["delta"] = round(values[-1] - values[0], 4)
+            else:
+                row["delta"] = None
+            rows.append(row)
+
+        return jsonify({
+            "rows": rows,
+            "datasets": [
+                {"slug": d["slug"], "label": d["label"], "available": d["available"],
+                 "n_queries": (d["report"].get("n_queries") or 0)}
+                for d in multi["datasets"]
+            ],
+        })
 
     @app.get("/api/accuracy")
     def api_accuracy():
@@ -194,10 +331,31 @@ def create_app(index_dir: str | None = None) -> Flask:
 
         Always returns 200 with empty fields when ``metrics.json`` is
         missing, so the UI can render an empty state cleanly.
-        """
-        from src.evaluation.report import load_report  # noqa: WPS433
 
-        report = load_report()
+        Query param ``dataset`` selects a registered dataset slug.
+        """
+        from src.evaluation.report import (  # noqa: WPS433
+            DATASET_REGISTRY,
+            load_multi_report,
+            load_report,
+        )
+
+        slug = (request.args.get("dataset") or "").strip()
+        if slug and slug in DATASET_REGISTRY:
+            path = Path(DATASET_REGISTRY[slug]["path"])
+            report = load_report(path)
+        else:
+            multi = load_multi_report()
+            report = None
+            if multi["datasets"]:
+                for d in multi["datasets"]:
+                    if d["available"]:
+                        report = d["report"]
+                        slug = d["slug"]
+                        break
+            if report is None:
+                report = load_report()
+
         aggregate = report.get("aggregate") or {}
         rows = report.get("per_query") or []
 
@@ -263,13 +421,29 @@ def create_app(index_dir: str | None = None) -> Flask:
                 "source": report.get("source") or "unknown",
                 "source_file": report.get("source_file") or "",
                 "last_modified": report.get("last_modified"),
+                "dataset": slug,
             },
         })
 
     @app.get("/api/metrics")
     def api_metrics():
-        p = Path("data/metrics.json")
-        if not p.exists():
+        from src.evaluation.report import (  # noqa: WPS433
+            DATASET_REGISTRY,
+            load_multi_report,
+        )
+
+        slug = (request.args.get("dataset") or "").strip()
+        if slug and slug in DATASET_REGISTRY:
+            p = Path(DATASET_REGISTRY[slug]["path"])
+        else:
+            multi = load_multi_report()
+            p = None
+            if multi["datasets"]:
+                for d in multi["datasets"]:
+                    if d["available"]:
+                        p = Path(d["path"])
+                        break
+        if p is None or not p.exists():
             return jsonify({"rows": []})
         try:
             return jsonify(json.loads(p.read_text(encoding="utf-8")))
@@ -286,6 +460,87 @@ def create_app(index_dir: str | None = None) -> Flask:
         from src.models.registry import build_status_report  # noqa: WPS433
 
         return jsonify(build_status_report())
+
+    @app.get("/api/literature/comparison")
+    def api_literature_comparison():
+        """Side-by-side comparison vs. 11 published hallucination systems.
+
+        Reads ``Paper/comparison_table.csv`` (master CSV the user curates)
+        and returns a JSON-friendly payload with one row per (category,
+        metric) and one column per method. ``ours_numeric`` is the lower
+        bound for ranged cells like ``"0.91-0.95 (projected)"`` so the
+        frontend can plot a single point + a range badge.
+        """
+        from src.evaluation.literature import load_literature_csv  # noqa: WPS433
+
+        return jsonify(load_literature_csv())
+
+    @app.get("/api/literature/why-we-win")
+    def api_literature_why_we_win():
+        """Verdict matrix + headline bar chart from Paper/why_we_win.md.
+
+        Shape::
+
+            {
+              "rows":      [ {dimension, best_paper, best_score,
+                               our_score, winner, justification}, ... ],
+              "tally":     {win, tie, loss, verdict},
+              "visual_headline": [ {metric, best, ours, gap, tag}, ... ],
+            }
+
+        ``winner`` is the raw character from the paper (✓ / ≈ / ✗) so the
+        frontend can colour-code without re-parsing the text.
+        """
+        from src.evaluation.literature import load_why_we_win  # noqa: WPS433
+
+        return jsonify(load_why_we_win())
+
+    @app.get("/api/literature/headline")
+    def api_literature_headline():
+        """One-shot payload for the literature card on the demo page.
+
+        Combines the verdict tally + the wins/losses + the headline bar
+        chart so the frontend can render the 'why my paper wins' card
+        with a single fetch.
+        """
+        from src.evaluation.literature import (  # noqa: WPS433
+            load_literature_csv,
+            load_why_we_win,
+        )
+
+        csv_data = load_literature_csv()
+        md_data = load_why_we_win()
+
+        wins = [v for v in md_data.get("rows", []) if v.get("winner", "").startswith("✓")]
+        losses = [v for v in md_data.get("rows", []) if v.get("winner", "").startswith("✗")]
+        ties = [v for v in md_data.get("rows", []) if v.get("winner", "").startswith("≈")]
+
+        # Per-row win/loss attached to the CSV rows where metric matches.
+        # Best-effort — the verdict metric is free-form text, but the
+        # visual_headline entries map cleanly to CSV rows.
+        per_row_outcomes: list[dict[str, Any]] = []
+        csv_lookup = {r["metric"].strip(): r for r in csv_data["rows"]}
+        for v in md_data.get("visual_headline", []):
+            csv_row = csv_lookup.get(v["metric"].strip())
+            per_row_outcomes.append({
+                "metric": v["metric"],
+                "best": v["best"],
+                "ours": v["ours"],
+                "gap": v["gap"],
+                "tag": v["tag"],
+                "is_win": "Best" in v["tag"] or "best" in v["tag"].lower(),
+            })
+
+        return jsonify({
+            "methods_compared": csv_data["method_columns"],
+            "n_rows": len(csv_data["rows"]),
+            "tally": md_data.get("tally", {}),
+            "wins": wins,
+            "ties": ties,
+            "losses": losses,
+            "visual_headline": md_data.get("visual_headline", []),
+            "per_row_outcomes": per_row_outcomes,
+        })
 
     @app.get("/api/structure")
     def api_structure():

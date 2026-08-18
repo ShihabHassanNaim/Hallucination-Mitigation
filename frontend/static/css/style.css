@@ -244,6 +244,40 @@ button.ghost:hover { color: var(--accent); border-color: var(--accent); }
 .metric-card-red    { border-left-color: var(--red); }
 .metric-card-na     { opacity: 0.5; }
 
+/* Dataset selector ----------------------------------------------------- */
+.dataset-pills { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.dataset-pill {
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 6px 12px; cursor: pointer;
+  font: inherit; font-size: 12px; color: var(--muted);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.dataset-pill:hover { color: var(--text); border-color: var(--accent); }
+.dataset-pill.active {
+  background: rgba(121,192,255,0.12); color: var(--accent);
+  border-color: rgba(121,192,255,0.4);
+}
+.dataset-pill .pill-count {
+  font-size: 11px; padding: 1px 6px; border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+}
+.dataset-pill[data-available="false"] { opacity: 0.5; cursor: not-allowed; }
+.dataset-pill[data-available="false"]:hover { border-color: var(--border); color: var(--muted); }
+
+/* Comparison table (side-by-side) -------------------------------------- */
+.comparison-table-wrap { max-height: 320px; overflow-y: auto; margin-top: 8px; }
+.comparison-table th, .comparison-table td {
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.comparison-table th:first-child, .comparison-table td:first-child {
+  text-align: left;
+}
+.comparison-table td.delta-pos { color: var(--green); font-weight: 600; }
+.comparison-table td.delta-neg { color: var(--red);   font-weight: 600; }
+.comparison-table td.delta-zero { color: var(--muted); }
+.comparison-table th.col-dataset { color: var(--accent); }
+
 .eval-table-wrap { max-height: 400px; overflow-y: auto; }
 .eval-table th, .eval-table td {
   white-space: nowrap; font-variant-numeric: tabular-nums;
@@ -374,4 +408,78 @@ button.ghost:hover { color: var(--accent); border-color: var(--accent); }
 @media (max-width: 760px) {
   .acc-breakdown { grid-template-columns: 1fr; }
   .acc-donut-wrap { justify-content: center; }
+}
+
+/* Evaluation dashboard --------------------------------------------------- */
+.eval-headline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.eval-bars-wrap {
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 18px;
+}
+.eval-bars { display: flex; flex-direction: column; gap: 10px; }
+.eval-bar-row {
+  display: grid;
+  grid-template-columns: 180px 1fr 80px;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+.eval-bar-label {
+  color: var(--muted); font-size: 12px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.eval-bar-track {
+  position: relative;
+  height: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.eval-bar-fill {
+  display: block; height: 100%;
+  transition: width 0.4s ease;
+  border-radius: 8px;
+}
+.eval-bar-err {
+  position: absolute; top: 0; bottom: 0;
+  border-left: 1px solid rgba(230, 237, 243, 0.6);
+  border-right: 1px solid rgba(230, 237, 243, 0.6);
+  pointer-events: none;
+}
+.fill-green  { background: linear-gradient(90deg, #2ea043, var(--green)); }
+.fill-yellow { background: linear-gradient(90deg, #9e6a00, var(--yellow)); }
+.fill-red    { background: linear-gradient(90deg, #8b1f1c, var(--red)); }
+.eval-bar-value {
+  text-align: right; font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.commentary p { line-height: 1.55; font-size: 14px; margin: 8px 0; }
+.commentary code {
+  font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+  font-size: 12px; color: var(--accent);
+  background: rgba(121, 192, 255, 0.08); padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.cell-good { color: var(--green); font-weight: 600; }
+.cell-bad  { color: var(--red);   font-weight: 600; }
+
+#row-decision, #row-filter {
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 10px; color: var(--text);
+  font: inherit;
+}
+#row-decision { margin: 0; }
+
+@media (max-width: 760px) {
+  .eval-bar-row { grid-template-columns: 120px 1fr 60px; gap: 8px; }
 }

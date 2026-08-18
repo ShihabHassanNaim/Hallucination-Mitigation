@@ -4,10 +4,28 @@ Returns labels: supported | contradicted | unknown.
 """
 from __future__ import annotations
 
+import os
+
+
+def _pick_device() -> str:
+    override = os.environ.get("HALLUC_NLI_DEVICE")
+    if override:
+        return override
+    try:
+        import torch  # type: ignore
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:  # noqa: BLE001
+        return "cpu"
+
 
 class DebertaNLIModel:
-    def __init__(self, model_name: str = "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"):
+    def __init__(
+        self,
+        model_name: str = "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7",
+        device: str | None = None,
+    ):
         self.model_name = model_name
+        self.device = device or _pick_device()
         self._tok = None
         self._model = None
 
@@ -17,7 +35,8 @@ class DebertaNLIModel:
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"transformers missing: {exc}")
         self._tok = AutoTokenizer.from_pretrained(self.model_name)
-        self._model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+        self._model = AutoModelForSequenceClassification.from_pretrained(self.model_name).to(self.device)
+        self._model.eval()
 
     def _ensure_loaded(self) -> None:
         if self._model is None or self._tok is None:
@@ -29,7 +48,7 @@ class DebertaNLIModel:
 
         inputs = self._tok(  # type: ignore[union-attr]
             premise, hypothesis, return_tensors="pt", truncation=True, max_length=512
-        )
+        ).to(self.device)
         with torch.no_grad():
             logits = self._model(**inputs).logits  # type: ignore[union-attr]
         probs = torch.softmax(logits, dim=-1)[0].cpu().numpy()

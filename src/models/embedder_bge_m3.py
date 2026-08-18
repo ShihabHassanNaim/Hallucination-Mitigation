@@ -4,15 +4,30 @@ Loads the BAAI/bge-m3 sentence-transformers checkpoint. Raises on failure.
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
+
+
+def _pick_device() -> str:
+    """Pick 'cuda' when a GPU is visible, else 'cpu'."""
+    override = os.environ.get("HALLUC_EMBEDDER_DEVICE")
+    if override:
+        return override
+    try:
+        import torch  # type: ignore
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:  # noqa: BLE001
+        return "cpu"
 
 
 class BGE_M3Embedder:
     """Dense embedder. ``encode(texts) -> ndarray[float32]`` shape (n, dim)."""
 
-    def __init__(self, dim: int = 1024, model_name: str = "BAAI/bge-m3"):
+    def __init__(self, dim: int = 1024, model_name: str = "BAAI/bge-m3", device: str | None = None):
         self.dim = dim
         self.model_name = model_name
+        self.device = device or _pick_device()
         self._model = None
 
     def _load_hf(self) -> None:
@@ -20,7 +35,7 @@ class BGE_M3Embedder:
             from sentence_transformers import SentenceTransformer  # type: ignore
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"sentence-transformers not available: {exc}")
-        m = SentenceTransformer(self.model_name, trust_remote_code=True)
+        m = SentenceTransformer(self.model_name, device=self.device, trust_remote_code=True)
         # bge-m3 outputs 1024-d vectors; if smaller model, override dim.
         test_vec = m.encode(["ping"], normalize_embeddings=True)
         self.dim = int(test_vec.shape[-1])

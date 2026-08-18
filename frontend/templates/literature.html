@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Literature comparison — Hallucination Pipeline</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/literature.css') }}" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo"></span>
+      <div>
+        <h1>Literature comparison</h1>
+        <p class="sub" id="lit-subtitle">Side-by-side with 11 published hallucination-detection systems.</p>
+      </div>
+    </div>
+    <nav class="nav">
+      <a href="/">Demo</a>
+      <a href="/structure">Project</a>
+      <a href="/evaluation">Evaluation</a>
+      <a href="/literature" class="active">Literature</a>
+    </nav>
+    <div class="status">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text" class="muted small">checking…</span>
+      <span class="mode-badge" id="source-badge">—</span>
+    </div>
+  </header>
+
+  <main class="grid one">
+    <!-- 1. Headline / why we win ---------------------------------------- -->
+    <section class="card" id="card-headline">
+      <div class="card-header">
+        <h2>Why this paper wins</h2>
+        <button id="btn-refresh" class="ghost">Refresh</button>
+      </div>
+      <p class="muted small" id="headline-meta">Loading…</p>
+
+      <div class="tally-bar" id="tally-bar"></div>
+
+      <p class="verdict-blurb" id="verdict-blurb">Loading…</p>
+
+      <div class="win-grid">
+        <div class="win-card win-card-win">
+          <h3>✓ Wins <span class="muted small" id="win-count">0</span></h3>
+          <ul id="win-list"></ul>
+        </div>
+        <div class="win-card win-card-tie">
+          <h3>≈ At par <span class="muted small" id="tie-count">0</span></h3>
+          <ul id="tie-list"></ul>
+        </div>
+        <div class="win-card win-card-loss">
+          <h3>✗ Trails <span class="muted small" id="loss-count">0</span></h3>
+          <ul id="loss-list"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Headline bar chart ------------------------------------------- -->
+    <section class="card" id="card-bars">
+      <h2>Headline metric chart</h2>
+      <p class="muted small">Bars compare the best score in the cited literature against our score. Green = we win on this metric; yellow = at par; red = we trail.</p>
+      <div class="lit-bars" id="lit-bars"></div>
+    </section>
+
+    <!-- 3. Full side-by-side comparison table -------------------------- -->
+    <section class="card" id="card-table">
+      <div class="card-header">
+        <h2>Full side-by-side comparison</h2>
+        <div class="row">
+          <select id="category-filter">
+            <option value="">All categories</option>
+          </select>
+        </div>
+      </div>
+      <p class="muted small">Source: <code>Paper/comparison_table.csv</code>. <span id="row-count">0</span> rows × <span id="col-count">0</span> methods.</p>
+      <div class="lit-table-wrap">
+        <table class="status-table lit-table" id="lit-table">
+          <thead id="lit-thead"></thead>
+          <tbody id="lit-tbody">
+            <tr><td class="muted small">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 4. Defence talking points --------------------------------------- -->
+    <section class="card" id="card-talking-points">
+      <h2>Defence talking points</h2>
+      <div class="talking-points" id="talking-points">
+        <p class="muted small">Loading…</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/literature.js') }}"></script>
+</body>
+</html>

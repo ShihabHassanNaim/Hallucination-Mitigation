@@ -1,0 +1,133 @@
+/* Literature comparison page --------------------------------------------- */
+
+.tally-bar {
+  display: flex;
+  height: 14px;
+  border-radius: 7px;
+  overflow: hidden;
+  margin: 12px 0;
+  background: var(--panel-2);
+}
+.tally-bar .seg-win  { background: var(--green); }
+.tally-bar .seg-tie  { background: var(--yellow); }
+.tally-bar .seg-loss { background: var(--red); }
+
+.verdict-blurb {
+  background: var(--panel-2);
+  border-left: 3px solid var(--accent);
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin: 8px 0 16px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.win-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.win-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.win-card h3 { margin: 0 0 8px; font-size: 14px; color: var(--text); }
+.win-card ul { margin: 0; padding-left: 18px; }
+.win-card li { margin: 4px 0; font-size: 13px; }
+.win-card .dim-name { font-weight: 600; color: var(--text); }
+.win-card .dim-best { color: var(--muted); font-size: 12px; }
+.win-card-win  { border-left-color: var(--green); }
+.win-card-tie  { border-left-color: var(--yellow); }
+.win-card-loss { border-left-color: var(--red); }
+
+/* Bar chart --------------------------------------------------------------- */
+.lit-bars { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.lit-bar-row {
+  display: grid;
+  grid-template-columns: 180px 1fr 100px 80px;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.lit-bar-row .lit-bar-name { color: var(--text); font-weight: 600; }
+.lit-bar-row .lit-bar-track {
+  position: relative;
+  background: var(--panel-2);
+  border-radius: 4px;
+  height: 18px;
+  overflow: hidden;
+}
+.lit-bar-row .lit-bar-fill {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s;
+}
+.lit-bar-row .lit-bar-fill.best  { background: rgba(154, 165, 178, 0.5); }
+.lit-bar-row .lit-bar-fill.ours  { background: linear-gradient(90deg, var(--green), var(--accent)); }
+.lit-bar-row.win  .lit-bar-fill.ours { background: linear-gradient(90deg, var(--green), var(--accent)); }
+.lit-bar-row.tie  .lit-bar-fill.ours { background: linear-gradient(90deg, var(--yellow), #f5d76e); }
+.lit-bar-row.loss .lit-bar-fill.ours { background: linear-gradient(90deg, var(--red), #ff8472); }
+.lit-bar-row .lit-bar-legend {
+  color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums;
+}
+.lit-bar-row .lit-bar-tag {
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
+}
+.lit-bar-row.win  .lit-bar-tag { color: var(--green); }
+.lit-bar-row.tie  .lit-bar-tag { color: var(--yellow); }
+.lit-bar-row.loss .lit-bar-tag { color: var(--red); }
+
+/* Side-by-side table ------------------------------------------------------ */
+.lit-table-wrap { max-height: 600px; overflow: auto; margin-top: 8px; }
+.lit-table {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.lit-table th, .lit-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.lit-table thead th {
+  background: var(--panel-2);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.lit-table th.col-ours {
+  background: rgba(121, 192, 255, 0.15);
+  color: var(--accent);
+}
+.lit-table td.col-ours {
+  background: rgba(121, 192, 255, 0.06);
+  font-weight: 600;
+}
+.lit-table td.cell-win  { color: var(--green); font-weight: 600; }
+.lit-table td.cell-loss { color: var(--red); font-weight: 600; }
+.lit-table td.cell-tie  { color: var(--yellow); }
+.lit-table td.metric-name {
+  font-weight: 600; color: var(--text);
+  white-space: normal;
+  max-width: 200px;
+}
+.lit-table td.cat-tag {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+/* Talking points ---------------------------------------------------------- */
+.talking-points ul { padding-left: 18px; margin: 8px 0; }
+.talking-points li { margin: 8px 0; line-height: 1.5; }
+.talking-points .tp-q { font-weight: 600; color: var(--accent); }
+.talking-points .tp-a { color: var(--text); }
+
+@media (max-width: 760px) {
+  .lit-bar-row { grid-template-columns: 100px 1fr 60px 60px; gap: 6px; font-size: 12px; }
+}

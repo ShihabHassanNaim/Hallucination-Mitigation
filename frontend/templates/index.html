@@ -18,6 +18,8 @@
     <nav class="nav">
       <a href="/" class="active">Demo</a>
       <a href="/structure">Project</a>
+      <a href="/evaluation">Evaluation</a>
+      <a href="/literature">Literature</a>
     </nav>
     <div class="status" id="status">
       <span class="dot" id="status-dot"></span>
@@ -71,10 +73,14 @@
     <section class="card wide" id="card-accuracy">
       <div class="card-header">
         <h2>4. Accuracy</h2>
-        <button id="btn-acc-refresh" class="ghost">Refresh</button>
+        <div class="row">
+          <div class="dataset-pills" id="acc-dataset-pills"></div>
+          <button id="btn-acc-refresh" class="ghost">Refresh</button>
+        </div>
       </div>
       <p class="muted small" id="acc-meta">
         <span id="acc-source">—</span>
+        · dataset <span id="acc-dataset">—</span>
         · <span id="acc-row-count">0</span> queries
         · last updated <span id="acc-last-updated">never</span>
       </p>
@@ -171,10 +177,15 @@
     <section class="card wide" id="card-evaluation">
       <div class="card-header">
         <h2>5. Evaluation</h2>
-        <button id="btn-eval-refresh" class="ghost">Refresh</button>
+        <div class="row">
+          <div class="dataset-pills" id="eval-dataset-pills"></div>
+          <button id="btn-eval-refresh" class="ghost">Refresh</button>
+        </div>
       </div>
       <p class="muted small" id="eval-meta">
-        data/metrics.json · <span id="eval-row-count">0</span> rows
+        <span id="eval-source-file">data/metrics.json</span>
+        · dataset <span id="eval-dataset">—</span>
+        · <span id="eval-row-count">0</span> rows
         · last updated <span id="eval-last-updated">never</span>
         · source: <span id="eval-source">—</span>
       </p>
@@ -184,9 +195,45 @@
       </div>
     </section>
 
+    <section class="card wide" id="card-comparison">
+      <div class="card-header">
+        <h2>6. Cross-dataset comparison</h2>
+        <button id="btn-cmp-refresh" class="ghost">Refresh</button>
+      </div>
+      <p class="muted small" id="cmp-meta">
+        Side-by-side headline metrics for every registered dataset.
+        <b>Δ</b> is the difference between the first and last registered
+        dataset (positive = the right-most dataset scores higher).
+      </p>
+      <div class="comparison-table-wrap">
+        <table class="status-table comparison-table" id="comparison-table">
+          <thead><tr id="comparison-head"><th>Metric</th></tr></thead>
+          <tbody id="comparison-body">
+            <tr><td class="muted small">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="card wide" id="card-result">
-      <h2>6. Result</h2>
+      <h2>7. Result</h2>
       <div id="result"></div>
+    </section>
+
+    <section class="card wide" id="card-why-win">
+      <div class="card-header">
+        <h2>8. Why this paper wins</h2>
+        <div class="row">
+          <a href="/literature" class="ghost">Full comparison →</a>
+          <button id="btn-whywin-refresh" class="ghost">Refresh</button>
+        </div>
+      </div>
+      <p class="muted small" id="whywin-meta">Comparing against 11 published hallucination-detection systems from Paper/comparison_table.csv + Paper/why_we_win.md.</p>
+
+      <div class="tally-bar" id="whywin-bar"></div>
+      <p class="verdict-blurb" id="whywin-blurb">Loading…</p>
+
+      <div class="win-grid" id="whywin-grid"></div>
     </section>
   </main>
 

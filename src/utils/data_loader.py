@@ -48,9 +48,17 @@ def load_halueval(path: str | Path) -> list[dict]:
             except json.JSONDecodeError:
                 continue
             q = obj.get("question") or obj.get("query") or ""
-            a = obj.get("right_answer") or obj.get("answer") or obj.get("response") or ""
+            # Prefer explicit `answer` (caller-set, e.g. the hallucinated variant),
+            # then fall back to right_answer / response.
+            a = obj.get("answer")
+            if not a:
+                a = obj.get("right_answer") or obj.get("response") or ""
             k = obj.get("knowledge") or obj.get("evidence") or ""
-            label = obj.get("label") or obj.get("hallucination") or ""
+            # Preserve explicit 0/1 integer labels; fall back to string 'hallucination' field.
+            if "label" in obj and obj["label"] != "":
+                label = obj["label"]
+            else:
+                label = obj.get("hallucination") or ""
             rows.append({"query": q, "answer": a, "evidence": [k] if k else [], "label": label})
     return rows
 

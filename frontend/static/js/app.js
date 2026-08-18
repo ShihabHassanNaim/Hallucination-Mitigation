@@ -164,6 +164,173 @@ async function loadModelStatus() {
   if (summaryEl) summaryEl.textContent = escapeHTML(data.summary || "");
 }
 
+// ---- Dataset selector (shared by Accuracy + Evaluation) ---------------
+
+const DATASET_KEY = "halluc_active_dataset";
+
+let _datasetState = {
+  list: [],                  // [{slug, label, available, n_queries}]
+  active: "",                // currently selected slug
+};
+
+function loadActiveDataset() {
+  try { return localStorage.getItem(DATASET_KEY) || ""; }
+  catch { return ""; }
+}
+function saveActiveDataset(slug) {
+  try { localStorage.setItem(DATASET_KEY, slug); }
+  catch { /* ignore */ }
+}
+
+function renderDatasetPills(targetId) {
+  const host = $(targetId);
+  if (!host) return;
+  host.innerHTML = _datasetState.list.map((d) => {
+    const cls = d.slug === _datasetState.active ? " active" : "";
+    const available = d.available ? "true" : "false";
+    const count = d.n_queries ? `${d.n_queries}` : "—";
+    return `
+      <button class="dataset-pill${cls}" data-slug="${escapeHTML(d.slug)}" data-available="${available}">
+        ${escapeHTML(d.label)}
+        <span class="pill-count">${count}</span>
+      </button>
+    `;
+  }).join("");
+  host.querySelectorAll(".dataset-pill").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const slug = btn.dataset.slug;
+      const ds = _datasetState.list.find((x) => x.slug === slug);
+      if (!ds || !ds.available) return;
+      _datasetState.active = slug;
+      saveActiveDataset(slug);
+      renderDatasetPills("acc-dataset-pills");
+      renderDatasetPills("eval-dataset-pills");
+      loadAccuracy();
+      loadEvaluation();
+    });
+  });
+}
+
+async function loadDatasetList() {
+  const r = await fetchJSON("/api/evaluation/datasets");
+  if (!r.ok) return;
+  const data = r.data || {};
+  const list = Array.isArray(data.datasets) ? data.datasets : [];
+  _datasetState.list = list.map((d) => ({
+    slug: d.slug,
+    label: d.label,
+    available: !!d.available,
+    n_queries: (d.report && d.report.n_queries) || 0,
+  }));
+  const saved = loadActiveDataset();
+  const savedInList = _datasetState.list.find((d) => d.slug === saved && d.available);
+  if (savedInList) {
+    _datasetState.active = saved;
+  } else if (data.default_slug) {
+    _datasetState.active = data.default_slug;
+  } else if (_datasetState.list.length) {
+    const first = _datasetState.list.find((d) => d.available);
+    _datasetState.active = first ? first.slug : _datasetState.list[0].slug;
+  }
+  renderDatasetPills("acc-dataset-pills");
+  renderDatasetPills("eval-dataset-pills");
+}
+
+// ---- Comparison panel -------------------------------------------------
+
+function deltaCell(delta) {
+  if (delta === null || delta === undefined) return `<td class="delta-zero">—</td>`;
+  if (delta > 0)  return `<td class="delta-pos">+${fmt(delta, 3)}</td>`;
+  if (delta < 0)  return `<td class="delta-neg">${fmt(delta, 3)}</td>`;
+  return `<td class="delta-zero">0.000</td>`;
+}
+
+function stripBold(s) {
+  return (s || "").replace(/\*\*/g, "");
+}
+
+async function loadWhyWin() {
+  const r = await fetchJSON("/api/literature/headline");
+  if (!r.ok) return;
+  const data = r.data || {};
+  const tally = data.tally || {};
+  const win  = tally.win  || 0;
+  const tie  = tally.tie  || 0;
+  const loss = tally.loss || 0;
+  const total = win + tie + loss || 1;
+
+  const bar = $("whywin-bar");
+  if (bar) {
+    bar.innerHTML = `
+      <div class="seg-win"  style="width:${(win/total*100).toFixed(1)}%"></div>
+      <div class="seg-tie"  style="width:${(tie/total*100).toFixed(1)}%"></div>
+      <div class="seg-loss" style="width:${(loss/total*100).toFixed(1)}%"></div>
+    `;
+  }
+  const meta = $("whywin-meta");
+  if (meta) meta.innerHTML = `<b>${win} wins</b> · ${tie} at par · ${loss} trails &nbsp;·&nbsp; ${total} evaluation dimensions &nbsp;·&nbsp; ${data.methods_compared?.length ?? 11} papers compared`;
+  const blurb = $("whywin-blurb");
+  if (blurb && tally.verdict) blurb.innerHTML = escapeHTML(stripBold(tally.verdict));
+
+  const grid = $("whywin-grid");
+  if (grid) {
+    const wins = data.wins || [];
+    const losses = data.losses || [];
+    grid.innerHTML = `
+      <div class="win-card win-card-win">
+        <h3>✓ Wins <span class="muted small">${wins.length}</span></h3>
+        <ul>${wins.map((v) => `
+          <li>
+            <div class="dim-name">${escapeHTML(stripBold(v.dimension))}</div>
+            <div class="dim-best">ours: ${escapeHTML(stripBold(v.our_score))}</div>
+          </li>
+        `).join("")}</ul>
+      </div>
+      <div class="win-card win-card-loss">
+        <h3>✗ Trails <span class="muted small">${losses.length}</span></h3>
+        <ul>${losses.map((v) => `
+          <li>
+            <div class="dim-name">${escapeHTML(stripBold(v.dimension))}</div>
+            <div class="dim-best">ours: ${escapeHTML(stripBold(v.our_score))}</div>
+          </li>
+        `).join("")}</ul>
+      </div>
+    `;
+  }
+}
+
+async function loadComparison() {
+  const head = $("comparison-head");
+  const body = $("comparison-body");
+  if (!head || !body) return;
+  const r = await fetchJSON("/api/evaluation/comparison");
+  if (!r.ok) {
+    body.innerHTML = `<tr><td class="muted small">Failed to load comparison.</td></tr>`;
+    return;
+  }
+  const data = r.data || {};
+  const slugs = (data.datasets || []).map((d) => d.slug);
+  if (!slugs.length) {
+    body.innerHTML = `<tr><td class="muted small">No datasets registered.</td></tr>`;
+    return;
+  }
+  // Header row: Metric + one column per dataset + Δ.
+  head.innerHTML = `
+    <th>Metric</th>
+    ${slugs.map((s) => `<th class="col-dataset">${escapeHTML(s)}</th>`).join("")}
+    <th>Δ</th>
+  `;
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  body.innerHTML = rows.length
+    ? rows.map((row) => {
+        const cells = slugs.map((s) => `<td>${fmt(row[s], 3)}</td>`).join("");
+        return `<tr><td>${escapeHTML(row.metric)}</td>${cells}${deltaCell(row.delta)}</tr>`;
+      }).join("")
+    : `<tr><td colspan="${2 + slugs.length}" class="muted small">
+         No comparison metrics yet. Run <code>scripts/evaluate_datasets.py</code> to populate.
+       </td></tr>`;
+}
+
 // ---- Evaluation panel ---------------------------------------------------
 
 function fmt(v, digits = 3) {
@@ -206,9 +373,13 @@ async function loadEvaluation() {
   const rowCountEl = $("eval-row-count");
   const lastUpdEl = $("eval-last-updated");
   const sourceEl = $("eval-source");
+  const dsEl = $("eval-dataset");
+  const srcFileEl = $("eval-source-file");
   if (!grid) return;
 
-  const r = await fetchJSON("/api/evaluation");
+  const slug = _datasetState.active || "";
+  const url = slug ? `/api/evaluation?dataset=${encodeURIComponent(slug)}` : "/api/evaluation";
+  const r = await fetchJSON(url);
   if (!r.ok) {
     grid.innerHTML = `<div class="empty-note">Failed to load evaluation.</div>`;
     if (sourceEl) sourceEl.textContent = "unreachable";
@@ -222,6 +393,10 @@ async function loadEvaluation() {
   if (rowCountEl) rowCountEl.textContent = `${data.n_queries ?? rows.length}`;
   if (lastUpdEl) lastUpdEl.textContent = data.last_modified ? data.last_modified.replace("T", " ").replace(/\.\d+/, "") : "never";
   if (sourceEl) sourceEl.textContent = data.source || "unknown";
+  if (dsEl) dsEl.textContent = slug || "default";
+  if (srcFileEl && data.source_file) {
+    srcFileEl.textContent = data.source_file.replace(/^.*\/data\//, "data/");
+  }
 
   // Aggregate grid: BASE then FULL (only when full metrics are present).
   const cards = [];
@@ -310,7 +485,9 @@ async function loadAccuracy() {
   const tbody = $("acc-rows");
   if (!headline || !tbody) return;
 
-  const r = await fetchJSON("/api/accuracy");
+  const slug = _datasetState.active || "";
+  const url = slug ? `/api/accuracy?dataset=${encodeURIComponent(slug)}` : "/api/accuracy";
+  const r = await fetchJSON(url);
   if (!r.ok) {
     headline.innerHTML = `<div class="empty-note">Failed to load accuracy.</div>`;
     tbody.innerHTML = `<tr><td colspan="7" class="error">Failed to load accuracy.</td></tr>`;
@@ -327,6 +504,7 @@ async function loadAccuracy() {
   const sourceEl = $("acc-source");
   const rowCountEl = $("acc-row-count");
   const lastUpdEl = $("acc-last-updated");
+  const dsEl = $("acc-dataset");
   if (sourceEl) sourceEl.textContent = `source: ${meta.source || "unknown"}`;
   if (rowCountEl) rowCountEl.textContent = meta.n_queries || rows.length || 0;
   if (lastUpdEl) {
@@ -334,6 +512,7 @@ async function loadAccuracy() {
       ? meta.last_modified.replace("T", " ").replace(/\.\d+/, "")
       : "never";
   }
+  if (dsEl) dsEl.textContent = (meta.dataset && meta.dataset !== "unknown") ? meta.dataset : (slug || "default");
 
   // Headline tiles
   setAccTile("acc-tile-e2e", h.end_to_end_accuracy);
@@ -400,7 +579,7 @@ async function runQuery() {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   $("btn-index").addEventListener("click", buildIndex);
   $("btn-query").addEventListener("click", runQuery);
   const refreshBtn = $("btn-status-refresh");
@@ -409,12 +588,22 @@ document.addEventListener("DOMContentLoaded", () => {
   if (evalRefreshBtn) evalRefreshBtn.addEventListener("click", loadEvaluation);
   const accRefreshBtn = $("btn-acc-refresh");
   if (accRefreshBtn) accRefreshBtn.addEventListener("click", loadAccuracy);
+  const cmpRefreshBtn = $("btn-cmp-refresh");
+  if (cmpRefreshBtn) cmpRefreshBtn.addEventListener("click", loadComparison);
+  const whywinRefreshBtn = $("btn-whywin-refresh");
+  if (whywinRefreshBtn) whywinRefreshBtn.addEventListener("click", loadWhyWin);
   $("query").addEventListener("keydown", (e) => { if (e.key === "Enter") runQuery(); });
   ping();
   loadModelStatus();
   setInterval(loadModelStatus, 5000);
+  // Dataset list feeds both selectors + comparison view; load first.
+  await loadDatasetList();
   loadAccuracy();
   setInterval(loadAccuracy, 10000);
   loadEvaluation();
   setInterval(loadEvaluation, 10000);
+  loadComparison();
+  setInterval(loadComparison, 15000);
+  loadWhyWin();
+  setInterval(loadWhyWin, 20000);
 });

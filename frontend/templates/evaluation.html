@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Evaluation — Hallucination Pipeline</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo"></span>
+      <div>
+        <h1>Evaluation Dashboard</h1>
+        <p class="sub" id="eval-subtitle">Loading aggregate metrics from data/metrics.json…</p>
+      </div>
+    </div>
+    <nav class="nav">
+      <a href="/">Demo</a>
+      <a href="/structure">Project</a>
+      <a href="/evaluation" class="active">Evaluation</a>
+    </nav>
+    <div class="status">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text" class="muted small">checking…</span>
+      <span class="mode-badge" id="source-badge">—</span>
+    </div>
+  </header>
+
+  <main class="grid one">
+    <!-- 0. Dataset selector + comparison -->
+    <section class="card" id="card-dataset">
+      <div class="card-header">
+        <h2>Datasets</h2>
+        <div class="row">
+          <label class="muted small" for="dataset-select">Active dataset</label>
+          <select id="dataset-select"></select>
+          <button id="btn-refresh" class="ghost">Refresh</button>
+        </div>
+      </div>
+      <p class="muted small" id="dataset-desc">Loading dataset list…</p>
+
+      <h3 class="section-subhead" id="comparison-title">Cross-dataset comparison</h3>
+      <p class="muted small">Side-by-side headline metrics across every registered dataset. <b>Δ</b> shows the delta between the first and last dataset.</p>
+      <div class="status-table-wrap eval-table-wrap">
+        <table class="status-table eval-table" id="comparison-table">
+          <thead>
+            <tr id="comparison-head">
+              <th>Metric</th>
+            </tr>
+          </thead>
+          <tbody id="comparison-body">
+            <tr><td colspan="2" class="muted small">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 1. Overview / headline tiles -->
+    <section class="card" id="card-overview">
+      <div class="card-header">
+        <h2>Overview</h2>
+        <div class="row">
+          <button id="btn-refresh" class="ghost">Refresh</button>
+        </div>
+      </div>
+      <p class="muted small" id="overview-meta">—</p>
+
+      <div class="eval-headline">
+        <div class="acc-tile acc-tile-na" id="tile-e2e">
+          <div class="acc-tile-label">End-to-end accuracy</div>
+          <div class="acc-tile-value">—</div>
+          <div class="acc-tile-sub">fraction of queries answered correctly</div>
+        </div>
+        <div class="acc-tile acc-tile-na" id="tile-claim">
+          <div class="acc-tile-label">Claim F1</div>
+          <div class="acc-tile-value">—</div>
+          <div class="acc-tile-sub">atomic-claim verification quality</div>
+        </div>
+        <div class="acc-tile acc-tile-na" id="tile-vsrr">
+          <div class="acc-tile-label">Verification success</div>
+          <div class="acc-tile-value">—</div>
+          <div class="acc-tile-sub">claims successfully verified</div>
+        </div>
+        <div class="acc-tile acc-tile-na" id="tile-mrr">
+          <div class="acc-tile-label">Retrieval MRR</div>
+          <div class="acc-tile-value">—</div>
+          <div class="acc-tile-sub">mean reciprocal rank @ 5</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Decision breakdown + correctness donut -->
+    <section class="card" id="card-decisions">
+      <h2>Decision breakdown</h2>
+      <p class="muted small">Final pipeline decisions: PASS (returned), REGEN (regenerated), ABSTAIN (refused).</p>
+
+      <div class="acc-breakdown">
+        <div class="acc-donut-wrap">
+          <div class="acc-donut">
+            <svg viewBox="0 0 120 120" width="160" height="160" aria-hidden="true">
+              <circle cx="60" cy="60" r="52" stroke="var(--panel-2)" stroke-width="14" fill="none" />
+              <circle id="acc-donut-arc" cx="60" cy="60" r="52" stroke="var(--green)"
+                      stroke-width="14" fill="none" stroke-linecap="round"
+                      stroke-dasharray="0 327" transform="rotate(-90 60 60)" />
+            </svg>
+            <div class="acc-donut-center">
+              <div class="acc-donut-value" id="donut-pct">—</div>
+              <div class="acc-donut-label">correct</div>
+            </div>
+          </div>
+          <div class="acc-legend">
+            <div class="acc-legend-item">
+              <span class="acc-swatch swatch-green"></span>
+              <span>Correct: <b id="correct-count">0</b></span>
+            </div>
+            <div class="acc-legend-item">
+              <span class="acc-swatch swatch-red"></span>
+              <span>Incorrect: <b id="incorrect-count">0</b></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="acc-decision-bars" id="decision-bars">
+          <div class="acc-decision-row">
+            <span class="acc-decision-tag tag pass">PASS</span>
+            <span class="acc-bar"><span class="acc-bar-fill fill-pass" id="bar-pass" style="width:0%"></span></span>
+            <span class="acc-bar-count" id="count-pass">0</span>
+          </div>
+          <div class="acc-decision-row">
+            <span class="acc-decision-tag tag regen">REGEN</span>
+            <span class="acc-bar"><span class="acc-bar-fill fill-regen" id="bar-regen" style="width:0%"></span></span>
+            <span class="acc-bar-count" id="count-regen">0</span>
+          </div>
+          <div class="acc-decision-row">
+            <span class="acc-decision-tag tag abstain">ABSTAIN</span>
+            <span class="acc-bar"><span class="acc-bar-fill fill-abstain" id="bar-abstain" style="width:0%"></span></span>
+            <span class="acc-bar-count" id="count-abstain">0</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Aggregate metric grid -->
+    <section class="card" id="card-aggregate">
+      <div class="card-header">
+        <h2>Aggregate metrics</h2>
+        <span class="muted small" id="agg-source">—</span>
+      </div>
+      <p class="muted small">All numeric metrics in <code>data/metrics.json</code>, with per-metric stdev where ≥ 2 samples.</p>
+
+      <h3 class="section-subhead">Generation & retrieval (BASE)</h3>
+      <div class="metric-grid" id="grid-base">
+        <div class="empty-note">Loading…</div>
+      </div>
+
+      <h3 class="section-subhead" id="full-section-title" style="display:none;">Detection metrics (FULL — <code>evaluate_full.py</code>)</h3>
+      <div class="metric-grid" id="grid-full" style="display:none;"></div>
+    </section>
+
+    <!-- 4. Per-metric bar chart (visual comparison) -->
+    <section class="card" id="card-bars">
+      <h2>Metric comparison</h2>
+      <p class="muted small">Mean (with ±1 stdev error bars) for every BASE metric. Use this to see which retrieval vs verification numbers are strong and which need work.</p>
+      <div class="eval-bars-wrap">
+        <div id="eval-bars" class="eval-bars muted">Loading…</div>
+      </div>
+    </section>
+
+    <!-- 5. Per-query table -->
+    <section class="card" id="card-table">
+      <div class="card-header">
+        <h2>Per-query results</h2>
+        <div class="row">
+          <input id="row-filter" type="text" placeholder="filter…" style="width:160px;" />
+          <select id="row-decision">
+            <option value="">All decisions</option>
+            <option value="PASS">PASS</option>
+            <option value="REGEN">REGEN</option>
+            <option value="ABSTAIN">ABSTAIN</option>
+          </select>
+          <span class="muted small" id="row-count">0 rows</span>
+        </div>
+      </div>
+      <div class="status-table-wrap eval-table-wrap">
+        <table class="status-table eval-table" id="rows-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Query</th>
+              <th>Decision</th>
+              <th>Correct?</th>
+              <th>E2E Acc.</th>
+              <th>Claim F1</th>
+              <th>Claim P</th>
+              <th>Claim R</th>
+              <th>R@5</th>
+              <th>P@5</th>
+              <th>MRR</th>
+              <th>nDCG</th>
+              <th>VSR</th>
+              <th>Conf.</th>
+            </tr>
+          </thead>
+          <tbody id="rows-body">
+            <tr><td colspan="14" class="muted small">No rows.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 6. Project commentary -->
+    <section class="card" id="card-commentary">
+      <h2>What these numbers mean</h2>
+      <div class="commentary" id="commentary">
+        <p class="muted small">Loading commentary…</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/evaluation.js') }}"></script>
+</body>
+</html>

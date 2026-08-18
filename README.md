@@ -189,6 +189,38 @@ python -m scripts.report --query "What is the capital of France?"
 
 `data/metrics.json` aggregates every metric category from the diagram.
 
+#### Evaluate on the two real benchmarks (HaluEval + TruthfulQA)
+
+The pipeline ships with both datasets already downloaded as JSONL under
+`data/halueval_qa.jsonl` and `data/truthfulqa_qa.jsonl`. The frontend's
+`/api/evaluation/comparison` endpoint (and the "Cross-dataset comparison"
+card on the demo page) reads from `data/metrics_<slug>.json` files
+produced by these commands:
+
+```bash
+# Single dataset — base retrieval / generation metrics
+python -m scripts.evaluate --dataset halueval    # writes data/metrics_halueval.json
+python -m scripts.evaluate --dataset truthfulqa  # writes data/metrics_truthfulqa.json
+
+# Single dataset — full detection + HRR/CCR/VSR
+python -m scripts.evaluate_full --dataset halueval
+python -m scripts.evaluate_full --dataset truthfulqa
+
+# Or run BASE + FULL on every registered dataset in one shot
+python -m scripts.evaluate_datasets                  # both, BASE then FULL
+python -m scripts.evaluate_datasets --limit 200      # smoke test (first 200 rows each)
+python -m scripts.evaluate_datasets --only truthfulqa --skip-base  # FULL on one set
+
+# Override the input JSONL or output path if you want
+python -m scripts.evaluate_full --dataset halueval --out runs/v2/halueval.json
+```
+
+Once both `data/metrics_halueval.json` and `data/metrics_truthfulqa.json`
+exist, the Flask demo page (`/`) shows a dataset-pill selector on the
+**Accuracy** and **Evaluation** panels, and a side-by-side **Cross-dataset
+comparison** card with one column per dataset plus a Δ column. The
+dedicated `/evaluation` page has the same controls plus per-query drill-down.
+
 ### 8. Run the REST API
 
 ```bash
@@ -462,6 +494,7 @@ raises — fix the network/token/dependency issue and re-run.
 | build index | `python -m scripts.build_index --corpus synthetic --out data/index` |
 | query | `python -m scripts.run_inference --query "…"` |
 | evaluate | `python -m scripts.evaluate_full --synth --out data/metrics.json` |
+| evaluate both datasets | `python -m scripts.evaluate_datasets` |
 | report | `python -m scripts.report --query "…"` |
 | API | `python -m uvicorn api.app:app --port 8000` |
 | UI | `python -m frontend.app` |
@@ -501,8 +534,10 @@ python -m scripts.run_frontend   # reads HF token from .env
 
 Two pages:
 
-- **`/`** — docs + query + result panel (decision, confidence, per-claim verdicts, evidence, 13 step traces)
+- **`/`** — docs + query + result panel (decision, confidence, per-claim verdicts, evidence, 13 step traces, dataset-aware Accuracy + Evaluation panels, side-by-side dataset comparison card, "Why this paper wins" panel)
 - **`/structure`** — full project tree with depth selector, hidden-file toggle, and live filter. Backed by `GET /api/structure?depth=N&include_hidden=1`.
+- **`/evaluation`** — dedicated evaluation dashboard with dataset selector + per-query drill-down.
+- **`/literature`** — side-by-side comparison against 11 published hallucination-detection systems (Dale 2023, DUTh, TU Wien, SHROOM, IRIT-BL, AILS-NTUA, INSIDE, LLM-Check, AutoHall, Decoding Memories, Conformal-RAG). Verdict matrix (✓/≈/✗) + headline bar chart + full table + defence talking points. Backed by `/api/literature/comparison`, `/api/literature/why-we-win`, `/api/literature/headline` — all of which parse `Paper/comparison_table.csv` + `Paper/why_we_win.md`.
 
 ## Evaluation
 

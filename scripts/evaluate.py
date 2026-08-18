@@ -2,17 +2,21 @@
 
 Usage:
   python -m scripts.evaluate --data data/synth.jsonl --out data/metrics.json
+  python -m scripts.evaluate --dataset halueval    --out data/metrics_halueval.json
+  python -m scripts.evaluate --dataset truthfulqa  --out data/metrics_truthfulqa.json
 """
 from __future__ import annotations
 
 import argparse
 import json
 import statistics
+import sys
+import time
 from pathlib import Path
 
 from src.config import load_config
 from src.pipeline import Pipeline
-from src.utils.data_loader import load_synthetic_qa, save_jsonl, load_jsonl
+from src.utils.data_loader import load_jsonl, load_synthetic_qa
 
 
 _METRIC_NUMERIC_KEYS = [
@@ -24,26 +28,100 @@ _METRIC_NUMERIC_KEYS = [
 ]
 
 
+# Default data file → default output filename for each registered dataset.
+# The frontend's ``src.evaluation.report.DATASET_REGISTRY`` expects the
+# output filenames listed below, so keep them in sync.
+_DATASET_DEFAULTS: dict[str, dict[str, str]] = {
+    "halueval": {
+        "data": "data/halueval_qa.jsonl",
+        "out": "data/metrics_halueval.json",
+    },
+    "truthfulqa": {
+        "data": "data/truthfulqa_qa.jsonl",
+        "out": "data/metrics_truthfulqa.json",
+    },
+}
+
+
+def _resolve_dataset_rows(args: argparse.Namespace) -> tuple[list[dict], str]:
+    """Return (rows, dataset_slug_or_label) honoring --data/--synth/--dataset."""
+    if args.synth:
+        rows = load_synthetic_qa()
+    elif args.dataset:
+        slug = args.dataset.strip().lower()
+        defaults = _DATASET_DEFAULTS.get(slug)
+        if defaults is None:
+            raise SystemExit(
+                f"unknown --dataset {args.dataset!r}; "
+                f"supported: {sorted(_DATASET_DEFAULTS)} (or pass --data)"
+            )
+        data_path = args.data or defaults["data"]
+        rows = load_jsonl(data_path)
+        if not rows:
+            raise SystemExit(
+                f"no rows loaded from {data_path}; download/build the dataset first"
+            )
+        rows = rows  # keep named for clarity below
+        slug = slug
+    elif args.data:
+        rows = load_jsonl(args.data)
+        slug = Path(args.data).stem
+    else:
+        rows = load_synthetic_qa()
+        slug = "synth"
+
+    if args.limit is not None and args.limit > 0:
+        rows = rows[: args.limit]
+    return rows, slug
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", help="JSONL of {query, answer, evidence:[ids], label}")
     ap.add_argument("--synth", action="store_true", help="use built-in synthetic QA")
-    ap.add_argument("--out", default="data/metrics.json")
+    ap.add_argument(
+        "--dataset",
+        choices=sorted(_DATASET_DEFAULTS),
+        help="named dataset shortcut (halueval | truthfulqa); uses the "
+             "default JSONL path under data/ and writes to "
+             "data/metrics_<slug>.json unless --out is overridden.",
+    )
+    ap.add_argument(
+        "--out",
+        default=None,
+        help="output JSON path (default: data/metrics.json for --synth, "
+             "data/metrics_<slug>.json for --dataset)",
+    )
+    ap.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="process only the first N rows (useful for smoke tests)",
+    )
+    ap.add_argument(
+        "--index",
+        default=None,
+        help="path to a saved FAISS+BM25 index directory (scripts/build_index format); "
+             "skips the default synthetic-corpus index.",
+    )
     args = ap.parse_args()
 
-    rows: list[dict] = []
-    if args.synth:
-        rows = load_synthetic_qa()
-    elif args.data:
-        rows = load_jsonl(args.data)
-    else:
-        rows = load_synthetic_qa()
+    rows, slug = _resolve_dataset_rows(args)
+    if args.out is None:
+        if slug in _DATASET_DEFAULTS:
+            args.out = _DATASET_DEFAULTS[slug]["out"]
+        else:
+            args.out = "data/metrics.json"
 
     cfg = load_config()
     pipe = Pipeline(cfg=cfg)
+    if args.index:
+        pipe.load_index(args.index)
 
     per_query_metrics: list[dict] = []
-    for r in rows:
+    t_start = time.time()
+    for idx, r in enumerate(rows):
+        row_t = time.time()
         try:
             res = pipe.run(r["query"])
             d = res.to_dict()
@@ -67,6 +145,17 @@ def main() -> None:
             })
         except Exception as exc:  # noqa: BLE001
             per_query_metrics.append({"query": r.get("query"), "error": str(exc)})
+        # Progress line every 10 rows or on the last row.
+        if (idx + 1) % 10 == 0 or (idx + 1) == len(rows):
+            elapsed = time.time() - t_start
+            row_dt = time.time() - row_t
+            avg = elapsed / (idx + 1)
+            eta = avg * (len(rows) - idx - 1)
+            print(
+                f"  [{idx+1}/{len(rows)}] row_dt={row_dt:.1f}s avg={avg:.1f}s eta={eta:.0f}s",
+                file=sys.stderr,
+                flush=True,
+            )
 
     # Aggregate.
     aggregate: dict[str, float] = {}
@@ -80,9 +169,12 @@ def main() -> None:
         "n_queries": len(per_query_metrics),
         "per_query": per_query_metrics,
         "aggregate": aggregate,
+        "dataset": slug,
     }
-    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.out).write_text(json.dumps(out, indent=2), encoding="utf-8")
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    print(f"wrote {out_path} ({slug}, {len(per_query_metrics)} rows)")
     print(json.dumps({"aggregate": aggregate}, indent=2))
 
 

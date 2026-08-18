@@ -55,6 +55,29 @@ _DEFAULT_METRICS_PATH = Path("data/metrics.json")
 
 
 # ---------------------------------------------------------------------------
+# Multi-dataset registry
+# ---------------------------------------------------------------------------
+#
+# Each entry maps a dataset slug to a relative path under data/ that
+# holds the metrics.json produced by ``scripts/evaluate.py`` +
+# ``scripts/evaluate_full.py``. The frontend uses ``load_multi_report``
+# to render a side-by-side comparison.
+
+DATASET_REGISTRY: dict[str, Dict[str, str]] = {
+    "halueval": {
+        "label": "HaluEval QA",
+        "path": "data/metrics_halueval.json",
+        "description": "10k QA pairs, paired right vs hallucinated answer (faithfulness).",
+    },
+    "truthfulqa": {
+        "label": "TruthfulQA",
+        "path": "data/metrics_truthfulqa.json",
+        "description": "817 questions × 2 references (truthful vs misconception).",
+    },
+}
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -210,4 +233,79 @@ def load_report(metrics_path: Optional[Path] = None) -> Dict[str, Any]:
     }
 
 
-__all__ = ["BASE_METRICS", "FULL_METRICS", "compute_aggregate", "load_report"]
+__all__ = ["BASE_METRICS", "FULL_METRICS", "compute_aggregate", "load_report", "load_multi_report", "DATASET_REGISTRY"]
+
+
+# ---------------------------------------------------------------------------
+# Multi-dataset support
+# ---------------------------------------------------------------------------
+
+
+def _build_dataset_entry(slug: str) -> Dict[str, Any]:
+    """Return a single dataset entry: label + metrics report (or placeholder)."""
+    meta = DATASET_REGISTRY.get(slug)
+    if meta is None:
+        return {
+            "slug": slug,
+            "label": slug,
+            "path": None,
+            "description": "",
+            "available": False,
+            "report": {
+                "aggregate": {},
+                "per_query": [],
+                "n_queries": 0,
+                "source_file": "",
+                "last_modified": None,
+                "source": "missing",
+            },
+        }
+    path = Path(meta["path"])
+    report = load_report(path)
+    return {
+        "slug": slug,
+        "label": meta["label"],
+        "path": meta["path"],
+        "description": meta.get("description", ""),
+        "available": path.exists(),
+        "report": report,
+    }
+
+
+def load_multi_report() -> Dict[str, Any]:
+    """Return a JSON-friendly payload with one entry per registered dataset.
+
+    Schema::
+
+        {
+            "datasets": [
+                {
+                    "slug": "halueval",
+                    "label": "HaluEval QA",
+                    "path": "data/metrics_halueval.json",
+                    "description": "...",
+                    "available": true,
+                    "report": { ...load_report() shape... },
+                },
+                ...
+            ],
+            "default_slug": "halueval" | first available,
+        }
+
+    The frontend uses this to render a dataset selector and a
+    side-by-side comparison card. Datasets whose file is missing are
+    included with ``available: false`` so the UI can still show a
+    placeholder row.
+    """
+    datasets = [_build_dataset_entry(slug) for slug in DATASET_REGISTRY]
+    default_slug = ""
+    for d in datasets:
+        if d["available"]:
+            default_slug = d["slug"]
+            break
+    if not default_slug and datasets:
+        default_slug = datasets[0]["slug"]
+    return {
+        "datasets": datasets,
+        "default_slug": default_slug,
+    }
