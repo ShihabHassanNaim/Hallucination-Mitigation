@@ -1,0 +1,548 @@
+
+
+===== PAGE 1 =====
+
+Proceedings of the 18th International Workshop on Semantic Evaluation (SemEval-2024) , pages 1064–1070
+June 20-21, 2024 ©2024 Association for Computational Linguistics
+DUTh at SemEval-2024 Task 6: Comparing Pre-trained Models on
+Sentence Similarity Evaluation for Detecting of Hallucinations and Related
+Observable Overgeneration Mistakes
+Ioanna Iordanidou Ioannis Maslaris Avi Arampatzis
+Database & Information Retrieval research unit,
+Department of Electrical & Computer Engineering,
+Democritus University of Thrace, Greece.
+{ioaniord1,imaslari,avi}@ee.duth.gr
+Abstract
+In this paper, we present our approach to
+SemEval-2024 Task 6: SHROOM, a Shared-
+task on Hallucinations and Related Observable
+Overgeneration Mistakes, which aims to deter-
+mine weather AI generated text is semantically
+correct or incorrect. This work is a compara-
+tive study of Large Language Models (LLMs)
+in the context of the task, shedding light on
+their effectiveness and nuances. We present a
+system that leverages pre-trained LLMs, such
+as LaBSE, T5, and DistilUSE, for binary classi-
+fication of given sentences into ‘Hallucination’
+or ‘Not Hallucination’ classes by evaluating
+the model’s output against the reference cor-
+rect text. Moreover, beyond utilizing labeled
+datasets, our methodology integrates synthetic
+label creation in unlabeled datasets, followed
+by the prediction of test labels.
+1 Introduction
+Hallucinations in machine generated text are cases
+when the model generates output that is partially or
+fully unrelated to the source sentence. While being
+a non-frequent phenomenon, it can dramatically
+impact the user experience and the trust toward the
+system. Hallucination rates in multiple models vary
+from 2.8 to 16.2 percent, according to the hallucina-
+tion leaderboard created by Vectara hosted on HF
+and GitHub. 1 While the problem of hallucinations
+is known, it remains challenging, and one aspect of
+that is the absence of proper datasets. As a result,
+previous studies relied on scenarios where mod-
+els are encouraged to hallucinate (Lee et al., 2018;
+Raunak et al., 2021; Müller et al., 2019; V oita et al.,
+2020; Zhou et al., 2020). However, it is uncertain
+if these approaches are effective in more natural,
+undisturbed environments (Guerreiro et al., 2022).
+Recent research conducted in relatively clean
+settings (Guerreiro et al., 2022) demonstrates that
+existing hallucinations detection methods fall short.
+1https://huggingface.co/spaces/vectara/leaderboard
+The authors create a natural setting dataset, anno-
+tate it for various NMT (Neural Machine Transla-
+tion) pathologies, and evaluate detection methods.
+They find most existing detection methods inade-
+quate, with sequence log-probability performing
+best. Although they demonstrated interesting re-
+sults, they were limited on detecting hallucinations
+on Machine Translation (MT) generated text.
+SemEval-2024 task 6 (Mickus et al., 2024) goes
+a step further by providing a human annotated
+dataset of hallucinated text regarding three differ-
+ent scenarios. Along with Machine Translation
+(MT), also Definition Modeling (DM) and Para-
+phrase Generation (PG) cases are considered. This
+paper describes the system developed by the DUTh
+team for SemEval-2024 task 6. Our strategy is
+based on utilizing embeddings to evaluate the simi-
+larity between context and hypothesis sentences in
+order to detect hallucinated text. In our case con-
+text sentence is the ‘gold’ output expected from to
+the models for generation and hypothesis sentence
+is the actual model production. For generating the
+embeddings of the context and hypothesis we are
+utilizing a pretrained T5 tokenizer (Raffel et al.,
+2020). Then we measure their similarity by taking
+the dot product of their corresponding embeddings,
+followed by summation along axis 1. Finally, using
+that similarity score, we train an ensembler ma-
+chine learning model to distinguish hallucinated
+form non-hallucinated text. We provide our code
+publicly 2
+2 Background
+2.1 Related work
+Methods for identifying hallucinations are primar-
+ily concentrated on the Machine Translation task
+and they generally aim to find translations of poor
+quality that may also satisfy additional constraints.
+To effectively pinpoint factual inaccuracies in LLM
+2https://github.com/DataMas/ai-hallutinations-detection
+1064
+
+===== PAGE 2 =====
+
+outputs, one straightforward strategy involves com-
+paring the model generated output information
+from an external knowledge source. Relevant re-
+search, starting from traditional fact checking (Au-
+genstein et al., 2019) tries to expand the capabili-
+ties of such systems by incorporating various web
+sources (Chen et al., 2023) and evaluating their
+truthfulness (Galitsky, 2023). Recently, there is
+a significant emphasis on enhancing the process
+of retrieving information from external sources.
+FACTSCORE introduced by (Min et al., 2023), is
+a metric specifically for long-text generation. The
+LLM output is decomposed into atomic facts and
+each one is validated by reliable external knowl-
+edge sources. Furthermore, (Huo et al., 2023), en-
+hanced the retrieving process by augmenting the
+query to the external sources with the input to and
+the output of the LLM.
+When utilizing external sources, previous re-
+search mostly focused on evaluating models output
+based on a pool of third party knowledge. However,
+implementation of such systems could be compli-
+cated. Similarity between the source and the tar-
+get estimated via embeddings, has been proved to
+be a good indicator for hallucinations in Machine
+Translation scenarios (Dale et al., 2022). In this
+manner, we are experimenting with this strategy
+on detecting hallucinations on machine generated
+text regarding Definition Modeling and Paraphrase
+Generation. We hypothesize that hallucinations can
+have a great impact on the conceptual content of
+the generated text, enough to be detected through
+sentence similarity evaluation.
+2.2 Dataset
+The task provided three datasets for each track: the
+train and test sets comprised unlabeled datapoints,
+and the validation set contained labeled datapoints
+enriched with additional features. Each datapoint
+in the labeled set encompasses the following at-
+tributes. The ‘model’ attribute is included only in
+the model-aware datasets and the items without
+bold annotation are not featured in the test datasets.
+- “id”: The datapoint’s ID
+- “task”: The model’s optimization objective
+(DM, PG, MT).
+- “model”: The model used for text generation.
+- “tgt”: The intended reference text for model
+generation.
+- “src”: The input presented to the models for
+generation.
+- “hyp”: The actual model output.
+- “ref”: Indicates whether the ‘tgt’ or ‘src’
+fields, or both, are the context that contains
+the requisite semantic information to discern
+the datapoint as a hallucination.
+- “labels”: A set of per-annotator labels gaug-
+ing whether each annotator perceives the data-
+point as a hallucination.
+- “label”: The majority-based gold-label de-
+rived from the per-annotator labels.
+- “p(Hallucination)”: The probability assigned
+to the datapoint being a hallucination based
+on the proportion of annotators considering it
+as such.
+In the model-aware segment, we dived deeper
+into our data by visually representing (Figure 1)
+the distribution of three distinct models across data
+points. In both the validation and test sets, two
+of the three models exhibit an equal distribution,
+while the third one, tuner007/pegasus_paraphrase,
+is utilized less, accounting for roughly 33 percent.
+The training set shows an equal distribution of all
+three models.
+3 System Overview
+3.1 Hallucination Detection
+Hallucination detection methods are a developing
+field in modern NLP. Given input information and
+parameters can vary and subsequently the meth-
+ods applied for detection are subject to change.
+SemEval-2024 Task 6: SHROOM - a Shared-task
+on Hallucinations and Related Observable Over-
+generation Mistakes was divided into two tracks.
+The first sub-task, Model-Aware, involves deter-
+mining whether the model produced a hallucina-
+tion, given information about which model was
+employed. The second sub-task, Model-Agnostic,
+pertains to scenarios where the model used is un-
+known.
+3.2 System
+We approached the task as a binary text classifica-
+tion problem, implementing our system leveraging
+the HuggingFace Transformer library. Concisely,
+our methodology aligns with the conventional ap-
+proach to addressing text classification problems
+— training a model with a large labeled dataset and
+employing it to predict labels for the test set. We
+first opted for the labeled dataset provided by (Guer-
+reiro et al., 2022) for the training process. Then
+1065
+
+===== PAGE 3 =====
+
+we tried the unlabeled training dataset supplied
+by the task organizers, conducting experiments to
+automatically generate synthetic labels for its uti-
+lization into the training process.
+In summary, our system comprised distinct steps,
+including extraction of embeddings for ‘hyp’ and
+‘context’, calculation of cosine similarity between
+the two, generation of synthetic labels for the train-
+ing set through clustering, and prediction of the test
+set using ensembled classifiers.
+3.2.1 Sentence Embeddings
+Sentence embeddings are a potent technique utiliz-
+ing deep learning models, specifically transformers,
+to encode words, or in our context, sentences, into
+vectors. These vectors capture the semantic mean-
+ing and contextual information of the input text.
+This encoding is valuable as vectors provide a ro-
+bust representation of the semantic content embed-
+ded in sentences and are more efficiently compared
+or handled in any way for various NLP tasks. Our
+approach employed pre-trained sentence transform-
+ers sourced from the HuggingFace library (v. 2.2.2)
+for extracting these embeddings. From our dataset,
+the hypothesis (‘hyp‘) was compared to the context
+sentence provided by the semantic reference (‘ref‘).
+The cosine similarity between the vectors result-
+ing from this comparison, along with a probability
+measure of hallucination, was subsequently incor-
+porated into our system. Formally, the similarity
+score, denoted as sims, is calculated as
+sims =
+n∑
+i=1
+(emb_coni · emb_hypi)
+where emb_coni and emb_hypi represent the em-
+beddings for the i-th context and hypothesis, re-
+spectively. In this numerical measure of similarity,
+higher values indicate greater similarity between
+the encoded representations of hypotheses and con-
+texts. The probability is computed as 1 − sims and
+is subsequently appended to the dataset.
+3.2.2 Synthetic Labels Creation
+Cluster analysis is a technique used in data min-
+ing and machine learning to group similar objects
+into clusters. k-means clustering is a popular un-
+supervised machine learning algorithm with vector
+inputs that allocates every data point to the near-
+est cluster. Synthetic data creation has become a
+widely adopted methodology within the NLP field,
+notably used for the purpose of label generation
+(Zhou et al., 2020). In our pursuit of generating syn-
+thetic labels for the unlabeled dataset, we employed
+the k-means algorithm with k = 2, signifying two
+centroids, to extract ‘Hallucination’ and ‘Not Hal-
+lucination’ labels. The parameters provided for
+clustering were the cosine similarity and the prob-
+ability derived from sentence embeddings within
+the model-agnostic sub-task. Additionally, for the
+model-aware subtask, we incorporated the one-hot
+encoded representation of the utilized model as
+an additional parameter. We additionally tested
+the efficacy of our label extraction mechanism on
+the provided labeled datasets, achieving a notable
+accuracy rate of 75 percent.
+3.2.3 Label Prediction
+Following the training phase, we engaged in an
+ensemble approach, combining several widely rec-
+ognized classification algorithms to forecast the
+labels of the test set and identify instances of hal-
+lucination. In text classification, each data point
+is allocated a label, with binary classification typ-
+ically involving two labels (e.g., 0 and 1). Model
+ensembling aims to utilize the collective strength of
+various classifiers to maximize overall performance.
+We employed the similarity extracted from the em-
+beddings and integrated it as a feature alongside the
+probability in the training of our classifiers. In our
+ensembling, we incorporated the following classi-
+fiers: Logistic Regression, Random Forest, Gradi-
+ent Boosting, K Nearest Neighbours, XGBoost and
+Decision Tree. By employing this methodology,
+we got labeled test sets as the final outputs.
+3.3 Models
+Central to our system are pre-trained models from
+the sentence transformers library of HuggingFace
+(v. 2.2.2). The models we distinguished were
+DistilUSE (Reimers and Gurevych, 2019), LaBSE
+(Feng et al., 2020) and T5 (Raffel et al., 2020).
+The ’distiluse-base-multilingual-cased-v2’ model
+excels at mapping sentences to a 512-dimensional
+dense vector space, making it ideal for tasks like
+clustering and semantic search. With its multi-
+lingual capabilities and nuanced representation of
+case information, it proves valuable across vari-
+ous languages for applications requiring semantic
+understanding and similarity assessment. LaBSE,
+Language-agnostic BERT sentence embedding,
+supports 109 languages and adopts a dual-encoder
+approach based on pretrained transformers. It has
+been fine-tuned for translation ranking with an ad-
+1066
+
+===== PAGE 4 =====
+
+ditive margin softmax loss. T5, or Text-To-Text
+Transfer Transformer, is adept at mapping sen-
+tences to a 768-dimensional dense vector space.
+This model particularly excels in tasks related to
+sentence similarity. This selection of models, rang-
+ing from BERT to LaBSE and T5, offers a diverse
+toolkit for our system. These pre-trained models,
+with their distinct architectures and capabilities,
+contribute to the robustness and versatility of the
+implemented system across a spectrum of natural
+language processing tasks.
+Model Model-Agnostic Model-Aware
+Score 1 Score 2 Score 1 Score 2
+LaBSE 0.7366 0.7366 0.7440 0.7440
+T5 0.7440 0.7440 0.7553 0.7553
+DistilUSE 0.7066 0.7367 0.6867 0.7440
+Table 1: Accuracy for all models. Score 1 is using syn-
+thetic labeled train set and score 2 is using the Guerreiro
+set.
+Model Model-Agnostic Model-Aware
+Score 1 Score 2 Score 1 Score 2
+LaBSE 0.4298 0.4298 0.4277 0.4277
+T5 0.4748 0.5224 0.5285 0.5255
+DistilUSE 0.3051 0.3576 0.2988 0.3269
+Table 2: Spearman Correlation for all models. Score 1
+is using synthetic labeled train set and score 2 is using
+the Guerreiro set.
+4 Experimental setup
+4.1 Preprocessing
+Prior to any NLP problem solving , performing
+text preprocessing is necessary. The nature of text
+preprocessing varies depending on the methodol-
+ogy to be employed, encompassing various steps.
+In the context of our binary classification problem
+utilizing the provided dataset, we conducted thor-
+ough feature extraction and preprocessing on the
+raw textual data. Specifically, we opted for the En-
+glish language model available in SpaCy’s trained
+pipelines (v. 3.7.2). This choice was particularly in-
+formed by the necessity to preprocess the ’hyp’ and
+’context’ features, being aware that the context in
+the Machine Translation (MT) task was in English.
+Across all tasks, our text preprocessing included
+text lowercase conversion, punctuation removal,
+and lemmatization, where custom lemmas were in-
+corporated. For the Definition Modeling task, we
+extracted the word to define from the context. In
+the model-aware track of the task, we introduced
+one-hot encoding representation of the model used
+for all datapoints. Similar techniques were used for
+the (Guerreiro et al., 2022) dataset adapting to the
+corresponding feature names.
+4.2 Experiments
+The conducted experiments incorporated the en-
+tirety of available datasets, the training, develop-
+ment, and test sets. Our initial experiment, as out-
+lined in the system section, involved the utilization
+of the synthetically labeled train and test sets in
+conjunction with the DistilUSE, LaBSE, and T5
+models. In the next experiment, we only utilized T5
+and skipped the synthetic labeling phase from our
+methodology. In this iteration, the training process
+was conducted by utilizing the (Guerreiro et al.,
+2022) dataset. This adjustment was motivated by
+the labeled nature of this set, making it conducive
+to predicting labels for the test set in both tracks of
+the task.
+4.3 Evaluation
+The evaluation measures employed in both tracks
+of the task were consistent. The initial metric per-
+tained to a general accuracy score, derived from the
+test reference data provided by the task organizers,
+applied to our binary classification results. Sub-
+sequently, the evaluation for the model-agnostic
+track extended to include the Spearman’s correla-
+tion coefficient, a statistical measure of the strength
+of a monotonic relationship between the output
+probabilities of the systems and the proportion of
+annotators marking an item as overgenerating. The
+Spearman correlation assesses the degree to which
+the systems’ output probabilities align with the
+consensus among annotators, offering a nuanced
+evaluation of the models’ performance in capturing
+the observed trends in overgeneration perception.
+Both metrics have a maximum value of 1.
+5 Results
+The comprehensive scores of our system across the
+three utilized models are presented in Tables 1 and
+2, for accuracy and correlation, respectively. The
+highest accuracy score was T5’s 0.7553 in model-
+aware which ranked 25th out of 38 and 0.7440
+in model-agnostic which ranked 27th out of 41
+while both passed the baseline scores in accuracy
+and correlation. There was no difference in the
+dataset used for the training process. The baseline
+score was obtained through using an instruction-
+finetuned Mistral model tasked with classifying
+the sentences as contextual or not, answering with
+1067
+
+===== PAGE 5 =====
+
+Algorithm Model-Agnostic Model-Aware
+Score 1 Score 2 Score 1 Score 2
+Logistic Regression 0.6874 0.7066 0.7086 0.7160
+Random Forest 0.6873 0.7420 0.7380 0.7347
+Gradient Boosting Classifier 0.6874 0.7327 0.7067 0.7393
+K Nearest Neighbours 0.6867 0.6740 0.7067 0.6687
+Decision Tree 0.7067 0.7447 0.7367 0.7493
+XGBoost 0.7067 0.6787 0.7407 0.6887
+Ensembling 0.7440 0.7447 0.7553 0.7373
+Table 3: Evaluation Metrics for Seven Machine Learning Algorithms. Score 1 is using synthetic labeled train set
+and score 2 is using the Guerreiro set.
+a yes or no. The accuracy score it achieved was
+0.697 in the model-agnostic track and 0.745 in
+the model-aware track. If ranked by correlation,
+T5 scores highest with a moderate correlation of
+0.5285 for the aware track using the synthetically
+labeled dataset and 0.5224 in the agnostic track us-
+ing the Guerreiro dataset, also surpassing the base-
+line system which scored 0.488 and 0.403 respec-
+tively. Consequently, after careful consideration,
+T5 was selected for integration into our final system.
+For the label prediction part we tried multiple Ma-
+chine Learning classification algorithms which are
+shown in Table 3. In both tracks using the synthetic
+labeled dataset, distinctions, ranging from subtle
+in some cases to more pronounced in others, were
+observed among individual algorithms. However,
+the ensemble strategy consistently surpassed their
+individual performances, scoring 0.7440 in model-
+agnostic and 0.7553 in model-aware. When ap-
+plying the Guerreiro dataset, Decision Tree outper-
+formed the ensemble strategy in the model-aware
+track, consistently staying below 0.7553. However,
+this did not hold in the model-agnostic track, where
+both Decision Tree and the ensemble of all seven
+algorithms achieved a score of 0.7447, closely mir-
+roring Score 1. Based on the previously mentioned
+outcomes, the score obtained through the ensemble
+of classifiers using the synthetically labeled set was
+ultimately submitted to the tasks leaderboard.
+6 Conclusion
+Through these experiments, we found that the pre-
+trained T5 model exhibits optimal performance in
+the detection of hallucinated text in the domain of
+artificial intelligence. Furthermore, we successfully
+employed an ensemble of multiple popular top-tier
+classifiers to augment the predictive capabilities
+of our system and investigated the implications of
+synthetically labeling unlabeled data, presenting it
+as a novel approach to hallucination detection.
+The next step could involve an extended com-
+parison of various language models to identify the
+most powerful one, as well as exploring the option
+of training on diverse and larger datasets. Addi-
+tionally, for further exploration, we recommend
+fine-tuning a Language Model (LLM) to extract
+enhanced embeddings, thereby improving the accu-
+racy of sentence similarity assessments and conse-
+quently bolstering the overall system performance.
+References
+Isabelle Augenstein, Christina Lioma, Dongsheng
+Wang, Lucas Chaves Lima, Casper Hansen, Chris-
+tian Hansen, and Jakob Grue Simonsen. 2019. Mul-
+tifc: A real-world multi-domain dataset for evidence-
+based fact checking of claims. arXiv preprint
+arXiv:1909.03242.
+Jifan Chen, Grace Kim, Aniruddh Sriram, Greg Durrett,
+and Eunsol Choi. 2023. Complex claim verification
+with evidence retrieved in the wild. arXiv preprint
+arXiv:2305.11859.
+David Dale, Elena V oita, Loïc Barrault, and Marta R
+Costa-jussà. 2022. Detecting and mitigating halluci-
+nations in machine translation: Model internal work-
+ings alone do well, sentence similarity even better.
+arXiv preprint arXiv:2212.08597.
+Fangxiaoyu Feng, Yinfei Yang, Daniel Cer, Naveen
+Arivazhagan, and Wei Wang. 2020. Language-
+agnostic bert sentence embedding. arXiv preprint
+arXiv:2007.01852.
+Boris A Galitsky. 2023. Truth-o-meter: Collaborating
+with llm in fighting its hallucinations.
+Nuno M Guerreiro, Elena V oita, and André FT Martins.
+2022. Looking for a needle in a haystack: A com-
+prehensive study of hallucinations in neural machine
+translation. arXiv preprint arXiv:2208.05309.
+1068
+
+===== PAGE 6 =====
+
+Siqing Huo, Negar Arabzadeh, and Charles LA Clarke.
+2023. Retrieving supporting evidence for llms gener-
+ated answers. arXiv preprint arXiv:2306.13781.
+Katherine Lee, Orhan Firat, Ashish Agarwal, Clara Fan-
+njiang, and David Sussillo. 2018. Hallucinations in
+neural machine translation.
+Timothee Mickus, Elaine Zosa, Raúl Vázquez, Teemu
+Vahtola, Jörg Tiedemann, Vincent Segonne, Alessan-
+dro Raganato, and Marianna Apidianaki. 2024.
+Semeval-2024 shared task 6: Shroom, a shared-task
+on hallucinations and related observable overgener-
+ation mistakes. In Proceedings of the 18th Interna-
+tional Workshop on Semantic Evaluation (SemEval-
+2024), pages 1980–1994, Mexico City, Mexico. As-
+sociation for Computational Linguistics.
+Sewon Min, Kalpesh Krishna, Xinxi Lyu, Mike
+Lewis, Wen-tau Yih, Pang Wei Koh, Mohit Iyyer,
+Luke Zettlemoyer, and Hannaneh Hajishirzi. 2023.
+Factscore: Fine-grained atomic evaluation of factual
+precision in long form text generation. arXiv preprint
+arXiv:2305.14251.
+Mathias Müller, Annette Rios, and Rico Sennrich. 2019.
+Domain robustness in neural machine translation.
+arXiv preprint arXiv:1911.03109.
+Colin Raffel, Noam Shazeer, Adam Roberts, Katherine
+Lee, Sharan Narang, Michael Matena, Yanqi Zhou,
+Wei Li, and Peter J Liu. 2020. Exploring the limits
+of transfer learning with a unified text-to-text trans-
+former. The Journal of Machine Learning Research ,
+21(1):5485–5551.
+Vikas Raunak, Arul Menezes, and Marcin Junczys-
+Dowmunt. 2021. The curious case of hallucina-
+tions in neural machine translation. arXiv preprint
+arXiv:2104.06683.
+Nils Reimers and Iryna Gurevych. 2019. Sentence-bert:
+Sentence embeddings using siamese bert-networks.
+arXiv preprint arXiv:1908.10084.
+Elena V oita, Rico Sennrich, and Ivan Titov. 2020. Ana-
+lyzing the source and target contributions to predic-
+tions in neural machine translation. arXiv preprint
+arXiv:2010.10907.
+Chunting Zhou, Graham Neubig, Jiatao Gu, Mona
+Diab, Paco Guzman, Luke Zettlemoyer, and Marjan
+Ghazvininejad. 2020. Detecting hallucinated con-
+tent in conditional neural sequence generation. arXiv
+preprint arXiv:2011.02593.
+1069
+
+===== PAGE 7 =====
+
+A Appendix
+Figure 1: Distribution of Models used in Datasets.
+1070

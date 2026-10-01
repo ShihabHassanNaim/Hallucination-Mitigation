@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hallucination Detection Pipeline — Thesis Defense</title>
+  <link rel="stylesheet" href="slides.css" />
+</head>
+<body>
+  <div class="hud" id="hud"><b>1</b> / 15</div>
+  <button class="nav-btn prev" id="prev" aria-label="Previous">‹</button>
+  <button class="nav-btn next" id="next" aria-label="Next">›</button>
+
+  <div class="deck">
+
+    <!-- =========================================================
+         SLIDE 1 — Title
+         ========================================================= -->
+    <section class="slide title-slide active" aria-label="Title">
+      <header class="slide-header" style="border:none; padding:0;">
+        <h1 style="font-size:46px;">A 13-Step Hallucination<br />Detection Pipeline for RAG</h1>
+      </header>
+      <p class="subtitle">Fact-verifying every claim with real HuggingFace models</p>
+      <p class="author">Master's Thesis Defense</p>
+      <p class="meta">Hallucination-Mitigation · 2026</p>
+      <footer class="slide-footer"><span>Hallucination Pipeline</span><span>1 / 15</span></footer>
+    </section>
+
+    <!-- =========================================================
+         SLIDE 2 — The Problem
+         ========================================================= -->
+    <section class="slide" aria-label="The Problem">
+      <header class="slide-header">
+        <h1>The problem</h1>
+        <span class="tag">Slide 02 · Problem</span>
+      </header>
+      <div class="slide-body">
+        <p>Retrieval-Augmented Generation (RAG) systems <b>still hallucinate</b> — even when the answer is in the retrieved evidence.</p>
+        <div class="grid-2">
+          <div class="callout">
+            <b>What is a hallucination?</b><br />
+            A model-generated statement that is <i>not supported</i> by the source it claims to ground itself in — factually wrong, fabricated, or contradicted by the retrieved evidence.
+          </div>
+          <div class="callout" style="border-left-color: var(--red); background: rgba(248,81,73,0.08); border-color: rgba(248,81,73,0.3);">
+            <b>Why it matters</b><br />
+            In domains like medicine, law, and finance a hallucinated fact is a <b>liability</b>. Users can't tell which sentences are grounded and which are fabricated.
+          </div>
+        </div>
+        <h3>Symptoms in modern RAG</h3>
+        <ul>
+          <li>The LLM <b>paraphrases</b> retrieved text and drops qualifiers ("always" → "sometimes").</li>
+          <li>The LLM <b>adds</b> facts that are consistent with its prior but absent from the corpus.</li>
+          <li>The LLM <b>denies</b> facts that are actually present (false abstention).</li>
+        </ul>
+        <p><small>→ Existing solutions are either retrieval-only (rerankers) or detection-only (NLI). Neither closes the loop.</small></p>
+      </div>
+      <footer class="slide-footer"><span>Hallucination Pipeline</span><span>2 / 15</span></footer>
+    </section>
+
+    <!-- =========================================================
+         SLIDE 3 — Motivation / RQs
+         ========================================================= -->
+    <section class="slide" aria-label="Motivation">
+      <header class="slide-header">
+        <h1>Motivation &amp; research questions</h1>
+        <span class="tag">Slide 03 · Motivation</span>
+      </header>
+      <div class="slide-body">
+        <p>The goal: build a <b>single, end-to-end pipeline</b> that detects, verifies, and explains hallucinations — and that exposes a clean, machine-readable justification for every decision.</p>
+        <h3>Research questions</h3>
+        <div class="grid-3">
+          <div class="tile green">
+            <div class="tile-label">RQ1</div>
+            <div class="tile-sub">Can a <b>hybrid</b> retriever (dense + sparse + cross-encoder rerank) reliably surface the evidence the NLI verifier needs?</div>
+          </div>
+          <div class="tile yellow">
+            <div class="tile-label">RQ2</div>
+            <div class="tile-sub">Does <b>atomic claim</b> verification (split → retrieve → NLI → fuse) outperform whole-answer verification?</div>
+          </div>
+          <div class="tile" style="border-left-color: var(--purple);">
+            <div class="tile-label">RQ3</div>
+            <div class="tile-sub">Can we <b>explain</b> every gate decision (PASS / REGEN / ABSTAIN) with the evidence that drove it?</div>
+          </div>
+        </div>
+        <div class="callout">
+          <b>Design principle:</b> every component must load its real HuggingFace checkpoint — no mocks, no stubs. The system either runs against real models or it raises.
+        </div>
+      </div>
+      <footer class="slide-footer"><span>Hallucination Pipeline</span><span>3 / 15</span></footer>
+    </section>
+
+    <!-- =========================================================
+         SLIDE 4 — Contributions
+         ========================================================= -->
+    <section class="slide" aria-label="Contributions">
+      <header class="slide-header">
+        <h1>Contributions</h1>
+        <span class="tag">Slide 04 · Contributions</span>
+      </header>
+      <div class="slide-body">
+        <ol>
+          <li><b>End-to-end 13-step architecture</b> — query understanding → grounded generation → early detection → claim extraction → hybrid retrieval → rerank → NLI → fusion → regeneration → gate → explainable response → evaluation.</li>
+          <li><b>Real-model implementation</b> — 6 first-class HuggingFace components (BGE-M3, BGE-Reranker-v2, mDeBERTa-v3-NLI, GLiNER, Llama-3.1-8B-Instruct, Qwen). No silent fallback to stubs.</li>
+          <li><b>Atomic-claim verification</b> — every generated sentence is split, retrieved against, and judged by NLI; final decision fuses per-claim verdicts via EEDC + temperature scaling.</li>
+          <li><b>Explainable output</b> — every step writes a trace; final response is JSON + Markdown + HTML with per-claim evidence and verdicts.</li>
+          <li><b>Evaluation framework</b> — 13 metrics across 10 categories (HRR, CCR, VSR, BLEU, ROUGE-L, BERTScore, ROC-AUC, MRR, nDCG, …) computed automatically by <code>scripts/evaluate_full.py</code>.</li>
+          <li><b>Web UI + REST API</b> — Flask chat-style demo, project tree viewer, evaluation dashboard, FastAPI mirror; live / degraded status badge per component.</li>
+        </ol>
+      </div>
+      <footer class="slide-footer"><span>Hallucination Pipeline</span><span>4 / 15</span></footer>
+    </section>
+
+    <!-- =========================================================
+         SLIDE 5 — Related Work
+         ========================================================= -->
+    <section class="slide" aria-label="Related work">
+      <header class="slide-header">
+        <h1>Related work</h1>
+        <span class="tag">Slide 05 · Related work</span>
+      </header>
+      <div class="slide-body">
+        <table class="metrics">
+          <thead>
+            <tr><th>Line</th><th>Examples</th><th>What they do</th><th>Gap</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Retrieval-only</td><td>BGE-M3, ColBERT, SPLADE</td><td>Surface better evidence</td><td>Don't verify what the LLM actually wrote</td></tr>
+            <tr><td>Reranking</td><td>BGE-Reranker-v2, MonoT5</td><td>Re-order top-k by relevance</td><td>No factuality signal</td></tr>
+            <tr><td>NLI detection</td><td>DeBERTa-MNLI, FEVER</td><td>Classify supported / refuted</td><td>No retrieval, no grounding</td></tr>
+            <tr><td>Self-check / hidden-state</td><td>HALO, INSIDE</td><td>Use internal signals</td><td>Closed-source, opaque</td></tr>
+            <tr style="background: rgba(86,211,100,0.08);">
+              <td><b>This work</b></td><td>13-step pipeline</td>
+              <td>Generate → detect → claim-split → retrieve → rerank → NLI → fuse → regen → gate</td>
+              <td><b>Closes the loop with explainable output</b></td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="callout"><b>Position:</b> existing systems treat <i>retrieval</i> and <i>verification</i> as separate problems. Our pipeline threads them together so the evidence that justifies a PASS / REGEN / ABSTAIN is the same evidence that was retrieved for the claim.</p>
+      </div>
+      <footer class="slide-footer"><span>Hallucination Pipeline</span><span>5 / 15</span></footer>
+    </section>
+
+    <!-- =========================================================
+         SLIDE 6 — System Architecture
+         ========================================================= -->
+    <section class="slide" aria-label="System architecture">
+      <header class="slide-header">
+        <h1>System architecture</h1>
+        <span class="tag">Slide 06 · Architecture</span>
+      </header>
+      <div class="slide-body">
+        <pre class="diagram">                              User Question
+                                    |
+                                    v
+  +------------------------------+
+  | 1. Query Understanding       |   GLiNER + spaCy + Llama 3.1
+  +-------------+----------------+
+                |
+                v
+  +------------------------------+
+  | 2. Grounded Generation       |   Llama 3.1 / Qwen 3
+  +-------------+----------------+
+                |
+                v
+  +------------------------------+
+  | 3. Early Detection           |   BGE-M3 cosine + XGBoost
+  +-------------+----------------+
+                |
+                v
+  +------------------------------+
+  | 4. Confidence Assessment     |   EEDC + temperature scaling
+  +-------------+----------------+
+                |
+                v
+  +------------------------------+
+  | 5. Atomic Claim Extraction   |   rule-based + LLM splitter
+  +-------------+----------------+
+                |
+                v
+  +------------------------------+
+  | 6. Hybrid Retrieval          |   BGE-M3 + FAISS + BM25
+  +-------------+----------------+
+                |
+                v
+  +------------------------------+
+  | 7. Evidence Reranking        |   BGE-Reranker-v2 (cross-encoder)
+  +-------------+----------------+
+                |
+                v
+  +------------------------------+
+  | 8. NLI Verification          |   DeBERTa-v3-MNLI
+  +-------------+----------------+
+                |
+                v
+  +------------------------------+
+  | 9. Confidence Fusion         |   weighted multi-score fusion
+  +-------------+----------------+
+                |
+                v
+  +------------------------------+
+  |10. Evidence-Guided Regen     |   Llama 3.1 (verified-only)
+  +-------------+----------------+
+                |
+                v
+  +------------------------------+
+  |11. Final Verification Gate   |   PASS / REGEN / ABSTAIN
+  +-------------+----------------+
+                |
+                v
+  +------------------------------+
+  |12. Explainable Response      |   JSON + Markdown + HTML
+  +-------------+----------------+
+                |
+                v
+  +------------------------------+
+  |13. Evaluation Module         |   HRR, CCR, VSR, BLEU, ROUGE-L,
+  +------------------------------+   BERTScore, ROC-AUC, MRR, nDCG…</pre>
+        <p class="callout"><small>Every step is one Python module under <code>src/steps/step0N_&lt;name&gt;.py</code>. The trace from each step is exposed via the JSON payload.</small></p>
+      </div>
+      <footer class="slide-footer"><span>Hallucination Pipeline</span><span>6 / 15</span></footer>
+    </section>
+
+    <!-- =========================================================
+         SLIDE 7 — The 13 Steps
+         ========================================================= -->
+    <section class="slide" aria-label="The 13 steps">
+      <header class="slide-header">
+        <h1>The 13 steps at a glance</h1>
+        <span class="tag">Slide 07 · Step map</span>
+      </header>
+      <div class="slide-body">
+        <table class="metrics">
+          <thead><tr><th style="width:34px;">#</th><th>Step</th><th>Model / Component</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>Query Understanding</td><td><code>knowledgator/gliner-base-v1.0</code> · spaCy · Llama 3.1</td></tr>
+            <tr><td>2</td><td>Grounded Generation</td><td><code>meta-llama/Meta-Llama-3.1-8B-Instruct</code> / Qwen 3</td></tr>
+            <tr><td>3</td><td>Early Hallucination Detection</td><td><code>BAAI/bge-m3</code> cosine + XGBoost classifier</td></tr>
+            <tr><td>4</td><td>Confidence Assessment</td><td>EEDC + temperature scaling (Platt)</td></tr>
+            <tr><td>5</td><td>Atomic Claim Extraction</td><td>rule-based + Llama 3.1 splitter</td></tr>
+            <tr><td>6</td><td>Hybrid Retrieval</td><td><code>BAAI/bge-m3</code> + FAISS + <code>rank_bm25</code></td></tr>
+            <tr><td>7</td><td>Evidence Reranking</td><td><code>BAAI/bge-reranker-v2-m3</code> (cross-encoder)</td></tr>
+            <tr><td>8</td><td>NLI Verification</td><td><code>MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7</code></td></tr>
+            <tr><td>9</td><td>Confidence Fusion</td><td>weighted multi-score fusion</td></tr>
+            <tr><td>10</td><td>Evidence-Guided Regeneration</td><td>Llama 3.1 (verified-only context)</td></tr>
+            <tr><td>11</td><td>Final Verification Gate</td><td>rule-based PASS / REGEN / ABSTAIN</td></tr>
+            <tr><td>12</td><td>Explainable Response</td><td>JSON + Markdown + HTML report</td></tr>
+            <tr><td>13</td><td>Evaluation Module</td><td>HRR, CCR, VSR, BLEU, ROUGE-L, BERTScore, ROC-AUC, MRR, nDCG…</td></tr>
+          </tbody>
+        </table>
+        <p><small>Every checkpoint is loaded from HuggingFace; if a download fails the wrapper raises — no silent fallback.</small></p>
+      </div>
+      <footer class="slide-footer"><span>Hallucination Pipeline</span><span>7 / 15</span></footer>
+    </section>
+
+    <!-- =========================================================
+         SLIDE 8 — Deep dive: Detection + Confidence
+         ========================================================= -->
+    <section class="slide" aria-label="Detection deep-dive">
+      <header class="slide-header">
+        <h1>Deep dive · Detection &amp; Confidence</h1>
+        <span class="tag">Slide 08 · Steps 3 + 4</span>
+      </header>
+      <div class="slide-body grid-2">
+        <div>
+          <h3>Step 3 · Early Hallucination Detection</h3>
+          <ul>
+            <li>Compute cosine similarity between the <b>answer</b> embedding and the <b>concatenated evidence</b> embedding with BGE-M3.</li>
+            <li>Feed (cosine, answer length, evidence length, claim-count, named-entity overlap) into an <b>XGBoost</b> classifier trained on labeled pairs.</li>
+            <li>Output: <code>p_hallucination ∈ [0, 1]</code> + a 3-class verdict (supported / weak / contradicted).</li>
+          </ul>
+          <div class="callout"><b>Why early?</b> if the early detector says "high hallucination risk", the gate can <i>skip</i> the expensive retrieval + NLI steps and ABSTAIN cheaply.</div>
+        </div>
+        <div>
+          <h3>Step 4 · Confidence Assessment (EEDC)</h3>
+          <ul>
+            <li><b>EEDC</b> = Expected Evidence-Disagreement Calibration. Combines the answer's perplexity, the NLI verifier's entropy, and the retrieval score.</li>
+            <li>Platt scaling + temperature scaling fit on a held-out calibration set (<code>scripts/calibrate_eedc.py</code>).</li>
+            <li>Output: <b>calibrated confidence</b> in [0, 1] that is comparable across queries.</li>
+          </ul>
+          <div class="callout" style="border-left-color: var(--purple);"><b>Why calibrate?</b> raw model scores are not probabilities. Without calibration the gate either over-accepts or over-abstains.</div>
+        </div>
+      </div>
+      <footer class="slide-footer"><span>Hallucination Pipeline</span><span>8 / 15</span></footer>
+    </section>
+
+    <!-- =========================================================
+         SLIDE 9 — Deep dive: Retrieval + NLI
+         ========================================================= -->
+    <section class="slide" aria-label="Retrieval deep-dive">
+      <header class="slide-header">
+        <h1>Deep dive · Retrieval &amp; Verification</h1>
+        <span class="tag">Slide 09 · Steps 6 + 8</span>
+      </header>
+      <div class="slide-body grid-2">
+        <div>
+          <h3>Step 6 · Hybrid Retrieval</h3>
+          <ul>
+            <li><b>Dense</b>: BGE-M3 embeddings → <b>FAISS</b> (cosine, top-50).</li>
+            <li><b>Sparse</b>: <code>rank_bm25</code> over the same chunks (top-50).</li>
+            <li><b>Fuse</b> with <b>Reciprocal Rank Fusion</b> (RRF, k = 60). RRF is parameter-free and beat simple linear blending on our dev set.</li>
+            <li>Returns top-5 chunks by RRF score.</li>
+          </ul>
+          <div class="callout"><b>Why hybrid?</b> BM25 catches exact terms (names, years) that dense retrieval misses; dense catches paraphrases that BM25 misses. RRF merges them without learning weights.</div>
+        </div>
+        <div>
+          <h3>Step 8 · NLI Verification</h3>
+          <ul>
+            <li>Cross-encoder: <code>MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7</code>.</li>
+            <li>For each (claim, evidence) pair → 3-way softmax over <b>entailment / neutral / contradiction</b>.</li>
+            <li>Step 7 (BGE-Reranker-v2) reorders the top-5 first, so the NLI sees the strongest evidence at the top.</li>
+            <li>Per-claim verdict: <code>supported</code> / <code>unknown</code> / <code>contradicted</code>.</li>
+          </ul>
+          <div class="callout" style="border-left-color: var(--purple);"><b>Why claim-level?</b> a single entailment on the whole answer can hide a contradictory half. Split → verify → fuse gives the gate an auditable signal.</div>
+        </div>
+      </div>
+      <footer class="slide-footer"><span>Hallucination Pipeline</span><span>9 / 15</span></footer>
+    </section>
+
+    <!-- =========================================================
+         SLIDE 10 — Frontend & API
+         ========================================================= -->
+    <section class="slide" aria-label="Frontend and API">
+      <header class="slide-header">
+        <h1>Frontend &amp; REST API</h1>
+        <span class="tag">Slide 10 · UI</span>
+      </header>
+      <div class="slide-body">
+        <div class="grid-2">
+          <div>
+            <h3>Three pages</h3>
+            <ul>
+              <li><b><code>/</code></b> — chat-style demo: paste documents, build index, query, see per-claim verdicts + 13-step trace.</li>
+              <li><b><code>/structure</code></b> — interactive project tree with depth slider and live filter.</li>
+              <li><b><code>/evaluation</code></b> — accuracy dashboard with headline tiles, decision breakdown donut, per-metric bar chart, per-query table.</li>
+            </ul>
+            <h3>Two backends</h3>
+            <ul>
+              <li><b>Flask</b> on <code>127.0.0.1:5000</code> (vanilla HTML/JS, no build step).</li>
+              <li><b>FastAPI</b> on <code>127.0.0.1:8000</code> for programmatic access.</li>
+              <li>Live / degraded badge in the header shows whether every HF checkpoint loaded.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Endpoints</h3>
+            <table class="metrics">
+              <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+              <tbody>
+                <tr><td>GET</td><td><code>/health</code></td><td>Liveness</td></tr>
+                <tr><td>POST</td><td><code>/index</code></td><td>Build index from <code>{"documents":[…]}</code></td></tr>
+                <tr><td>POST</td><td><code>/query</code></td><td>Run the 13-step pipeline</td></tr>
+                <tr><td>GET</td><td><code>/metrics</code></td><td>Recent aggregate metrics</td></tr>
+                <tr><td>GET</td><td><code>/evaluation</code></td><td>Full evaluation report (headline + per-query)</td></tr>
+                <tr><td>GET</td><td><code>/accuracy</code></td><td>Accuracy dashboard payload</td></tr>
+                <tr><td>GET</td><td><code>/structure</code></td><td>Project tree JSON</td></tr>
+                <tr><td>GET</td><td><code>/models/status</code></td><td>Live status of all 6 components</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <footer class="slide-footer"><span>Hallucination Pipeline</span><span>10 / 15</span></footer>
+    </section>
+
+    <!-- =========================================================
+         SLIDE 11 — Evaluation Setup
+         ========================================================= -->
+    <section class="slide" aria-label="Evaluation setup">
+      <header class="slide-header">
+        <h1>Evaluation setup</h1>
+        <span class="tag">Slide 11 · Setup</span>
+      </header>
+      <div class="slide-body">
+        <div class="grid-2">
+          <div>
+            <h3>Dataset</h3>
+            <ul>
+              <li><b>69 synthetic QA pairs</b> built into <code>src/utils/data_loader.py</code> — each row has <code>query / answer / evidence / label</code>.</li>
+              <li>Mix of factoid, definitional, and <b>intentionally-wrong</b> rows to stress the verifier (e.g. <i>"Eric Arthur Blair was French"</i>).</li>
+              <li>Indexed corpus = 6 hand-written documents (d0…d5).</li>
+            </ul>
+            <h3>Metrics</h3>
+            <ul>
+              <li><b>BASE</b> (10): claim P/R/F1, retrieval R@5 / P@5 / MRR / nDCG, VSR, end-to-end accuracy, confidence.</li>
+              <li><b>FULL</b> (7 extras): detection accuracy / P / R / F1, ROC-AUC, hallucination reduction rate (HRR), claim correction rate (CCR).</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Pipeline</h3>
+            <pre>python -m scripts.build_index --corpus synthetic --out data/index
+python -m scripts.run_inference --query "..."
+python -m scripts.evaluate       --synth --out data/metrics.json
+python -m scripts.evaluate_full  --synth --out data/metrics.json
+python -m scripts.calibrate_eedc --out data/calibration.json</pre>
+            <h3>Reproducibility</h3>
+            <ul>
+              <li>All knobs in <code>configs/default.yaml</code>; override via env vars prefixed <code>HALLUC_</code>.</li>
+              <li>31-test pytest suite uses in-memory fakes → fast + offline.</li>
+              <li>Production code always loads the real HF checkpoint.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <footer class="slide-footer"><span>Hallucination Pipeline</span><span>11 / 15</span></footer>
+    </section>
+
+    <!-- =========================================================
+         SLIDE 12 — Results
+         ========================================================= -->
+    <section class="slide" aria-label="Results">
+      <header class="slide-header">
+        <h1>Results</h1>
+        <span class="tag">Slide 12 · Numbers</span>
+      </header>
+      <div class="slide-body">
+        <div class="grid-4" style="margin-bottom:8px;">
+          <div class="tile red">
+            <div class="tile-label">End-to-end acc.</div>
+            <div class="tile-value">34.4%</div>
+            <div class="tile-sub">± 48% · 23 / 69 correct</div>
+          </div>
+          <div class="tile red">
+            <div class="tile-label">Claim F1</div>
+            <div class="tile-value">24.0%</div>
+            <div class="tile-sub">± 43%</div>
+          </div>
+          <div class="tile green">
+            <div class="tile-label">Verification SR</div>
+            <div class="tile-value">100%</div>
+            <div class="tile-sub">claims successfully verified</div>
+          </div>
+          <div class="tile green">
+            <div class="tile-label">Retrieval MRR</div>
+            <div class="tile-value">79.7%</div>
+            <div class="tile-sub">R@5 79.7% · P@5 43.1%</div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div>
+            <h3>Decision breakdown (n = 69)</h3>
+            <div class="bar-row">
+              <span><span class="tag-pill pass">PASS</span></span>
+              <span class="bar-track"><span class="bar-fill fill-pass" style="width:33.3%"></span></span>
+              <span>23</span>
+            </div>
+            <div class="bar-row">
+              <span><span class="tag-pill regen">REGEN</span></span>
+              <span class="bar-track"><span class="bar-fill fill-regen" style="width:14.5%"></span></span>
+              <span>10</span>
+            </div>
+            <div class="bar-row">
+              <span><span class="tag-pill abstain">ABSTAIN</span></span>
+              <span class="bar-track"><span class="bar-fill fill-abstain" style="width:52.2%"></span></span>
+              <span>36</span>
+            </div>
+            <p><small>The verification gate is conservative — many queries are ABSTAINed, which is safer than a wrong PASS.</small></p>
+          </div>
+
+          <div>
+            <h3>Correctness donut</h3>
+            <div class="donut-wrap">
+              <div class="donut">
+                <svg viewBox="0 0 120 120" width="180" height="180">
+                  <circle cx="60" cy="60" r="52" stroke="#1c232c" stroke-width="14" fill="none" />
+                  <circle cx="60" cy="60" r="52" stroke="#56d364" stroke-width="14" fill="none"
+                          stroke-linecap="round"
+                          stroke-dasharray="54.6 272.0"
+                          transform="rotate(-90 60 60)" />
+                </svg>
+                <div class="donut-center">
+                  <div class="donut-value">33.3%</div>
+                  <div class="donut-label">correct</div>
+                </div>
+              </div>
+              <div>
+                <p><b>23</b> queries answered correctly</p>
+                <p><b>46</b> queries answered incorrectly</p>
+                <p><small>(PASS / REGEN / ABSTAIN against the gold answer)</small></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <footer class="slide-footer"><span>Hallucination Pipeline</span><span>12 / 15</span></footer>
+    </section>
+
+    <!-- =========================================================
+         SLIDE 13 — Analysis & Discussion
+         ========================================================= -->
+    <section class="slide" aria-label="Analysis">
+      <header class="slide-header">
+        <h1>Analysis &amp; discussion</h1>
+        <span class="tag">Slide 13 · Analysis</span>
+      </header>
+      <div class="slide-body">
+        <div class="grid-2">
+          <div>
+            <h3>What's working</h3>
+            <ul>
+              <li><b>Retrieval</b> is strong — R@5 = 79.7%, MRR = 79.7%. The hybrid BGE-M3 + BM25 + RRF combination reliably surfaces the right evidence.</li>
+              <li><b>Verification</b> always returns a usable verdict (VSR = 100%) — no crashes, no skipped claims.</li>
+              <li><b>Decision diversity</b> — the gate exercises all three branches (23 PASS / 10 REGEN / 36 ABSTAIN), so it's not degenerating to one class.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>What's hurting E2E accuracy</h3>
+            <ul>
+              <li><b>Conservative gate</b>: a high ABSTAIN rate (52%) drags E2E accuracy down — the gate refuses too often even when the answer is correct.</li>
+              <li><b>Claim split</b>: Claim F1 = 24% means the rule-based splitter misses facts that the LLM later verifies (precision + recall both low).</li>
+              <li><b>High retrieval precision, low end-to-end</b>: the gap between R@5 (79.7%) and E2E (34.4%) is the verification + gate loss — the next bottleneck to close.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="callout">
+          <b>RQ answers (preliminary):</b>
+          <ol style="margin-top:4px;">
+            <li><b>Yes</b> — hybrid retrieval reliably supplies evidence (R@5 ≈ 80%).</li>
+            <li><b>Partial</b> — atomic claim verification is auditable but the splitter is the weakest link.</li>
+            <li><b>Yes</b> — every gate decision carries the evidence that justified it, surfaced in the JSON payload.</li>
+          </ol>
+        </div>
+      </div>
+      <footer class="slide-footer"><span>Hallucination Pipeline</span><span>13 / 15</span></footer>
+    </section>
+
+    <!-- =========================================================
+         SLIDE 14 — Limitations & Future Work
+         ========================================================= -->
+    <section class="slide" aria-label="Limitations">
+      <header class="slide-header">
+        <h1>Limitations &amp; future work</h1>
+        <span class="tag">Slide 14 · Limitations</span>
+      </header>
+      <div class="slide-body">
+        <table class="metrics">
+          <thead><tr><th style="width:34%;">Limitation</th><th>Impact</th><th>Next step</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Synthetic-only evaluation</td>
+              <td>Numbers may not transfer to open-domain corpora</td>
+              <td>Evaluate on HaluEval QA + a curated real-world RAG log</td>
+            </tr>
+            <tr>
+              <td>Llama-3.1 is gated</td>
+              <td>Default generator swaps to Qwen 3 without a HF token</td>
+              <td>Auto-fallback + transparent <code>degraded mode</code> badge (already shipped)</td>
+            </tr>
+            <tr>
+              <td>Single-hop retrieval</td>
+              <td>Can't answer queries that require chaining evidence</td>
+              <td>Step 6.5: query-decomposition + iterative retrieval</td>
+            </tr>
+            <tr>
+              <td>Rule-based claim splitter</td>
+              <td>Drives the low Claim F1 (24%)</td>
+              <td>Fine-tune a small claim-segmentation model or prompt-tune Llama 3.1</td>
+            </tr>
+            <tr>
+              <td>No human evaluation</td>
+              <td>Don't know how users perceive REGEN / ABSTAIN</td>
+              <td>Run a small user study: prefer answer vs prefer ABSTAIN</td>
+            </tr>
+            <tr>
+              <td>Detection metrics require <code>evaluate_full.py</code></td>
+              <td>HRR / CCR / ROC-AUC are absent from the BASE run</td>
+              <td>Document + auto-run after every <code>evaluate.py</code> in CI</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="callout"><small>Bottom line: the architecture closes the loop, the gate is safe, and the retrieval is strong — the open frontier is <b>claim-level understanding</b>.</small></p>
+      </div>
+      <footer class="slide-footer"><span>Hallucination Pipeline</span><span>14 / 15</span></footer>
+    </section>
+
+    <!-- =========================================================
+         SLIDE 15 — Conclusion + Q&A
+         ========================================================= -->
+    <section class="slide" aria-label="Conclusion">
+      <header class="slide-header">
+        <h1>Conclusion</h1>
+        <span class="tag">Slide 15 · Q &amp; A</span>
+      </header>
+      <div class="slide-body">
+        <p style="font-size:18px;">A <b>13-step, real-model, explainable-by-construction</b> hallucination-detection pipeline for RAG.</p>
+        <ul style="font-size:15px;">
+          <li><b>Architecture</b> maps one-to-one to the diagram — every step is one Python module under <code>src/steps/</code>.</li>
+          <li><b>Evaluation</b> shows strong retrieval (MRR 79.7%), perfect verification (VSR 100%), and a conservative but honest gate (52% ABSTAIN).</li>
+          <li><b>Next</b>: replace the rule-based claim splitter, add multi-hop retrieval, run on HaluEval + a real RAG log.</li>
+        </ul>
+        <div class="callout" style="margin-top:12px;">
+          <b style="font-size:18px;">Thank you — questions?</b><br />
+          <small>Open the deck at <code>/slides</code>, the demo at <code>/</code>, the project tree at <code>/structure</code>, and the evaluation dashboard at <code>/evaluation</code>.</small>
+        </div>
+        <p class="meta" style="color:var(--muted); font-size:12px;">Hallucination-Mitigation · Master's Thesis · 2026</p>
+      </div>
+      <footer class="slide-footer"><span>Hallucination Pipeline</span><span>15 / 15</span></footer>
+    </section>
+
+  </div>
+
+  <script src="slides.js"></script>
+</body>
+</html>

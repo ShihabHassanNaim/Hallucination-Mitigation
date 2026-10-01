@@ -1,0 +1,275 @@
+{
+  "query": "Who wrote the novel 1984?",
+  "answer": "The novel \"1984\" was written by George Orwell.",
+  "claims": [
+    {
+      "text": "The novel \"1984\" was written by George Orwell.",
+      "provenance": "extrinsic",
+      "intrinsic_overlap": 0.3,
+      "verdict": "supported",
+      "confidence": 0.8988322547673813,
+      "evidence": [
+        {
+          "doc_id": "doc-2",
+          "text": "George Orwell wrote the novel 1984, published in 1949.",
+          "score": 0.9996700286865234,
+          "source": ""
+        }
+      ],
+      "citation": "doc-2"
+    }
+  ],
+  "evidence": [
+    {
+      "doc_id": "doc-2",
+      "text": "George Orwell wrote the novel 1984, published in 1949.",
+      "score": 0.9996700286865234,
+      "source": ""
+    },
+    {
+      "doc_id": "doc-1",
+      "text": "Eric Arthur Blair, known by his pen name George Orwell, was a British writer.",
+      "score": 0.02865145541727543,
+      "source": ""
+    },
+    {
+      "doc_id": "doc-0",
+      "text": "Paris is the capital of France. France is in Europe.",
+      "score": 1.712953053356614e-05,
+      "source": ""
+    },
+    {
+      "doc_id": "doc-3",
+      "text": "Water boils at 100 degrees Celsius at standard atmospheric pressure.",
+      "score": 1.6009968021535315e-05,
+      "source": ""
+    },
+    {
+      "doc_id": "doc-4",
+      "text": "Mars is the fourth planet from the Sun in the Solar System.",
+      "score": 1.6002350093913265e-05,
+      "source": ""
+    }
+  ],
+  "confidence": 0.8988,
+  "decision": "PASS",
+  "iterations": 1,
+  "step_traces": [
+    {
+      "step": 1,
+      "name": "query_understanding",
+      "duration_ms": 1266.286,
+      "payload": {
+        "intent": "factual",
+        "entities": [
+          {
+            "text": "1984",
+            "label": "DATE",
+            "score": 1.0
+          }
+        ],
+        "query_variants": [
+          "Who wrote the novel 1984?",
+          "George Orwell wrote \"1984.\""
+        ],
+        "rewrite_method": "llm"
+      }
+    },
+    {
+      "step": 2,
+      "name": "grounded_generation",
+      "duration_ms": 1385.492,
+      "payload": {
+        "backend": "llama",
+        "answer": "The novel \"1984\" was written by George Orwell.",
+        "evidence_count": 0
+      }
+    },
+    {
+      "step": 3,
+      "name": "early_detection",
+      "duration_ms": 175.8,
+      "payload": {
+        "features": {
+          "cosine": 0.7868273854255676,
+          "claim_count": 1.0,
+          "intrinsic_overlap": 0.25,
+          "answer_length": 8
+        },
+        "hallucination_probability": 0.9527101516723633
+      }
+    },
+    {
+      "step": 4,
+      "name": "confidence_assessment",
+      "duration_ms": 0.31,
+      "payload": {
+        "eedc_raw": 0.6297210371490629,
+        "eedc_calibrated": 0.6297210371490629,
+        "nli_entropy": 0.21317261457443237,
+        "self_consistency": 0.7868273854255676
+      }
+    },
+    {
+      "step": 5,
+      "name": "claim_extraction",
+      "duration_ms": 0.331,
+      "payload": {
+        "mode": "rule",
+        "claim_count": 1,
+        "claims": [
+          "The novel \"1984\" was written by George Orwell."
+        ],
+        "provenances": [
+          "extrinsic"
+        ]
+      }
+    },
+    {
+      "step": 6,
+      "name": "hybrid_retrieval",
+      "duration_ms": 106.575,
+      "payload": {
+        "top_k": 5,
+        "evidence_count": 5,
+        "evidence_ids": [
+          "doc-2",
+          "doc-4",
+          "doc-0",
+          "doc-1",
+          "doc-3"
+        ]
+      }
+    },
+    {
+      "step": 7,
+      "name": "reranking",
+      "duration_ms": 1094.184,
+      "payload": {
+        "top_k": 5,
+        "evidence_count": 5,
+        "scores": [
+          0.9996700286865234,
+          0.02865145541727543,
+          1.712953053356614e-05,
+          1.6009968021535315e-05,
+          1.6002350093913265e-05
+        ]
+      }
+    },
+    {
+      "step": 8,
+      "name": "nli_verification",
+      "duration_ms": 2157.566,
+      "payload": {
+        "claim_count": 1,
+        "verdict_count": 5,
+        "verdict_distribution": {
+          "supported": 1,
+          "contradicted": 0,
+          "unknown": 0
+        }
+      }
+    },
+    {
+      "step": 9,
+      "name": "confidence_fusion",
+      "duration_ms": 0.019,
+      "payload": {
+        "weights": {
+          "similarity": 0.3,
+          "retrieval": 0.2,
+          "nli": 0.25,
+          "coverage": 0.15,
+          "eedc": 0.1
+        },
+        "components": {
+          "similarity": 0.7868273854255676,
+          "retrieval_top1": 0.9996700286865234,
+          "nli": 0.99951171875,
+          "coverage": 1.0,
+          "eedc": 0.6297210371490629
+        },
+        "overall_confidence": 0.8988322547673813,
+        "per_claim_confidence": [
+          0.8988322547673813
+        ]
+      }
+    },
+    {
+      "step": 10,
+      "name": "regeneration",
+      "duration_ms": 0.01,
+      "payload": {
+        "step": 10,
+        "mode": "evidence",
+        "unsupported_ratio": 0.0,
+        "decision": "KEEP"
+      }
+    },
+    {
+      "step": 11,
+      "name": "final_gate",
+      "duration_ms": 0.007,
+      "payload": {
+        "step": 11,
+        "confidence": 0.8988322547673813,
+        "unsupported_ratio": 0.0,
+        "decision": "PASS",
+        "pass_threshold": 0.7,
+        "abstain_threshold": 0.3
+      }
+    },
+    {
+      "step": 12,
+      "name": "explainable_response",
+      "duration_ms": 0.073,
+      "payload": {
+        "markdown_bytes": 1041,
+        "json_bytes": 1804
+      }
+    },
+    {
+      "step": 13,
+      "name": "evaluation",
+      "duration_ms": 25.951,
+      "payload": {
+        "metrics": {
+          "claim_precision": 1.0,
+          "claim_recall": 1.0,
+          "claim_f1": 1.0,
+          "retrieval_recall_at_5": 1.0,
+          "retrieval_precision_at_5": 1.0,
+          "retrieval_mrr": 1.0,
+          "retrieval_ndcg": 1.0,
+          "verification_success_rate": 1.0,
+          "end_to_end_accuracy": 1.0,
+          "confidence": 0.8988322547673813,
+          "decision": "PASS"
+        },
+        "requested": [
+          "bleu",
+          "rouge_l",
+          "bert_score",
+          "recall_at_k",
+          "precision_at_k",
+          "mrr",
+          "ndcg",
+          "claim_precision",
+          "claim_recall",
+          "claim_f1",
+          "detection_accuracy",
+          "detection_precision",
+          "detection_recall",
+          "detection_f1",
+          "detection_roc_auc",
+          "hallucination_reduction_rate",
+          "claim_correction_rate",
+          "verification_success_rate",
+          "end_to_end_accuracy"
+        ]
+      }
+    }
+  ],
+  "report_markdown": "# Hallucination Pipeline Report\n\n**Query:** Who wrote the novel 1984?\n**Answer:** The novel \"1984\" was written by George Orwell.\n**Confidence:** 0.90  \n**Decision:** `PASS`\n\n## Claims\n1. *(supported, conf=0.90)* The novel \"1984\" was written by George Orwell.  \n   - provenance: `extrinsic`  \n   - citation: `doc-2`\n\n## Evidence\n- **doc-2** (score=1.000): George Orwell wrote the novel 1984, published in 1949.\n- **doc-1** (score=0.029): Eric Arthur Blair, known by his pen name George Orwell, was a British writer.\n- **doc-0** (score=0.000): Paris is the capital of France. France is in Europe.\n- **doc-3** (score=0.000): Water boils at 100 degrees Celsius at standard atmospheric pressure.\n- **doc-4** (score=0.000): Mars is the fourth planet from the Sun in the Solar System.\n\n## Decision history\n- step 10: {'step': 10, 'mode': 'evidence', 'unsupported_ratio': 0.0, 'decision': 'KEEP'}\n- step 11: {'step': 11, 'confidence': 0.8988322547673813, 'unsupported_ratio': 0.0, 'decision': 'PASS', 'pass_threshold': 0.7, 'abstain_threshold': 0.3}"
+}

@@ -1,0 +1,1338 @@
+
+
+===== PAGE 1 =====
+
+Decoding Memories: An Efficient Pipeline for
+Self-Consistency Hallucination Detection
+Weizhi Gao1*, Xiaorui Liu1, Feiyi Wang2, Dan Lu2, Junqi Yin2
+1Department of Computer Science, North Carolina State University
+2Oak Ridge National Laboratory
+Abstract
+Large language models (LLMs) have demonstrated impres-
+sive performance in both research and real-world applica-
+tions, but they still struggle with hallucination. Existing hallu-
+cination detection methods often perform poorly on sentence-
+level generation or rely heavily on domain-specific knowl-
+edge. While self-consistency approaches help address these
+limitations, they incur high computational costs due to re-
+peated generation. In this paper, we conduct the first study
+on identifying redundancy in self-consistency methods, mani-
+fested as shared prefix tokens across generations, and observe
+that non-exact-answer tokens contribute minimally to the se-
+mantic content. Based on these insights, we propose a novel
+Decoding Memory Pipeline (DMP) that accelerates genera-
+tion through selective inference and annealed decoding. Be-
+ing orthogonal to the model, dataset, decoding strategy, and
+self-consistency baseline, our DMP consistently improves the
+efficiency of multi-response generation and holds promise for
+extension to alignment and reasoning tasks. Extensive exper-
+iments show that our method achieves up to a 3x speedup
+without sacrificing AUROC performance.
+Code —
+https://anonymous.4open.science/status/Decoding-
+Memorie-Pipeline-4E8F
+1 Introduction
+Large Language Models (LLMs) have made significant
+advancements in both research and practical applica-
+tions (OpenAI 2023; AI@Meta 2024). However, a persis-
+tent challenge is their tendency to hallucinate, where the
+model produces outputs that are grammatically correct and
+fluent, yet factually inaccurate, especially in sentence-level
+generation (Park et al. 2025; Ji et al. 2023). The difficulty
+of identifying factual error poses a substantial barrier to de-
+ploying LLMs in reliability-critical domains such as scien-
+tific research and medical diagnostics (Athaluri et al. 2023;
+Pal, Umapathi, and Sankarasubbu 2023; Chai et al. 2024).
+Therefore, it is urgent to design methods that accurately de-
+tect hallucination and reject unreliable answers (Manakul,
+Liusie, and Gales 2023; Chen et al. 2024).
+*This work was done during the internship at ORNL
+1Preprint. Under review. This version: September 1, 2026.
+Recent research has explored various approaches for de-
+tecting hallucinations in LLM outputs. One line of work esti-
+mates the likelihood of generated content using metrics such
+as perplexity and energy scores (Ren et al. 2022; Liu et al.
+2020). However, the scores using likelihood are affected by
+perturbations in grammar and common word usage, mak-
+ing them less effective at accurately identifying hallucina-
+tions at the sentence level (Chen et al. 2024). Another ap-
+proach involves linear probing of hidden states (Azaria and
+Mitchell 2023; Li et al. 2025), nevertheless, requiring la-
+beled training data and often struggling to generalize to out-
+of-distribution examples (Pan et al. 2023; Manakul, Liusie,
+and Gales 2023). Moreover, due to the overconfident nature
+of LLMs, these methods fail to provide reliable confidence
+estimates for hallucination detection (Xiong et al. 2023).
+Given the limitations of existing approaches, self-
+consistency methods have garnered significant attention for
+hallucination detection (Farquhar et al. 2024; Chen et al.
+2024). These methods assess the consistency among mul-
+tiple responses to the same query, using metrics such as se-
+mantic entropy. They not only achieve strong performance
+in detecting hallucinations but also exhibit robustness across
+diverse domains (Manakul, Liusie, and Gales 2023). More-
+over, the ensemble nature enables uncertainty quantification,
+allowing them to produce confidence scores for hallucina-
+tion detection. However, a key drawback of self-consistency
+methods is their high computational cost, as they require
+generating multiple responses per query. It often incurs 5
+to 10 times the cost, making them less suitable for resource-
+constrained applications (Farquhar et al. 2024).
+In this work, we present the first preliminary study that in-
+vestigates the redundancy inherent in self-consistency meth-
+ods based on multiple generations. We observe that, for a
+broad range of questions, the generated multiple responses
+often share similar tokens and prefixes, indicating overlap in
+token sequences. Furthermore, non-exact-answer tokens that
+do not contribute substantively to the core content of the an-
+swer, such as common function words “a” and “the”, have
+minimal impact on consistency evaluation. Therefore, the
+redundancy is therein though responses share different tem-
+plate caused by those tokens. We identify that two kinds of
+redundancy are widely present across models and datasets,
+constituting a substantial portion of the generated content.
+To exploit the redundancy in multiple generations, we
+arXiv:2508.21228v1  [cs.CL]  28 Aug 2025
+
+===== PAGE 2 =====
+
+propose a Decoding Memory Pipeline (DMP) to acceler-
+ate self-consistency methods. Specifically, we introduce se-
+lective inference to leverage the autoregressive pattern of
+language models, which skips redundant forward passes
+by reusing cached computations from overlapped prefixes
+across generations. To further increase the portion of com-
+putation that can be skipped, we propose annealed decod-
+ing, which progressively lowers the sampling temperature
+to make non-exact-answer tokens more deterministic during
+generation. Our DMP is agnostic to self-consistency meth-
+ods, enabling broad applicability for hallucination detection.
+To evaluate the effectiveness of our proposed DMP, we con-
+duct extensive experiments on several benchmark datasets,
+including TriviaQA, NQ-Open, SQuAD, and HaluEval us-
+ing a range of strong baselines. Our results show that DMP
+adequately reduces the redundancy, and accelerate the gen-
+eration process by up to 3x without compromising halluci-
+nation detection performance. In summary, our main contri-
+butions are as follows:
+• To the best of our knowledge, we are the first to identify
+redundancy in self-consistency methods in hallucination
+detection. Specifically, we reveal that redundancy arises
+from shared prefix tokens and non-exact-answer tokens
+across models and datasets.
+• We propose a novel Decoding Memory Pipeline (DMP)
+that is agnostic to self-consistency methods, enabling ac-
+celerated generation. Specifically, we introduce selective
+inference, which skips redundant computations by lever-
+aging repeated tokens, and annealed decoding, which
+increases token reuse by mitigating the impact of non-
+exact-answer tokens during generation.
+• Extensive experiments on TriviaQA, NQ-Open, SQuAD,
+and HaluEval with multiple self-consistency methods
+demonstrate that our DMP accelerates generation by up
+to 3x without compromising hallucination detection per-
+formance across multiple self-consistency baselines.
+2 Related Works
+2.1 Efficient LLMs
+LLMs face significant challenges in efficient deployment,
+prompting extensive research into improving inference effi-
+ciency (Wan et al. 2023). To address the quadratic complex-
+ity of the attention mechanism, key-value (KV) cache has
+become a standard inference strategy, enabling reuse of past
+key-value pairs (Hooper et al. 2024; Liu et al. 2024). Addi-
+tionally, attention masks are employed to facilitate batch-
+wise inference (Vaswani et al. 2017; Devlin et al. 2019).
+Various approaches, such as pruning (Ma, Fang, and Wang
+2023), quantization (Gao et al. 2025; Lin et al. 2024), and
+knowledge distillation (Xu et al. 2024), have been proposed
+to further accelerate inference. However, these methods are
+generally not tailored to self-consistency techniques, which
+incur computational redundancy due to generating multiple
+responses for the same input prompt. Our DMP is compati-
+ble with both KV caching and batch-wise inference, and is
+orthogonal to existing inference acceleration techniques.
+2.2 Hallucination Detection
+Hallucinations in LLMs present major challenges for reli-
+able deployment, leading to growing interest in effective de-
+tection methods (Ji et al. 2023; Rawte, Sheth, and Das 2023).
+One common approach estimates hallucination scores by
+computing generation likelihoods, using metrics such as per-
+plexity or energy scores (Ren et al. 2022; Liu et al. 2020).
+However, these methods often fail to achieve satisfactory de-
+tection performance. Other works attempt to identify hal-
+lucinations by training classifiers on hidden states (Azaria
+and Mitchell 2023; Li et al. 2025; Su et al. 2024; Orgad
+et al. 2024), but these approaches require labeled data and
+struggle with out-of-domain generalization (Pan et al. 2023;
+Manakul, Liusie, and Gales 2023). Furthermore, the over-
+confidence of LLMs limits the reliability of such confidence-
+based detection (Xue et al. 2023). Self-consistency methods,
+such as lexical similarities, SelfCheckGPT, and semantic en-
+tropy, offer an alternative by evaluating consistency across
+multiple responses to the same query (Manakul, Liusie, and
+Gales 2023; Farquhar et al. 2024; Chen et al. 2024; Lin, Liu,
+and Shang 2022). Nevertheless, these methods are hindered
+by their high computational cost.
+3 Background
+In this section, we provide essential background on LLM
+generation and self-consistency methods.
+3.1 LLM Generation Pipeline
+LLMs typically adopt an autoregressive generation
+paradigm, which involves alternating between inference
+and decoding steps (Henighan et al. 2020). In the inference
+stage, the model computes a logit for the next token,
+conditioned on the input context and all previously tokens.
+Given the input prompt x, the logit of generating the i-th
+token yi is computed as follows:
+si =fθ(x, y1:i−1), i = 1, 2,...,L, (1)
+wherefθ denotes a transformer-based model parameterized
+by θ, and L is the total number of tokens to be generated.
+In the decoding stage, a multinomial distribution over the
+token yi is constructed based on its logit. Given a sampling
+temperatureT , the probability is computed as:
+P(yi| x, y1:i−1) = softmax
+ si
+T
+
+,i = 1, 2,...,L, (2)
+where the next token yi is sampled from this distribution.
+The process repeats until an end-of-sequence token is pro-
+duced. To trade off between diversity and determinism, var-
+ious sampling strategies are employed, including greedy de-
+coding, beam search, top-k, and top-p sampling.
+KV Cache. To reduce the computational burden of the
+attention mechanism, past key K1:i−1 and value tensors
+V1:i−1 are cached to avoid redundant computation. The for-
+ward process with KV cache is updated as:
+si =fθ(x,yi−1, K1:i−2, V1:i−2), i = 2, 3,...,L. (3)
+Despite being optimized by KV cache, the sequential nature
+of generation remains computationally intensive, as it re-
+quiresO(L) model forward passes for a sequence of length
+L. For more details, please refer to Appendix A.
+
+===== PAGE 3 =====
+
+What is the Capital of Brazil?
+Response 1
+Forward
+The capital of Brazil is Brasilia
+Match
+The
+Match
+The capital
+Match
+…
+Forward
+Forward
+Lookup
+Response 2
+Forward
+The capital of Brazil is the city of Brasilia
+Match
+The
+Match
+The capital
+Match
+…
+Reuse
+Reuse
+Lookup
+The capital of Brazil is Brasilia<None>
+More
+Responses
+Anneal
+…
+…
+…
+…
+…
+Anneal
+…
+Figure 1: The illustration of our DMP. Given the input prompt, the model generates multiple responses. The current generation
+is compared with cached results: matches are reused as tokens (Green), while mismatches trigger a forward pass through the
+LLM (Red). Annealing (Blue) is used to increase the reuse ratio by lowering the cached sampling temperature for less important
+tokens. After generating a complete response, we add it to the cache if it is not already present.
+3.2 Self-Consistency Hallucination Detection
+Despite their impressive performance across a wide range of
+applications, LLMs are prone to hallucinations, where the
+responses appear plausible but contain factual inaccuracies.
+To address this issue, self-consistency methods have been
+proposed, which not only detect hallucination without train-
+ing but also provide uncertainty of the prediction. Given an
+input prompt x, suppose we generateN responses to evalu-
+ate consistency, denoted as a setY ={y1, y2,..., yN}. A
+consistency scoreS(Y; x) is then computed to quantify the
+agreement among these responses. For example, the Length-
+Normalized Entropy evaluates the normalized likelihood of
+the generated responses (Malinin and Gales 2020):
+SLNE(Y|x) =−Ey∈Y
+1
+Ly
+LyX
+i=1
+log P(yi| x, y1:i−1), (4)
+where a higher consistency score means a more factual an-
+swer. However, generating multiple responses further in-
+creases the computational cost of hallucination detection.
+4 Decoding Memory Pipeline
+In this section, we introduce our decoding memory pipeline.
+We begin by presenting preliminary studies that reveal the
+computational redundancy in self-consistency generation.
+To address this, we propose a selective inference mechanism
+that reduces computational cost by selectively skipping for-
+ward passes using cached logits in Section 4.2. We further
+introduce annealed decoding, a technique designed to en-
+hance token reuse by progressively lowering the sampling
+temperature for non-exact-answer tokens in Section 4.3. An
+overview of our proposed pipeline is provided in Figure 1.
+4.1 Redundancy in Self-Consistency Generation
+We conduct preliminary studies to investigate computa-
+tional redundancy in self-consistency hallucination detec-
+tion. Specifically, we make the following two observations
+when generating multiple responses.
+Observation 1: Repeated Prefix in Multiple Responses.
+Intuitively, responses generated for the same input prompt
+often share overlapping content, which is dependent on the
+model confidence. Since we are working with autoregres-
+sive models and aim to exploit this redundancy, we focus on
+the repetition of prefixes, i.e., the initial segments of the re-
+sponses. For example, given the question “What is the capi-
+tal of Brazil?”, multiple responses commonly share the pre-
+fix “The capital of Brazil is” as shown in Figure 2a.
+To verify the presence of redundancy, we analyze prefix
+overlap in multiple-response generation using Llama2-7B-
+Chat (Touvron et al. 2023) across several datasets. We eval-
+uate overlap from two perspectives: (1) the proportion of re-
+sponse pairs that share prefixes, and (2) the proportion of
+words in the shared prefixes relative to the total word count.
+As shown in Figure 2, the sentence-level and the word-level
+ratio exceeds 70% and 25% across all four datasets, respec-
+tively. These results demonstrate that redundancy is preva-
+lent across both datasets and models. For additional imple-
+mentation details and results on other models, please refer
+to Appendix B.1 and D.1.
+Observation 2: Non-exact-answer tokens do not matter.
+Recent research has shown that extracting exact answers
+
+===== PAGE 4 =====
+
+Question:What is the Capital of Brazil?
+R1:The capital of Brazil is Brasilia.
+R2:The capital of Brazil is the city of Brasilia.
+R3:The capital of Brazil is called Brasilia.
+(a)
+Question:What is the Capital of Brazil?
+R1:The capital of Brazil is Brasilia.
+R2:The capital of Brazil is the city of Brasilia.
+R3:Brasilia is the capital of Brazil.
+Similar Semantic (b)
+(c)
+ (d)
+Figure 2: Preliminary study of redundancy with Llama2-7B-
+Chat. (a) Example of shared prefixes across multiple gener-
+ations. (b) Example that variations in non-exact-answer to-
+kens preserve the semantics. (c) Prefix matching ratios at the
+sentence level and word level across datasets. (d) Response
+accuracy after template-based grouping across datasets.
+is critical for improving performance in many tasks (Orgad
+et al. 2024; Asai and Hajishirzi 2020), as they capture the
+key information within responses. Consequently, hallucina-
+tion detection should primarily rely on the exact answers,
+while non-exact-answer tokens affect sentence structure or
+word order. As shown in Figure 2b, given the questionWhat
+is the capital of Brazil? , the non-exact-answer tokens vary,
+but the responses convey the same semantic information, in-
+dicating the inner redundancy.
+To test the generality of this assumption, we conduct ex-
+periments to assess the influence of non-exact-answer to-
+kens. Specifically, for each question, we generate multiple
+responses and then group them based on their answer tem-
+plates using GPT-3.5 (OpenAI 2023). The rationale is that
+non-exact-answer tokens primarily affect the template or
+word order of the responses. After clustering the responses,
+we compare the accuracy of the two groups. As shown
+in Figure 2d, the accuracies of different groups are nearly
+identical to the overall accuracy, a trend consistent across
+datasets. This suggests that non-exact-answer tokens have a
+limited impact on the semantics of the generated responses.
+For implementation details, please refer to Appendix B.1.
+4.2 Selective Inference
+To mitigate the redundancy identified in Observation 1, we
+propose a selective inference strategy that skips unnecessary
+generation steps. The high-level motivation is that LLM in-
+ference will generate the same probability distribution with
+the same previous tokens, given the autoregressive pattern in
+Equation 1. To exploit this, we define a memory list M to
+store the response memory, which is initialized as an empty
+list. Then we define response memories to cache generated
+responses, where each entry stores the generated tokens y
+and their associated logits s:
+Mm = (y(m), s(m)), (5)
+wherem denotes the index of a cached generated response.
+During the generation of token y(n)
+i , we iterate over the
+memory entries Mm ∈ Mto check whether the prefix
+y(n)
+1:i−1 matches any stored response y(m)
+1:i−1. If a match is
+found, we directly assign the corresponding s(m)
+i to y(n)
+i ,
+and reuse s(m)
+i to predict the next token, bypassing the
+model inference step. If no matching prefix is found, a for-
+ward pass is performed: s(n)
+i = fθ(x, y(n)
+1:i−1). After gener-
+ating a newly complete responsey(n), it will be added to the
+memory listM if it is not already present.
+KV Cache. Selective inference remains compatible with
+KV caching by caching the key and value tensors of re-
+sponses. Specifically, we augment the response memory
+with keys K(m) and values V(m) of the whole sequence:
+Mm = (y(m), s(m), K(m), V(m)). (6)
+We assign K(m)
+i and V(m)
+i to y(n)
+i if a matching prefix
+is found in the memory set M. If no match is found, a
+forward pass is performed using the KV cache: s(n)
+i =
+fθ(x, y(n)
+i−1, K(n)
+1:i−2, V(n)
+1:i−2). Note that the outputs produced
+by our selective inference method are equivalent to those
+generated by the standard generation pipeline.
+Batch Mode. Our DMP supports batch-wise inference,
+aligning with the parallel processing characteristics of deep
+learning. This is achieved through a reusing mask, where
+the model continues its forward pass until no prefix match
+can be identified under this mask. To be specific, the reusing
+mask µr is initialized as the attention mask in causal lan-
+guage models (Vaswani et al. 2017), where only the input
+prompt tokens are unmasked. Let the generated batch be
+BG, and a reference batch BR of the same size be initial-
+ized with all entries set toNone. At each generation step, we
+first perform a batch-wise prefix match betweenBG andBR
+under the attention mask µa. Forj-th instance in the batch,
+the reusing maskµr is updated as follows:
+• For instance BG[j] that fails to match, set all the items of
+µr[j] as 0 and updateBR[j] with Next(MBG[j]).
+• For instance BG[j] that matches,µr[j] is updated to fol-
+lowµa[j], with the next token position unmasked.
+Here,MBG[j] is the memory list ofBG[j], and Next(M)
+fetches the next cached response in M. For the instances
+with a successful match, both the attention and generated
+batches are updated as follows:
+µr(BG) = Update(µr(BR)), (7)
+µr(µa) =µr, (8)
+where Update(·) denotes the next token information update
+in selective inference. If no match is found after iterating
+through all the caches inMBG, we perform a forward pro-
+cess over the batchf(BG,µa). Each newly generated com-
+plete response BG[j] is added to the memory list MBG[j]
+if it is not already present. The complete batch-wise infer-
+ence process is outlined in Appendix C, where all steps are
+implemented in a fully parallelization manner.
+
+===== PAGE 5 =====
+
+4.3 Annealed Decoding
+As indicated in Observation 2, non-exact tokens have mini-
+mal influence on semantics and hallucination detection per-
+formance. To enhance template consistency in responses, we
+introduce annealed decoding to mitigate the impact of non-
+exact-answer tokens. To implement this, we first identify
+less important tokens using the cosine similarity. Then, dur-
+ing decoding, we progressively lower the sampling temper-
+ature for these tokens based on how frequently they appear,
+effectively promoting the reuse ratio across generations.
+To identify less important tokens, we compute the cosine
+similarity between each response token embedding and the
+embedding of the input prompt. Intuitively, tokens that ex-
+hibit high similarity to the prompt embedding are likely to
+be semantically entailed or repeated from the prompt itself,
+and thus contribute less new information. In contrast, to-
+kens with low similarity are more likely to introduce novel
+content not directly present in the prompt, making them in-
+formative and important. Therefore, we treat high-similarity
+tokens as non-exact-answer tokens and target them for tem-
+perature annealing. First, we augment the response memory
+Mm by caching the hidden states h(m) = [h(x), h(y(m))],
+where h(·) denotes the final-layer hidden embeddings. The
+importance score of a response token y(k)
+i is computed as:
+I (m)
+i =− cos
+
+h(x−1), h(y(m)
+i )
+
+, (9)
+where we represent the input prompt using the embedding of
+its last token, h(x−1). Then we select less important tokens
+by comparing them with the average score:
+I (m) ={i|I (m)
+i < α
+L(m)
+L(m)
+X
+i=1
+I (m)
+i }, (10)
+where the hyperparameterα controls the selection threshold.
+Based on the occurrence frequency of non-exact-answer to-
+kens, we reduce the sampling randomness of them, as more
+frequent tokens tend to form a preferable template for gen-
+eration. In particular, when selective inference skips gener-
+ation using the m-th cached response and the i-th token is
+identified as a non-exact-answer token, we scale up and up-
+date the cached logits s(m) as follows:
+s(m)
+i =η∗ s(m)
+i , ifi∈I (m), (11)
+whereη∈ (1,∞) is the annealing speed for controlling the
+strength of annealing. Our technique is equivalent to lower-
+ing the sampling temperature and encourages deterministic
+reuse of non-exact-answer tokens while preserving the in-
+formative parts of the sequence.
+Hard Decoding. For tokens with highly concentrated
+sampling distributions during generation, resampling often
+results in negligible variation and does not alter the semantic
+outcome. To increase the reuse efficiency in such cases, we
+introduce hard sampling, which deterministically reuses the
+token prediction when the model is confident. Specifically,
+if the maximum sampling probability exceeds a threshold
+γ and the cached token is correspond to the maximum, we
+Algorithm 1: Decoding Memory Pipeline
+Input: Input prompts x, Number of ResponsesN, modelf
+Parameter: Sampling Temperature T , Confidence Threshold γ,
+Rescalingη, Selection Thresholdα
+Output:N responses
+1: Initailze memory list M = [ ] ;
+2: fori = 1 : N do
+3: Initialize the current response yi = x;
+4: forj = 1 : max generation do
+5: fork = 1 : len(M) do
+6: if M[k] start with yi then
+7: Hard Decoding with cache and inherit scores si,
+KV cacheKi,Vi, and hidden states hi;
+8: else
+9: yi[j + len(x)] =f (x,K i,V i);
+10: end if
+11: end for
+12: end for
+13: if yi is not contained in M then
+14: M.append((yi, si,Ki,Vi, hi));
+15: else
+16: Anneal the memory in M corresponding to yi;
+17: end if
+18: end for
+19: return [y1, y2,..., yN ]
+sample the next token as follows:
+s(n)
+i = y(m)
+i , if max(P(y(m)
+i | x, y(m)
+1:i−1))>γ
+and y(m)
+i = arg maxs(m)
+i ,
+where the hyperparameterγ controls the confidence thresh-
+old for applying hard decoding.
+Remark 1. Although our primary focus in this paper is on
+hallucination detection, the applicability of DMP extends
+beyond this use case. Self-consistency methods are broadly
+employed in tasks such as uncertainty quantification (Kuhn,
+Gal, and Farquhar 2023), alignment (Amini et al. 2024), and
+reasoning (Zuo et al. 2025) in LLMs.
+5 Experiments
+In this section, we first describe our experimental set-
+tings. We then evaluate the performance of our proposed
+DMP across multiple datasets using self-consistency meth-
+ods, demonstrating its ability to accelerate inference without
+compromising accuracy. Furthermore, we conduct compre-
+hensive ablation studies to analyze the contributions of se-
+lective inference and annealed decoding.
+5.1 Experiment Settings
+Datasets. We evaluate the effectiveness of our proposed
+DMP on four generative question-answering (QA) datasets:
+TriviaQA (Joshi et al. 2017), NQ Open (Kwiatkowski et al.
+2019), SQuAD (Rajpurkar et al. 2016), and the QA sub-
+set of HaluEval (Li et al. 2023). To further demonstrate
+the robustness of our method, we include additional results
+on SciQ (Welbl, Liu, and Gardner 2017) in Appendix E,
+showcasing its performance on domains requiring special-
+ized knowledge. For each dataset, we use 400 test examples
+randomly sampled from the original larger dataset.
+
+===== PAGE 6 =====
+
+Llama2-7B-Chat Mistral-7B-Instruct
+TriviaQA NQ Open SQuAD HaluEval TriviaQA NQ Open SQuAD HaluEval
+LN-Entopy 69.5 61.2 66.9 68.2 73.2 65.7 59.9 71.2
+LN-Entropy+DMP 71.0 64.4 68.6 69.8 73.3 67.8 61.0 73.8
+Lexical Similarity 66.7 62.9 70.0 61.5 75.8 68.2 64.8 79.3
+Lexical Similarity+DMP 67.7 62.0 70.8 65.3 75.5 67.8 63.9 78.0
+Semantic Entropy 86.4 81.8 82.5 77.9 84.6 79.9 76.7 84.3
+Semantic Entropy+DMP 85.4 82.0 81.5 77.2 84.8 78.9 77.1 84.9
+Semantic Entropy-B 86.3 81.6 82.2 78.0 84.8 80.0 77.0 84.5
+Semantic Entropy-B+DMP 86.4 82.3 81.4 77.0 84.6 79.1 77.5 84.8
+SelfCheckGPT 64.9 64.9 70.5 61.2 71.4 64.5 65.1 74.6
+SelfCheckGPT+DMP 67.5 62.9 70.3 64.5 71.6 66.9 60.1 76.0
+EigenScore 70.6 65.8 70.0 66.3 75.1 66.5 65.2 79.9
+EigenScore+DMP 69.5 63.9 71.8 68.3 75.8 67.3 66.4 78.4
+EigenScore-B 74.2 68.5 72.7 75.0 79.0 73.4 63.7 84.0
+EigenScore-B+DMP 71.3 65.8 73.7 75.1 78.9 71.4 65.1 81.8
+Mean – Baseline 74.09 69.53 73.54 69.73 77.70 71.17 67.49 79.69
+Mean – DMP (Ours) 74.11 69.04 74.01 71.03 77.79 71.31 67.30 79.68
+Time (s) – Baseline 1778 2368 1932 2148 1124 1750 1430 1225
+Time (s) – DMP (Ours) 627 (2.8x) 1246 (1.9x) 1022 (1.9x) 904 (2.4x) 442 (2.5x) 927 (1.9x) 744 (1.9x) 630 (2.0x)
+Reuse Ratio 66.8% 52.7% 50.4% 62.6% 63.4% 51.3% 51.3% 55.1%
+Table 1: AUROC, mean AUROC, running time, and reuse ratio of different baselines using LLaMA-2-7B-Chat and Mistral-
+7B-Instruct on TriviaQA, NQ Open, SQuAD, and HaluEval. The best mean AUROC is highlighted in bold.
+Models. Following prior work on hallucination detection,
+we conduct experiments using widely adopted open-source
+LLMs, including LLaMA-2-7B-Chat (Touvron et al. 2023)
+and Mistral-7B-Instruct (Jiang et al. 2023). To demonstrate
+the scalability and generalization of our DMP, we present
+additional experiments on LLaMA-2-13B-Chat and Falcon-
+7B-Instruct (Penedo et al. 2023), provided in Appendix D.2.
+Evaluation. Following Farquhar et al. (2024), we use
+GPT-4o (Hurst et al. 2024) to label the correctness of gen-
+erated responses, as standard metrics often fall short for
+sentence-level evaluation. We assess detection performance
+using the area under the receiver operating characteristic
+curve ( AUROC). To quantify the generation cost, we re-
+port the average generation time per input prompt on a sin-
+gle H100 GPU. To factor out hardware and system effects,
+we also report the reuse ratio, defined as the percentage of
+generated tokens for which the forward process is skipped,
+thereby reflecting the theoretical speedup.
+Baselines. We evaluate our proposed DMP against sev-
+eral widely-used self-consistency baselines, including LN-
+Entropy(Malinin and Gales 2020), Lexical Similarity(Lin,
+Liu, and Shang 2022), Semantic Entropy(Farquhar et al.
+2024), SelfCheckGPT(Manakul, Liusie, and Gales 2023),
+and EigenScore (Chen et al. 2024). Moreover, we provide
+additional experiments on the black box version of Seman-
+tic Entropy and EigenScore as“Semantic Entropy-B” and
+“EigenScore-B”. For detailed descriptions of these base-
+lines, please refer to Appendix A.
+Implementation. We implement our selective inference
+using the KV Cache variant. We adopt the following default
+settings. We set the generation temperature to 0.8. For an-
+nealed decoding, we set the importance-selection threshold
+α to 0.9 and the annealing speedη to 1.4. For hard decoding,
+we set the confidence threshold γ to 0.8. For additional im-
+plementation details, please refer to Appendix B.2. For nota-
+tional simplicity, we denote our method built upon a baseline
+implementation as “+DMP”. For example, when applied to
+LN-Entropy, we denote it as “LN-Entropy+DMP”.
+5.2 Main Results
+Table 1 reports the AUROC, mean AUROC, running time,
+and reuse ratio across different models and datasets, with the
+best mean performance highlighted in bold. Based on these
+results, we draw the following conclusions.
+Detection Performance. Our method consistently main-
+tains a high AUROC across baselines, models, and datasets,
+in some cases even slightly exceeding baseline performance.
+Specifically, the AUROC reduction is at most 2.9% across
+all trials, while the mean AUROC reduction over all self-
+consistency methods is limited to just0.5%, both well within
+an acceptable range. Notably, the mean AUROC with our
+DMP surpasses the baseline in 5 out of 8 trials, indicating
+that the introduced sampling randomness does not compro-
+mise, and may even enhance the detection performance.
+Efficiency Improvement. Applying DMP consistently
+improves the efficiency of self-consistency methods, as con-
+firmed by both theoretical analysis and empirical results. In
+terms of reuse ratio, our approach skips up to 66.8% of to-
+ken generation in TriviaQA with Llama2-7B-Chat, achiev-
+ing a 3× acceleration. The measured running time closely
+
+===== PAGE 7 =====
+
+(a) TriviaQA
+ (b) SQuAD
+Figure 3: AUROC and reuse ratio of confidence threshold
+study in hard decoding. Baseline denotes standard genera-
+tion, while w/ SI refers to selective inference without other
+techniques. The error bar indicates the reuse ratio of w/ SI.
+(a)γ = 0.75
+ (b)γ = 0.8
+Figure 4: AUROC and reuse ratio of rescaling study in
+annealed decoding. Baseline denotes standard generation,
+while w/ Hard refers to hard decoding. The red error bar
+indicates the reuse ratio of w/ Hard.
+matches the theoretical speedup on hardware. While the
+gains are smaller on more challenging datasets such as NQ
+Open and SQuAD, our method still consistently delivers at
+least a 2× acceleration in both theory and 1.9× practice.
+5.3 Ablation Study
+In this section, we present comprehensive ablation studies
+to examine the contributions of individual components of
+DMP, reporting mean measurements over the baselines. We
+first analyze the effect of the hard decoding threshold, fol-
+lowed by evaluating the effectiveness of annealed decoding.
+Furthermore, we assess the effect of sampling temperature
+on acceleration performance in Appendix D.3 and provide
+memory analysis in Appendix F. We denote w/ SI as the
+method that applies selective inference, and w/ Hard denotes
+the method applying hard decoding. We further denote Base-
+line as standard generation. The small error bar indicates the
+reuse ratio of the corresponding setting.
+Effectiveness of Hard Decoding. We conduct experi-
+ments on TriviaQA and SQuAD using Llama2-7B-Chat, ex-
+amining the trade-off between AUROC and reuse ratio under
+different confidence thresholds γ∈{ 0.6, 0.7, 0.8, 0.9}. As
+shown in Figure 3, AUROC remains robust across different
+values of γ, while the reuse ratio increases as γ decreases.
+We conservatively selectγ = 0.8 as the final threshold, as
+it provides a favorable balance. Notably, hard decoding does
+(a)η = 1.1
+ (b)η = 1.4
+Figure 5: AUROC and reuse ratio of selection threshold
+study in annealed decoding. Baseline denotes standard gen-
+eration, while w/ Hard refers to hard decoding. The red error
+bar indicates the reuse ratio of w/ Hard.
+Baseline +Selective
+Inference
++Hard
+Decoding
++Annealed
+Decoding
+AUROC 70.1 70.2 67.7 69.7
+Reuse Ratio – 56.9% 63.4% 66.8%
+Table 2: AUROC and reuse ratio for technique components.
+not necessarily reduce performance, suggesting that existing
+self-consistency methods may be underconfident.
+Effectiveness of Annealed Decoding. We conduct
+experiments on the rescaling hyperparameter η ∈
+{1.1, 1.2, 1.3, 1.4} in annealed decoding to study its im-
+pact on TriviaQA using Llama2-7B-Chat under two confi-
+dence thresholdsγ. As shown in Figure 4, annealed decod-
+ing yields improvements over hard decoding and can even
+approach baseline performance on both efficiency and detec-
+tion performance. We attribute this to the rescaling, which
+makes non-exact-answer tokens more deterministic, while
+hard decoding further enhances consistency and mitigates
+underconfidence in non-exact-answer tokens.
+Additionally, we conduct experiments on the selection
+threshold α ∈ {0.8, 0.9, 1.0, 1.1, 1.2} in annealed decod-
+ing to study its impact on TriviaQA using Llama2-7B-Chat
+under two rescaling parameters. As shown in Figure 5, set-
+ting α = 1.2 consistently maintains a high AUROC while
+achieving a favorable trade-off. Finally, we present perfor-
+mance improvement applying our techniques in Table 2.
+6 Conclusion
+In this work, we present the Decoding Memory Pipeline
+(DMP), a novel approach to accelerate hallucination detec-
+tion in large language models by leveraging redundancy in
+self-consistency decoding. By identifying and reusing re-
+peated tokens across generations, DMP significantly reduces
+inference cost while maintaining strong detection perfor-
+mance. Our experiments demonstrate up to a 3x speedup
+without compromising AUROC scores, making DMP prac-
+tical for real-world applications. A limitation of our ap-
+proach is the increased memory cost resulting from caching
+more responses than standard generation. Developing effi-
+cient cache storage strategies is left for future work.
+
+===== PAGE 8 =====
+
+7 Acknowledgment
+This research was supported by the Graduate Research at
+ORNL (GRO) Internship Program at Oak Ridge National
+Laboratory and used resources of the Oak Ridge Leader-
+ship Computing Facility (OLCF), which is a DOE Office of
+Science User Facility at the Oak Ridge National Laboratory
+supported by the U.S. Department of Energy under Contract
+No. DE-AC05-00OR22725.
+References
+AI@Meta. 2024. Llama 3 Model Card.
+Amini, A.; Vieira, T.; Ash, E.; and Cotterell, R.
+2024. Variational best-of-n alignment. arXiv preprint
+arXiv:2407.06057.
+Asai, A.; and Hajishirzi, H. 2020. Logic-guided data aug-
+mentation and regularization for consistent question answer-
+ing. arXiv preprint arXiv:2004.10157.
+Athaluri, S. A.; Manthena, S. V .; Kesapragada, V . K. M.;
+Yarlagadda, V .; Dave, T.; and Duddumpudi, R. T. S. 2023.
+Exploring the boundaries of reality: investigating the phe-
+nomenon of artificial intelligence hallucination in scientific
+writing through ChatGPT references. Cureus, 15(4).
+Azaria, A.; and Mitchell, T. 2023. The internal state
+of an LLM knows when it’s lying. arXiv preprint
+arXiv:2304.13734.
+Chai, M.; Herron, E.; Cervantes, E.; and Ghosal, T. 2024.
+Exploring scientific hypothesis generation with mamba.
+In Proceedings of the 1st Workshop on NLP for Science
+(NLP4Science), 197–207.
+Chen, C.; Liu, K.; Chen, Z.; Gu, Y .; Wu, Y .; Tao, M.; Fu,
+Z.; and Ye, J. 2024. INSIDE: LLMs’ internal states re-
+tain the power of hallucination detection. arXiv preprint
+arXiv:2402.03744.
+Devlin, J.; Chang, M.-W.; Lee, K.; and Toutanova, K. 2019.
+Bert: Pre-training of deep bidirectional transformers for lan-
+guage understanding. In Proceedings of the 2019 conference
+of the North American chapter of the association for compu-
+tational linguistics: human language technologies, volume 1
+(long and short papers), 4171–4186.
+Farquhar, S.; Kossen, J.; Kuhn, L.; and Gal, Y . 2024. Detect-
+ing hallucinations in large language models using semantic
+entropy. Nature, 630(8017): 625–630.
+Gao, W.; Hou, Z.; Yin, J.; Wang, F.; Peng, L.; and Liu,
+X. 2025. Modulated Diffusion: Accelerating Generative
+Modeling with Modulated Quantization. arXiv preprint
+arXiv:2506.22463.
+Henighan, T.; Kaplan, J.; Katz, M.; Chen, M.; Hesse, C.;
+Jackson, J.; Jun, H.; Brown, T. B.; Dhariwal, P.; Gray, S.;
+et al. 2020. Scaling laws for autoregressive generative mod-
+eling. arXiv preprint arXiv:2010.14701.
+Hooper, C.; Kim, S.; Mohammadzadeh, H.; Mahoney,
+M. W.; Shao, Y . S.; Keutzer, K.; and Gholami, A. 2024.
+Kvquant: Towards 10 million context length llm inference
+with kv cache quantization. Advances in Neural Informa-
+tion Processing Systems, 37: 1270–1303.
+Hurst, A.; Lerer, A.; Goucher, A. P.; Perelman, A.; Ramesh,
+A.; Clark, A.; Ostrow, A.; Welihinda, A.; Hayes, A.; Rad-
+ford, A.; et al. 2024. Gpt-4o system card. arXiv preprint
+arXiv:2410.21276.
+Ji, Z.; Lee, N.; Frieske, R.; Yu, T.; Su, D.; Xu, Y .; Ishii, E.;
+Bang, Y . J.; Madotto, A.; and Fung, P. 2023. Survey of hal-
+lucination in natural language generation. ACM computing
+surveys, 55(12): 1–38.
+Jiang, D.; Liu, Y .; Liu, S.; Zhao, J.; Zhang, H.; Gao, Z.;
+Zhang, X.; Li, J.; and Xiong, H. 2023. From clip to dino:
+Visual encoders shout in multi-modal large language mod-
+els. arXiv preprint arXiv:2310.08825.
+Joshi, M.; Choi, E.; Weld, D. S.; and Zettlemoyer, L.
+2017. Triviaqa: A large scale distantly supervised chal-
+lenge dataset for reading comprehension. arXiv preprint
+arXiv:1705.03551.
+Kuhn, L.; Gal, Y .; and Farquhar, S. 2023. Seman-
+tic uncertainty: Linguistic invariances for uncertainty es-
+timation in natural language generation. arXiv preprint
+arXiv:2302.09664.
+Kwiatkowski, T.; Palomaki, J.; Redfield, O.; Collins, M.;
+Parikh, A.; Alberti, C.; Epstein, D.; Polosukhin, I.; Devlin,
+J.; Lee, K.; et al. 2019. Natural questions: a benchmark for
+question answering research. Transactions of the Associa-
+tion for Computational Linguistics, 7: 453–466.
+Li, J.; Cheng, X.; Zhao, W. X.; Nie, J.-Y .; and Wen, J.-
+R. 2023. Halueval: A large-scale hallucination evalua-
+tion benchmark for large language models. arXiv preprint
+arXiv:2305.11747.
+Li, Q.; Geng, J.; Chen, Z.; Zhu, D.; Wang, Y .; Ma, C.;
+Lyu, C.; and Karray, F. 2025. HD-NDEs: Neural Differen-
+tial Equations for Hallucination Detection in LLMs. arXiv
+preprint arXiv:2506.00088.
+Lin, J.; Tang, J.; Tang, H.; Yang, S.; Chen, W.-M.; Wang,
+W.-C.; Xiao, G.; Dang, X.; Gan, C.; and Han, S. 2024.
+Awq: Activation-aware weight quantization for on-device
+llm compression and acceleration. Proceedings of machine
+learning and systems, 6: 87–100.
+Lin, Z.; Liu, J. Z.; and Shang, J. 2022. Towards collabora-
+tive neural-symbolic graph semantic parsing via uncertainty.
+Findings of the Association for Computational Linguistics:
+ACL 2022.
+Liu, A.; Liu, J.; Pan, Z.; He, Y .; Haffari, G.; and Zhuang, B.
+2024. Minicache: Kv cache compression in depth dimension
+for large language models. Advances in Neural Information
+Processing Systems, 37: 139997–140031.
+Liu, W.; Wang, X.; Owens, J.; and Li, Y . 2020. Energy-based
+out-of-distribution detection. Advances in neural informa-
+tion processing systems, 33: 21464–21475.
+Ma, X.; Fang, G.; and Wang, X. 2023. Llm-pruner: On the
+structural pruning of large language models. Advances in
+neural information processing systems, 36: 21702–21720.
+Malinin, A.; and Gales, M. 2020. Uncertainty estima-
+tion in autoregressive structured prediction. arXiv preprint
+arXiv:2002.07650.
+
+===== PAGE 9 =====
+
+Manakul, P.; Liusie, A.; and Gales, M. J. 2023. Self-
+checkgpt: Zero-resource black-box hallucination detection
+for generative large language models. arXiv preprint
+arXiv:2303.08896.
+OpenAI, R. 2023. Gpt-4 technical report. arxiv 2303.08774.
+View in Article, 2(5): 1.
+Orgad, H.; Toker, M.; Gekhman, Z.; Reichart, R.; Szpektor,
+I.; Kotek, H.; and Belinkov, Y . 2024. Llms know more than
+they show: On the intrinsic representation of llm hallucina-
+tions. arXiv preprint arXiv:2410.02707.
+Pal, A.; Umapathi, L. K.; and Sankarasubbu, M. 2023. Med-
+halt: Medical domain hallucination test for large language
+models. arXiv preprint arXiv:2307.15343.
+Pan, L.; Wu, X.; Lu, X.; Luu, A. T.; Wang, W. Y .;
+Kan, M.-Y .; and Nakov, P. 2023. Fact-checking com-
+plex claims with program-guided reasoning. arXiv preprint
+arXiv:2305.12744.
+Park, S.; Du, X.; Yeh, M.-H.; Wang, H.; and Li, Y . 2025.
+Steer LLM Latents for Hallucination Detection. arXiv
+preprint arXiv:2503.01917.
+Penedo, G.; Malartic, Q.; Hesslow, D.; Cojocaru, R.; Cap-
+pelli, A.; Alobeidli, H.; Pannier, B.; Almazrouei, E.; and
+Launay, J. 2023. The RefinedWeb dataset for Falcon LLM:
+outperforming curated corpora with web data, and web data
+only. arXiv preprint arXiv:2306.01116.
+Rajpurkar, P.; Zhang, J.; Lopyrev, K.; and Liang, P. 2016.
+Squad: 100,000+ questions for machine comprehension of
+text. arXiv preprint arXiv:1606.05250.
+Rawte, V .; Sheth, A.; and Das, A. 2023. A survey of
+hallucination in large foundation models. arXiv preprint
+arXiv:2309.05922.
+Ren, J.; Luo, J.; Zhao, Y .; Krishna, K.; Saleh, M.; Laksh-
+minarayanan, B.; and Liu, P. J. 2022. Out-of-distribution
+detection and selective generation for conditional language
+models. arXiv preprint arXiv:2209.15558.
+Su, W.; Wang, C.; Ai, Q.; Hu, Y .; Wu, Z.; Zhou, Y .; and
+Liu, Y . 2024. Unsupervised real-time hallucination detection
+based on the internal states of large language models. arXiv
+preprint arXiv:2403.06448.
+Touvron, H.; Martin, L.; Stone, K.; Albert, P.; Almahairi, A.;
+Babaei, Y .; Bashlykov, N.; Batra, S.; Bhargava, P.; Bhosale,
+S.; et al. 2023. Llama 2: Open foundation and fine-tuned
+chat models. arXiv preprint arXiv:2307.09288.
+Vaswani, A.; Shazeer, N.; Parmar, N.; Uszkoreit, J.; Jones,
+L.; Gomez, A. N.; Kaiser, Ł.; and Polosukhin, I. 2017. At-
+tention is all you need. Advances in neural information pro-
+cessing systems, 30.
+Wan, Z.; Wang, X.; Liu, C.; Alam, S.; Zheng, Y .; Liu, J.;
+Qu, Z.; Yan, S.; Zhu, Y .; Zhang, Q.; et al. 2023. Ef-
+ficient large language models: A survey. arXiv preprint
+arXiv:2312.03863.
+Welbl, J.; Liu, N. F.; and Gardner, M. 2017. Crowd-
+sourcing multiple choice science questions. arXiv preprint
+arXiv:1707.06209.
+Xiong, M.; Hu, Z.; Lu, X.; Li, Y .; Fu, J.; He, J.; and Hooi,
+B. 2023. Can llms express their uncertainty? an empirical
+evaluation of confidence elicitation in llms. arXiv preprint
+arXiv:2306.13063.
+Xu, X.; Li, M.; Tao, C.; Shen, T.; Cheng, R.; Li, J.; Xu,
+C.; Tao, D.; and Zhou, T. 2024. A survey on knowl-
+edge distillation of large language models. arXiv preprint
+arXiv:2402.13116.
+Xue, F.; Fu, Y .; Zhou, W.; Zheng, Z.; and You, Y . 2023.
+To repeat or not to repeat: Insights from scaling llm under
+token-crisis. Advances in Neural Information Processing
+Systems, 36: 59304–59322.
+Zuo, Y .; Zhang, K.; Sheng, L.; Qu, S.; Cui, G.; Zhu, X.; Li,
+H.; Zhang, Y .; Long, X.; Hua, E.; et al. 2025. Ttrl: Test-time
+reinforcement learning. arXiv preprint arXiv:2504.16084.
+
+===== PAGE 10 =====
+
+A Background
+In this section, we present the background knowledge about
+KV cache and the self-consistency baselines used in our pa-
+per.
+KV cache. To reduce the computational burden of the at-
+tention mechanism, past key and value tensors are cached
+to avoid redundant computation. During generation, the past
+tokens involve the logit computation of the next token yi+1
+via the attention:
+Attni = softmax
+ QiKT
+1:i√dk
+
+V1:i, (12)
+Qi = XiWQ, K1:i = X1:iWK, V1:i = X1:iWV, (13)
+wheredK denotes the dimensionality of the keys, X1:i de-
+notes the input of attention, and WQ, WK, and WV rep-
+resent the linear projections for the query, key, and value,
+respectively. Due to the causal mask in the attention mech-
+anism, K1:i−1 and V1:i−1 remain fixed during generation.
+Thus, only Ki and Vi need to be computed at each step,
+followed by concatenation with K1:i−1 and V1:i−1. Con-
+sequently, we can update Equation 1 in the main paper as
+follows:
+si =fθ(x,yi−1, K1:i−2, V1:i−2), i = 2, 3,...,L. (14)
+Despite the optimizations introduced by KV cache, the se-
+quential nature of generation remains computationally in-
+tensive, as it requires O(L) model forward passes for a se-
+quence of lengthL.
+LN-Entropy. GivenN responsesY ={y1, y2,..., yN}
+and the input prompt x, length-normalized entropy com-
+putes the consistency score as follows:
+SLNE(Y|x) =−Ey∈Y
+1
+Ly
+LyX
+i=1
+log P(yi| x, y1:i−1), (15)
+whereLy denotes the length of the response y. LN-Entropy
+computes the consistency score as the average log-likelihood
+of the responses, normalized by response length.
+Lexical Similarity.GivenN responsesY ={y1, y2,...,
+yN} and the input prompt x, lexical similarity estimates the
+consistency score by constructing semantic graphs and mea-
+suring similarities based on the uncertainty of a sequence-
+to-sequence model as follows:
+SLEX(Y|x) = 1
+N(N− 1)
+NX
+i=1
+NX
+j=i+1
+sim(yi, yj), (16)
+where sim(·,·) is the similarity function using semantic
+rules. We compute lexical similarity using the ROUGE met-
+ric.1
+SelfCheckGPT. Given N responsesY = {y1, y2,...,
+yN} and the input prompt x, SelfCheckGPT evaluates the
+consistency between generations using methods such as
+BERTScore, designed QA, NLI tasks, or n-gram models. In
+1https://huggingface.co/spaces/evaluate-metric/rouge
+our work, we adopt BERTScore, which is computed as fol-
+lows:
+SBERT(Y|x) = 1− 1
+N
+NX
+i=1
+B(yi, ˆy), (17)
+whereB(·,·) represents the BERTScore computation func-
+tion, and ˆy is the most probable answer generated with
+greedy decoding. We choose NLI-RoBERTa-Large as the
+backbone of the score computation2.
+EigenScore. GivenN responsesY ={y1, y2,..., yN}
+and the input prompt x, EigenScore measures the consis-
+tency between answers with the eigenvalues of the sentence
+embedding matrix. To be specific, the sentence embedding
+matrix is the stack of the hidden states of the last token:
+Z = Concat([h1[−1], h2[−1],..., hN[−1]]), (18)
+where Concat(·) denotes concatenation along the first di-
+mension, and hi[−1] refers to the hidden state of the last
+token in responsei. The covariance matrix ofZ is then com-
+puted as:
+Σ = Z⊤(I− 1
+N 1⊤1)Z, (19)
+where 1 denotes an all-ones column vector. The EigenScore
+is then computed using the determinant of Σ:
+SEigen = 1
+N
+NX
+i=1
+log det(Σ +αI), (20)
+where α is a regularization term introduced to mitigate is-
+sues arising from singular values.
+In black-box scenarios, where the hidden states of LLMs
+are inaccessible, we employ a proxy model to compute the
+hidden states. We denote this variant as EigenScore-B, us-
+ing NLI-RoBERTa-Large2 as the proxy model.
+Semantic Entropy. Given N responses Y =
+{y1, y2,..., yN} and the input prompt x, semantic
+entropy first clusters the responses in to clusters C with the
+help of other language models. Then the consistency score
+is computed through a Rao-Blackwellized Monte Carlo
+integration over the semantic equivalence classesC:
+SSE(Y|x) =−
+X
+c∈C
+P(c|x) logP(c|x), (21)
+P (c|x) =
+X
+yi∈c
+P(yi|x) (22)
+whereP (c|x) is normalized over the sampled clusters. We
+use GPT-3.5-Turbo to generate cluster responses. For the
+specific prompt, please refer to Appendix B.2.
+In black-box scenarios, where the sentence likelihood of
+LLMs is inaccessible for the Rao-Blackwellized formula-
+tion, we estimate semantic entropy by counting the sam-
+ples in each cluster. We denote this variant as Semantic
+Entropy-B.
+2https://huggingface.co/sentence-transformers/nli-roberta-
+large
+
+===== PAGE 11 =====
+
+B Implementation Details
+In this section, we present the implementation details of the
+implementation of our preliminary study and main experi-
+ments.
+B.1 Preliminary Study
+We show how the prefix sharing proportion is computed and
+how we construct the prompt for splitting the answers into
+two groups.
+Prefix Sharing Proportion.To compute the prefix shared
+proportion of Observation 1, we use the sentence level and
+word level, respectively. Given M input prompts x(i), we
+generateN responses y(i)
+j , wherei = 1, 2,...,M , andj =
+1, 2,...,N . The sentence-level prefix sharing proportion is
+computed as follows:
+psentence = 2
+MN (N− 1) (23)
+∗
+MX
+m=1
+NX
+i=1
+NX
+j=i+1
+1{Entail(y(m)
+i , y(m)
+j )}, (24)
+where 1 is the indicator function andEntail(y(m)
+i , y(m)
+j ) rep-
+resents either y(m)
+i starts with y(m)
+j or y(m)
+j starts with y(m)
+i .
+The word-level prefix sharing proportion is computed as:
+pword = 2
+MN (N− 1) (25)
+∗
+MX
+m=1
+NX
+i=1
+NX
+j=i+1
+1{Entail(y(m)
+i , y(m)
+j )} (26)
+∗
+min(Ly(m)
+i
+,L y(m)
+j
+PM
+m=1
+PN
+i=1Ly(m)
+i
+, (27)
+whereLy(m)
+i
+represents the length of the response y(m)
+i . For
+each model and dataset, we generate 10 responses for 400
+questions using a sampling temperature of 0.8.
+Grouping Prompt For Observation 2, we group re-
+sponses into two groups according to the answer template.
+We use GPT-3.5-Turbo for grouping with the following
+prompt:
+“Given the question, please split the given responses into
+two groups according to the structure or template of the re-
+sponse. Please return two index list for the two groups.
+Question:{Question}
+Response 1:{Response 1}
+Response 2:{Response 2}
+...
+Response 10:{Response 10}
+Returned Lists: ”
+In our experiments, we sample 100 questions for each
+dataset and generate 10 responses for each question. To la-
+bel the correctness of the response, we use GPT-3.5-Turbo
+and use the same labeling method as the main experiments
+(Appendix B.2).
+B.2 Main Experiments
+In this section, we present the implementation details of our
+main experiments, including the prompt design for sentence-
+level response generation, the prompt design for response la-
+beling, the short-answer cut technique in annealed decoding,
+and the selection of specific hyperparameters.
+Prompt for Sentence Generation. Following the ap-
+proach of semantic entropy (Farquhar et al. 2024), we use
+the following prompt to generate sentence-level responses:
+Answer the following question in a single brief but com-
+plete sentence.
+Question:{question}
+Answer:
+Prompt for Response Labeling. Following the approach
+of semantic entropy (Farquhar et al. 2024), we use the fol-
+lowing prompt for response labeling when the dataset con-
+tains only a single reference answer:
+We are assessing the quality of answers to the following
+question:{question}
+The expected answer is:{reference answer}
+The proposed answer is:{predicted answer}
+Within the context of the question, does the proposed an-
+swer mean the same as the expected answer? Respond only
+with yes or no.
+For datasets with multiple reference answers, we employ
+the following prompt with small modifications:
+We are assessing the quality of answers to the following
+question:{question}
+The following are expected answers to this question:
+The proposed answer is:{predicted answer}
+Within the context of the question, does the proposed an-
+swer mean the same as any of the expected answers? Re-
+spond only with yes or no.
+Prompt for Entailment Estimating. In semantic en-
+tropy, we need to cluster the responses. We use the following
+prompt with GPT-3.5-Turbo:
+We are evaluating answers to the question{question}
+Here are two possible answers:
+Possible Answer 1:{text1}
+Possible Answer 2:{text2}
+Does Possible Answer 1 semantically entail Possible An-
+swer 2?
+Respond with entailment, contradiction, or neutral.
+Dealing with Short Answer in Annealed Decoding.
+Our proposed annealed decoding method searches for non-
+exact-answer tokens. However, in some cases, the generated
+responses are already exact answers under our generation
+prompt. To avoid unnecessary errors, we identify such short
+answers and exclude them from annealed decoding. In our
+experiments, we define short answers as responses contain-
+ing fewer than 10 tokens.
+SQuAD Experimental Settings. For SQuAD, we find
+that experiments with annealed decoding perform signifi-
+cantly worse than those using only selective inference with
+hard decoding, which also provides greater efficiency in gen-
+eration. Therefore, we report hard decoding results for our
+experiments on SQuAD. We attribute this outcome to the
+inherent difficulty of the dataset.
+
+===== PAGE 12 =====
+
+C Batch-Wise Algorithm
+In this section, we present the algorithm for batch-wise se-
+lective inference in Algorithm 2. In the algorithm,Update(·)
+denotes the token-level information update in selective in-
+ference, while Next(M) retrieves the next cached response
+fromM. Note that although all update rules during genera-
+tion are applied in parallel with the mask, we present them
+in an instance-wise manner for improved readability.
+Algorithm 2: Batch-Wise Decoding Memory Pipeline
+Input: Input Batch x, Number of ResponsesN, modelf
+Parameter: Sampling Temperature T , Confidence Threshold γ,
+Rescalingη, Selection Thresholdα
+Output: BatchedN responses
+1: Initialize memory list Mj = [ ] for j-th instance in the
+batch;
+2: Initialize the reference batch BR = None
+3: fori = 1 : N do
+4: Initialize the attention mask µa;
+5: Initialize the reusing mask µr =µa;
+6: Initialize the current generation batch BGi = x;
+7: forj = 1 : max generation do
+7: # Update the following in parallel withµr
+8: ifµa(BGi )[j] == µa(BR)[j] is True for at least one j
+then
+9: µr(BGi ) = Update(µr(BR));
+10: µr(µa) = µr;
+11: BR[j] = Next(M[j]) forµa(BGi ) [j] ̸=µa(BR)[j];
+12: else
+13: BGi,µ a =f (BGi,µ a,K i,V i);
+14: end if
+15: end for
+16: end for
+17: ifBGi [j] is not contained in Mj then
+18: Mj.append((BGi [j], si,Ki,Vi, hi));
+19: else
+20: Anneal the memory in M corresponding toBGi [j];
+21: end if
+22: return [BG1,B G2,...,B GN ]
+D Additional Results
+In this section, we present additional experiments, including
+preliminary studies, main experiments on other models, and
+an ablation study on sampling temperature selection. Un-
+less otherwise noted, the experimental settings are consistent
+with those used in the main experiments.
+D.1 Preliminary Study on Other Models
+As shown in the main paper, sentence-level and word-level
+prefix sharing frequently occurs in Llama2-7B-Chat across
+datasets. Here, we provide statistical results for other models
+in Figures 6, 7, and 8. The results indicate that redundancy
+is prevalent across different models.
+D.2 Main Experiments on Other Models
+We report experiments on LLaMA2-13B-Chat and Falcon-
+7B-Instruct to demonstrate the scalability and generalization
+of our DMP. To reduce the cost of OpenAI API usage, we
+omit the semantic entropy results. As shown in Table 3, our
+Figure 6: Prefix matching ratios at the sentence level and
+word level across datasets with Mistral-7B-Instruct.
+Figure 7: Prefix matching ratios at the sentence level and
+word level across datasets with Llama2-13B-Chat.
+Figure 8: Prefix matching ratios at the sentence level and
+word level across datasets with Falcon-7B-Instruct.
+method consistently improves generation efficiency while
+maintaining high AUROC across both scalable models and
+others.
+D.3 Ablation Study of Sampling Temperature
+Sampling temperature can influence the performance of hal-
+lucination detection. A higher temperature is often desirable
+for capturing uncertainty, while our method instead lever-
+ages redundancy, where a lower temperature increases the
+proportion of response reuse. To study this trade-off, we
+
+===== PAGE 13 =====
+
+Llama2-13B-Chat Falcon-7B-Instruct
+TriviaQA NQ Open SQuAD HaluEval TriviaQA NQ Open SQuAD HaluEval
+LN-Entopy 0.686 0.594 0.697 0.666 0.608 0.603 0.507 0.659
+LN-Entropy+DMP 0.713 0.636 0.736 0.686 0.621 0.638 0.573 0.689
+Lexical Similarity 0.652 0.588 0.730 0.574 0.689 0.628 0.627 0.767
+Lexical Similarity+DMP 0.646 0.599 0.727 0.599 0.692 0.618 0.623 0.746
+SelfCheckGPT 0.633 0.623 0.753 0.605 0.651 0.597 0.623 0.732
+SelfCheckGPT+DMP 0.641 0.632 0.742 0.624 0.672 0.616 0.642 0.693
+EigenScore 0.701 0.625 0.776 0.657 0.717 0.642 0.703 0.786
+EigenScore+DMP 0.702 0.628 0.754 0.660 0.710 0.630 0.647 0.768
+EigenScore-B 0.725 0.647 0.754 0.701 0.725 0.666 0.728 0.799
+EigenScore-B+DMP 0.718 0.641 0.737 0.698 0.724 0.664 0.690 0.776
+Mean – Baseline 0.679 0.615 0.742 0.641 0.678 0.627 0.637 0.749
+Mean – DMP (Ours) 0.684 0.627 0.739 0.653 0.684 0.633 0.635 0.734
+Reuse Ratio 0.679 0.515 0.499 0.636 0.639 0.521 0.523 0.594
+Table 3: AUROC, mean AUROC, running time, and reuse ratio of different baselines using LLaMA-2-13B-Chat and Falcon-
+7B-Instruct on TriviaQA, NQ Open, SQuAD, and HaluEval. The best mean AUROC is highlighted in bold.
+Figure 9: AUROC and reuse ratio of selective inference
+compared to the baseline under different sampling tempera-
+tures on TriviaQA. w/ SI represents selective inference.
+Figure 10: AUROC and reuse ratio of selective inference
+compared to the baseline under different sampling tempera-
+tures on SQuAD. w/ SI represents selective inference.
+conduct experiments with T ∈{ 0.5, 0.7, 0.8, 1.0} on both
+the baseline and selective inference (denoted as w/ SI). As
+Llama2-
+7B-Chat
+Mistral-
+7B-Instruct
+LN-Entopy 62.6 62.6
+LN-Entropy+DMP 66.5 60.3
+Lexical Similarity 63.3 63.3
+Lexical Similarity+DMP 65.1 68.6
+EigenScore 68.4 68.4
+EigenScore+DMP 67.2 69.8
+EigenScore-B 67.7 67.7
+EigenScore-B+DMP 66.6 72.1
+Mean – Baseline 65.5 65.5
+Mean – DMP (Ours) 66.35 67.7
+Reuse Ratio 65.5% 57.1%
+Table 4: AUROC, mean AUROC, running time, and reuse
+ratio of different baselines using LLaMA-2-7B-Chat and
+Mistral-7B-Instruct on SciQ. The best mean AUROC is
+highlighted in bold.
+shown in Figure 9 and 10, selective inference maintains gen-
+eration quality while substantially improving efficiency. For
+a conservative balance, we adopt T = 0.8 as the final sam-
+pling temperature.
+E Results on SciQ
+To verify that our method is not domain-dependent, which
+is a key advantage of self-consistency methods, we conduct
+experiments on SciQ (Welbl, Liu, and Gardner 2017) using
+LLaMA2-7B-Chat and Mistral-7B-Instruct. To reduce time
+and cost, we evaluate only four baselines: LN-Entropy, Lex-
+ical Similarity, EigenScore, and EigenScore-B. As shown in
+Table E, our DMP achieves significant efficiency gains on
+SciQ, and the mean AUROC even surpasses that of the base-
+lines.
+
+===== PAGE 14 =====
+
+F Memory Cost
+One limitation of our DMP is that it requires storing
+more cache compared to standard generation. To quantify
+the additional memory cost, we conduct experiments with
+LLaMA2-7B-Chat on TriviaQA using a batch size of 10.
+The baseline exhibits a peak reserved memory of 28,312
+MB, whereas our DMP requires 29,034 MB, with an in-
+crease of 722MB.

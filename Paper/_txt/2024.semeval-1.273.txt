@@ -1,0 +1,1628 @@
+
+
+===== PAGE 1 =====
+
+Proceedings of the 18th International Workshop on Semantic Evaluation (SemEval-2024) , pages 1979–1993
+June 20-21, 2024 ©2024 Association for Computational Linguistics
+SemEval-2024 Task 6: SHROOM, a Shared-task on Hallucinations and
+Related Observable Overgeneration Mistakes
+Timothee Mickus
+ Elaine Zosa
+ Raúl Vázquez
+ Teemu Vahtola
+Jörg Tiedemann
+ Vincent Segonne
+ Alessandro Raganato
+ Marianna Apidianaki
+University of Helsinki
+ Silo AI, Finland
+ Université Bretagne Sud
+University of Milano-Bicocca
+ University of Pennsylvania
+{firstname.lastname}@{
+ helsinki.fi,
+ silo.ai,
+ univ-ubs.fr,
+ unimib.it}
+marapi@seas.upenn.edu
+Abstract
+This paper presents the results of the
+SHROOM, a shared task focused on detecting
+hallucinations: outputs from natural language
+generation (NLG) systems that are ﬂuent, yet
+inaccurate. Such cases of overgeneration put in
+jeopardy many NLG applications, where cor-
+rectness is often mission-critical. The shared
+task was conducted with a newly constructed
+dataset of 4000 model outputs labeled by 5 an-
+notators each, spanning 3 NLP tasks: machine
+translation, paraphrase generation and deﬁni-
+tion modeling.
+The shared task was tackled by a total of 58 dif-
+ferent users grouped in 42 teams, out of which
+26 elected to write a system description paper;
+collectively, they submitted over 300 predic-
+tion sets on both tracks of the shared task. We
+observe a number of key trends in how this
+approach was tackled—many participants rely
+on a handful of model, and often rely either
+on synthetic data for ﬁne-tuning or zero-shot
+prompting strategies. While a majority of the
+teams did outperform our proposed baseline
+system, the performances of top-scoring sys-
+tems are still consistent with a random handling
+of the more challenging items.
+1 Introduction
+The modern NLG landscape is plagued by two in-
+terlinked problems: On the one hand, our current
+neural models have a propensity to produce inaccu-
+rate but ﬂuent outputs; on the other hand, our met-
+rics are most apt at describing ﬂuency, rather than
+correctness. This leads neural networks to “halluci-
+nate”, i.e., produce ﬂuent but incorrect outputs that
+we currently struggle to detect automatically. For
+instance, Dopierre et al. (2021) report that when
+trying to produce a paraphrase for the input “ I am
+Figure 1: The SHROOM logo.
+not sure where my phone is ”, they obtain the fol-
+lowing ‘hallucination’ behavior: “How can I ﬁnd
+the location of any Android mobile ”. For many
+NLG applications, the correctness of an output is
+however mission critical. For instance, producing
+a plausible-sounding translation that is inconsistent
+with the source text puts in jeopardy the usefulness
+of a machine translation pipeline.
+This motivates us to organize a Shared-
+task on Hallucinations and Related Observable
+Overgeneration Mistakes, or SHROOM. With our
+shared task, we hope to foster the growing inter-
+est in this topic in the community (e.g., Ji et al. ,
+2023; Raunak et al. , 2021; Guerreiro et al. , 2023;
+Xiao and Wang, 2021; Guo et al. , 2022). In partic-
+ular, in the SHROOM we adopt a post hoc setting,
+where models have already been trained and out-
+puts already produced. Participants were asked to
+perform binary classiﬁcation to identify cases of
+ﬂuent overgeneration hallucinations in two dif-
+ferent setups: model-aware and model-agnostic
+tracks. That is, participants had to detect gram-
+matically sound outputs which contain incorrect
+or unsupported semantic information, inconsistent
+1979
+
+===== PAGE 2 =====
+
+with the reference input, with or without having
+access to the model that produced the output.
+To that end, we constructed a dataset comprising
+a collection of checkpoints, inputs, references and
+outputs of systems covering three different NLG
+tasks: deﬁnition modeling (DM, Noraset et al. ,
+2017), machine translation (MT) and paraphrase
+generation (PG) trained with varying degrees of ac-
+curacy. Datapoints were all annotated by 5 human
+annotators each resulting in 1000 validation items
+and 3000 test items.
+Beyond simply detecting factually unsupported
+outputs, one of the goals of this shared task was
+to establish whether hallucinations are best con-
+strued as a categorical phenomenon or a gradient
+one. Similar remarks have been made with respect
+to textual entailment ( Bowman et al. , 2015). As
+such, participants’ submission were scored both for
+accuracy (whether classiﬁers correctly identify hal-
+lucinations) and calibration (whether classiﬁers are
+conﬁdent about their prediction when they ought
+to be).
+The shared task attracted a total of 58 different
+users grouped in 42 teams, out of which 26 elected
+to write a system description paper. Collectively,
+over the three weeks of the evaluation phase, partic-
+ipants submitted 300 valid sets of predictions on the
+model-aware track, and 320 on the model-agnostic
+track. We take this participation rate, along with
+the breadth of methodological approaches devel-
+oped by participants, as clear signs of success for
+our shared task: This large pool of participants al-
+lows us to identify and discuss some key trends in
+how the task was tackled. Crucially, many partic-
+ipants rely on a handful of model, and often rely
+either on synthetic data for ﬁne-tuning or zero-shot
+prompting strategies. In terms of raw performance,
+we note that while a majority of the teams ( 64 to
+71%) did outperform our proposed baseline sys-
+tem, the performances of top-scoring systems are
+still consistent with a random handling of the more
+challenging items. In sum, this ﬁrst iteration of the
+SHROOM underscores both an interest of the re-
+search community as well as the current limitations
+in our approaches.
+The remainder of this article is structured as fol-
+lows: Iin Section 2, we provide an overview of
+the current research landscape. Section 3 deﬁnes
+our theoretical framework, and Section 4 summa-
+rizes our data collection process. We then present
+and discuss shared task results in Sections 5 and 6
+before concluding with a few thoughts on further
+research in Section 7.
+2 Connecting with the past: related works
+and state of the art
+It is now widely accepted that NLG models often
+generate outputs that are not faithful to the given
+input, commonly referred to in the community as
+hallucinations (Vinyals and Le, 2015; Raunak et al.,
+2021; Maynez et al. , 2020). Y et there is minimal
+consensus on the optimal framework for its appli-
+cation. This lack of agreement is due in part to the
+diversity of tasks that NLG encompasses ( Ji et al.,
+2023).
+Guerreiro et al. (2023) propose a taxonomy of
+hallucinations that includes oscillatory productions,
+and ﬂuent but strongly or fully “detached” outputs.
+While this taxonomy is well constructed, we ﬁnd
+it inadequate for the needs of the community at
+large for four reasons: (i) It conﬂates some issues
+of ﬂuency with semantic correctness (oscillatory
+productions are cases of non-ﬂuent overgeneration
+where no extraneous semantic material is intro-
+duced); (ii) It only considers the most extreme
+cases of hallucinations (strongly or fully detached
+productions), whereas diagnosis of intermediary
+cases is bound to be more challenging and useful
+to the community; (iii) It focuses only on MT, al-
+though other tasks are also known to suffer from
+ﬂuent overgeneration (e.g., Rohrbach et al. , 2018),
+including the ones we propose to address; (iv) It
+uses only lowest scoring outputs, whereas any tool
+built to verify system outputs ought not to ﬂag non-
+pathological outputs.
+Alternative studies have built benchmarks for
+hallucination detection, with a predominant empha-
+sis on dialogue systems. Li et al. (2023) propose the
+HaluEval benchmark using an annotation frame-
+work that does not necessarily center on the input
+given to the model and requires the annotators to
+search the internet for facts. Moreover, they opted
+to annotate the outputs of a popular LLM, with the
+major downsides that it is closed, not-transparent
+and commercial; rendering the research outputs
+that may stem from future studies less interesting.
+Other benchmarks include the works of Liu et al.
+(2022) and Zhou et al. (2021), which automatically
+insert hallucinations into training instances to gen-
+erate syntactic data for token-level hallucination
+detection; Lin et al. (2022), which work with fac-
+tual claims supported by reliable, publicly available
+1980
+
+===== PAGE 3 =====
+
+SHROOM
+Model-aware
+PGMTDM
+Model-agnostic
+PGMTDM
+Figure 2: Shared task overview. Both tracks feature
+all three NLG tasks. Datapoints from systems in blue
+correspond to target-referential datapoints and in red the
+ones that are either target- or source-referential; which
+we refer to as dual-referential.
+evidence; and Dziri et al. (2022), which focus on
+knowledge-based dialogue systems and base their
+annotation on NLI, relying only on the system’s
+input, just as we do.
+3 Tripping over hallucinations: task
+deﬁnition and annotation
+In contrast with previous works (e.g. Guerreiro
+et al., 2023; Li et al., 2023), we focus on cases of
+ﬂuent overgeneration since judgments pertaining
+to the over-generative nature of a production can
+be elicited by means of inferential semantics: if
+an output cannot be inferred from its semantic ref-
+erence, then it contains some information that is
+not present in the reference—i.e., the model has
+generated more than we expected. 1 This approach
+connects with the theoretical framework sketched
+by van Deemter (2024), who likewise relies on in-
+ferential semantics but also considers undergenera-
+tion issues in NLG outputs. We provide multiple
+annotations and a gold majority label, given the
+low consensus on semantic annotations ( Nie et al. ,
+2020).
+In Figure 2 we provide an overview of the
+task. The SHROOM is framed around two key
+distinctions: (i) model-aware vs. model-agnostic
+approaches, and (ii) source-referential vs. dual-
+referential datapoints. The former corresponds to
+whether participants have access to the model that
+generated the item: Model-agnostic approaches
+are practical, as models may not be accessible to
+end users; Model-aware approaches can lead to
+richer and more accurate diagnoses. The latter
+is a consequence of our inferential take on over-
+1Note that if the output can be inferred from the reference
+but the information is not explicitly present in the reference,
+then the model is actually making a correct semantic inference:
+it is generating a semantically sound output. E.g., if the the
+model produces “my tie is blue” for the reference “my tie is
+the color of the sky”, the model output is semantically sound.
+{ "hyp":"A cigarette .",
+"ref":"tgt",
+"src":"I stepped outside to smoke myself a j .
+What is the meaning of J ?",
+"tgt":"( plural Js or J 's ) A marijuana
+cigarette .",
+"model":"ltg\/flan-t5-definition-en-base",
+"task":"DM",
+"labels":["Hallucination","Not Hallucination",
+"Not Hallucination", "Hallucination",
+"Hallucination"],
+"label":"Hallucination",
+"p(Hallucination)":0.6 }
+Figure 3: Target-referential datapoint example from the
+validation set for the model-aware track.
+generation: what can effectively serve as a seman-
+tic reference varies across NLP systems. For DM,
+where we ﬁne-tune a language model to produce
+a deﬁnition for a given example of usage the data-
+points are target-referential, i.e. the target is the
+sole usable semantic reference. In this context, the
+target serves as the sole usable semantic reference.
+Conversely, the target is expected to be semanti-
+cally implied from the source in source-referential
+tasks, such as summarization. Note that we do not
+annotate source-referential tasks due to annotation
+challenges that make them unreliable for our pur-
+poses. In dual-referential tasks like PG & MT, this
+distinction bears no weight.
+In Figure 3, we present an example datapoint
+displaying how we plan to encode all relevant in-
+formation in a JSON format is provided. The dat-
+apoint keeps track of the source provided to the
+model as input ( src), the intended target ( tgt),
+the model production ( hyp), the task this produc-
+tion was derived from ( task), can correspond to
+DM, MT or PG), whether this datapoint is target-
+referential (ref), the annotations, the gold label
+and the proportion of annotators that labeled the
+utterance as a hallucination ( labels, label,
+and p(Hallucination)). In the model-aware
+track, we will also provide a HuggingFace model
+name (model).
+4 Foraging and harvesting season:
+Collected data
+All SHROOM data (models, outputs and annota-
+tions) are available under a CC-BY license. 2
+2See helsinki-nlp.github.io/shroom
+1981
+
+===== PAGE 4 =====
+
+4.1 Data & model provenance
+Participants have access to generated outputs from
+multiple systems trained to generate English out-
+put at various stages of their training, stemming
+from three sequence-to-sequence NLG tasks: DM,
+MT and PG. The SHROOM dataset consists of an-
+notated test and dev sets, as well as a unlabeled
+training split of 30k datapoints per track and the
+full set of possible target references to allow corpus-
+wide approaches. To ensure effective annotation
+of the development and test sets, and to be able
+to guarantee a gradient in quality as measured by
+automated metrics, we pre-selected ﬂuent outputs
+for the annotators, which we describe in the follow-
+ing.3
+MT: For the model agnostic track we use the
+models from Mickus and Vázquez (2023). We
+compute perplexity for the all MT outputs and
+BERTScores with regards to the outputs and cor-
+responding targets. We ﬁlter outputs with perplex-
+ity scores above the 2% quantile. From the ﬁl-
+tered outputs, we randomly select 200 samples with
+BERTscores in the 1/7, 2/7, 3/7, 4/7, and 5/7 quan-
+tiles. For the model-aware track, we use the NLLB
+model (NLLB Team et al., 2022) and produce trans-
+lations on the Flores-200 dataset from languages
+marked as low-resource to English. Next, we man-
+ually select a sample that is sufﬁciently ﬂuent.
+DM: We use the model of Segonne and Mickus
+(2023) for the model-agnostic track, and for
+the model-aware track we used the flan-
+t5-definition-en-base (Giulianelli et al. ,
+2023). We generate outputs on the English portion
+of the CoDWoE dataset (Mickus et al., 2022), and
+manually select a sample that is reasonably ﬂuent
+and contains no profanities.
+PG: We used a pretrained and ﬁne-tuned para-
+phrasing model 4 based on Pegasus ( Zhang et al. ,
+2020) for the model-aware track, and the con-
+trolled paraphrase generation model of V ahtola
+et al. (2023) for the model-agnostic track.
+We generated paraphrase hypotheses using Eu-
+roparl ( Koehn, 2005) and Opusparcus ( Creutz,
+2018) for the model-aware and -agnostic tracks,
+respectively. For the model-aware setup, we gener-
+ated 50 hypotheses for each source sentence using
+3Note that we do not warranty that the training split con-
+tains ﬂuent outputs.
+4https://huggingface.co/tuner007/
+pegasus_paraphrase
+diverse beam search ( Vijayakumar et al. , 2016)
+using BLEU scores ( Papineni et al. , 2002) to se-
+lect the least similar hypothesis for each source
+sentence to serve as its paraphrase. For the model-
+agnostic setup, we calculated control tokens for
+each source sentence as in V ahtola et al. (2023),
+scaled the length-controlling value in range (1, 1.5)
+with a uniform probability distribution to provoke
+hallucination in the generated sequences, and used
+beam search with a beam size of 5 to produce the
+paraphrases. We manually curated the ﬁnal valida-
+tion and test examples.
+4.2 Annotation
+We annotate a total of 4,000 items, which are
+split 25%–75% between development and test sets:
+1000 datapoints come from PG, 1500 from DM
+and 1500 from MT. Each item is annotated by ﬁve
+annotators on whether the reference entails the out-
+put. Annotations are binary, for ease of dataset
+construction. Gold labels are deﬁned with respect
+to the annotators’ majority vote.
+The annotators were enlisted via Proliﬁc, 5 a paid
+platform specialized in gathering human data for
+research studies and AI dataset creation, among
+other purposes. We did not target any particular
+group of participants; the only screening prerequi-
+sites were that (i) participants had to be ﬂuent in
+English and (ii) they should not have taken part in
+an initial pilot study.
+We used Potato (Pei et al., 2022), an open-source
+annotation tool speciﬁcally designed to seamlessly
+integrate with Proliﬁc. Annotators were ﬁrst pre-
+sented with a pre-annotation screen outlining the
+annotation guidelines, after which they commenced
+the annotation of items individually. Each item con-
+sisted of the Reference, the AI-generated output,
+and relevant context regarding the NLG task (DM,
+MT, or PG). The annotators were asked to answer
+the question "Does the following AI output only
+contain information supported by the Reference?"
+responding with either "yes" or "no," and were also
+given the opportunity to provide comments if nec-
+essary. Additionally, they could navigate back and
+forth through their assigned items. We set up a
+timer that notiﬁed the participants every 60 sec-
+onds of the time spent on an item. In Appendix B,
+we present a copy of the instructions we used.
+To control for annotation quality, we manually
+reviewed annotations from two sets of selected an-
+5https://www.prolific.com/
+1982
+
+===== PAGE 5 =====
+
+notators: (i) ﬁve randomly selected annotators; and
+(ii) the ﬁve annotators who completed the task the
+fastest (under 3.5 minutes). All 10 annotators com-
+pleted 20 annotations each. We judged all 200 an-
+notations to be sound, in that a reasoning could be
+reconstructed to explain the provided annotation.
+Label distribution. Figure 4 provides an
+overview of the distribution of labels in the
+SHROOM dataset splits (validation and test), bro-
+ken down per NLG task (MT, DM and PG) and
+track (model-aware vs. model-agnostic). In this
+ﬁgure, we consider the empirical probability that a
+given item is judged to be a hallucination, i.e., the
+proportion of annotators judging the NLG output is
+not supported by the intended semantic reference.
+We can highlight two trends in this ﬁgure. The
+ﬁrst one, and perhaps most important, is that hal-
+lucinations are not consensual among our annota-
+tors. If intuitions regarding hallucinations were
+clear-cut, we would strongly expect a bi-modal
+distribution of empirical label distributions being
+consistently judged as hallucinations or not halluci-
+nations. Instead, we ﬁnd a number of intermediate
+cases, where annotators are split: These account
+for 29–32% of the data, depending on the split (val-
+idation or test) and track (model-aware or model-
+agnostic). Given the small number of annotators
+per datapoint, we cannot conﬁdently rule out the
+possibility of a sampling bias—it is plausible that a
+larger pool of annotator would yield more bimodal
+empirical distributions. On the other hand, this ten-
+tative evidence is also in line with what has been ar-
+gued elsewhere for natural language inference ( Nie
+et al., 2020; Zhou et al. , 2022). This is in fact well
+exempliﬁed by the datapoint provided in Figure 3:
+Whether the term cigarette is underspeciﬁed and
+can apply to any smokable substance, or whether
+it is to be understood as prototypically referring
+to tobacco cigarettes by default is, in fact, up for
+discussion—and it stands to reason that different
+speakers may form different opinions.
+Second, it is difﬁcult to ﬁnd hallucinations: The
+higher the empirical probability, the fewer the dat-
+apoints. This is especially true in the PG task:
+these outputs rarely yields consensual hallucina-
+tions, whereas we can ﬁnd such items in DM
+and MT much more frequently. Looking at the
+expected value of the empirical probability per
+task, we ﬁnd that DM consistently ranks higher
+than MT, which in turns ranks higher than PG.
+Both of these differences are signiﬁcant under a
+one-sided Mann-Whitney U-test in the two test
+tracks (p < 0.0003); in the model-aware validation
+dataset, only the difference between MT and PG is
+signiﬁcant ( p < 2 · 10−8), in the model-agnostic
+validation dataset, only the difference between DM
+and MT is ( p < 0.04). We note that DM requires a
+more complex processing of its input, as it has to
+rely on facts captured by the underlying LLM dur-
+ing its pre-training phase; for MT and PG, the input
+of the NLG task contains the semantic information
+necessary to produce a valid output. As such, we
+conjecture that the difﬁculty of an NLG task fosters
+hallucinatory behavior.6
+5 They got so high: shared task results
+The competition was held via Codalab ( Pavao et al.,
+2023). The leaderboard was left hidden during the
+evaluation phase (i.e., participants were not notiﬁed
+of their submissions’ scores until the end of the
+evaluation phase) but users were allowed to make
+a high number of submissions (50).
+Systems are evaluated according to two crite-
+ria: the accuracy that the system reached on the
+binary classiﬁcation, and their calibration, mea-
+sured as the Spearman correlation of the systems’
+output probabilities with the proportion of the an-
+notators marking the item as overgenerating. We
+rank systems by accuracy and break possible ties
+using calibration.
+5.1 Baseline system
+As a baseline for the task, we use an LLM 7 to
+evaluate whether the generated hypotheses are co-
+herent with the provided context. Drawing upon
+Manakul et al. (2023), we use the prompt template
+listed in Figure 5. The system of Manakul et al.
+(2023), which has gathered some attention from
+the community, constitutes a straightforward ap-
+proach based on a modern LLM, and is therefore
+well-suited to serve as a baseline in our shared-task:
+6We also remark that the two tracks are broadly comparable
+in terms of hallucinatory content. Two-samples Kolmogorov-
+Smirnov tests for either split (test or validation) do not provide
+sufﬁcient grounds to suggest a difference of distribution in la-
+bels between model-aware and model-agnostic tracks—which
+again suggests that the relevant difference is at the task level,
+rather than at the model level.
+7We use quantized Mistral-7B-Instruct-
+v0.2 (Jiang et al. , 2023), from the Hugging
+Face hub huggingface.co/TheBloke/
+Mistral-7B-Instruct-v0.2-GGUF or the
+llamacpp project github.com/ggerganov/llama.
+cpp.
+1983
+
+===== PAGE 6 =====
+
+0
+10
+20
+30
+40
+50
+60
+70
+80
+90
+100
+110
+0.0 0.2 0.4 0.6 0.8 1.0
+agnostic
+aware
+agnostic
+aware
+agnostic
+aware
+agnostic
+aware
+agnostic
+aware
+agnostic
+aware
+DM
+MT
+PG
+Task
+p(Hallucination)
+(a) V alidation split
+0
+50
+100
+150
+200
+250
+300
+350
+400
+0.0 0.2 0.4 0.6 0.8 1.0
+agnostic
+aware
+agnostic
+aware
+agnostic
+aware
+agnostic
+aware
+agnostic
+aware
+agnostic
+aware
+DM
+MT
+PG
+Task
+p(Hallucination) (b) Test split
+Figure 4: Distributions of annotations
+Context: {}
+Sentence: {}
+Is the Sentence supported by the Context above?
+Answer using ONLY yes or no:
+Figure 5: Prompt template used in the baseline system,
+adapted from Manakul et al. (2023).
+it corresponds to a reasonable default approach to
+tackle the problem we challenge participants with.
+The speciﬁc context varies depending on the
+task addressed, i.e. the source sentence for the
+paraphrase generation task, and the target sentence
+for machine translation and deﬁnition modeling
+tasks. As for the probability of hallucination, we
+rely on the probability assigned by the model to the
+ﬁrst output word. 8 In cases where the output does
+not clearly indicate yes or no, we randomly select
+one, attributing a hallucination probability of 0.5.
+On the model-agnostic track, our baseline sys-
+tem achieves an accuracy of 0.697 (with a calibra-
+tion of ρ = 0.403), on the model-aware track, we
+observe an accuracy of 0.745 (with ρ = 0 .488).
+We can also indicate some other simple heuristics,
+such as picking the most frequent label (viz., Not
+Hallucination): In this case, one would ex-
+pect an accuracy of 0.593 on the model-agnostic
+track, and 0.633 on the model-aware track. A
+purely random guess between the two possible la-
+bels would result in an accuracy of 0.5. In short,
+our baseline systems systematically outperforms
+these crude heuristics.
+5.2 Participating teams
+A total of 59 individual users grouped in 42 teams
+participated in the shared task, out of which 26
+8We note that this simple heuristic may not accurately
+represent the true hallucination probability.
+elected to write a system description paper. During
+the evaluation phase, we received a total of 512 sub-
+missions, out of which 368 were successful. 264
+of these submissions targeted both tracks, while
+68 only targeted the model-agnostic track, and 36
+only targeted the model-aware track. That is, we
+received 332 model-agnostic submissions and 300
+model-aware submissions.
+We present the model-agnostic track rankings
+in Table 1a and the model-aware track in Table 1b.
+As one might expect, there is a high correlation
+between the accuracy and calibration scores of
+each team’s top ranking submission, which trans-
+lates into a Spearman’s ρ correlation of 0.909 on
+the model-agnostic track and 0.949 on the model-
+aware track. Most of the top submissions per
+team rank above our baseline ( 30/42 ≈ 71.4%
+in the model-agnostic track, 25/39 ≈ 64.1% in
+the model-aware track). This appears roughly
+in line with all submissions globally: 69.9% of
+all model-agnostic submissions and 57.0% of all
+model-aware submissions score higher than our
+baseline.
+Another point worth stressing is that teams that
+fare well on one track usually fare equally well
+on the other: For the 38 teams participating in
+both tracks, we ﬁnd that the rank they obtain on
+the model-aware track correlates with the rank
+they obtain on the model-agnostic track (Spear-
+man’sρ = 0.884). This would tentatively suggest
+that participants could not effectively leverage the
+supplementary data available in the model-aware
+track.9
+Lastly, we note that there is a ceiling in terms
+9An alternative account would be that all teams that partic-
+ipated in both tracks equally beneﬁted from the access to the
+model weights, which we deem much less likely.
+1984
+
+===== PAGE 7 =====
+
+team Acc ρ
+1 Halu-NLP (Mehta et al., 2024) 0.847 0.770
+2 OPDAI (Chen et al., 2024) 0.836 0.732
+3 HIT-MI&T Lab (Liu et al., 2024) 0.831 0.768
+4 SHROOM-INDElab (Allen et al., 2024) 0.829 0.721
+5 Alejandro Mosquera 0.826 0.709
+6 DeepPavlov (Belikova and Kosenko, 2024) 0.821 0.752
+7 BruceW 0.821 0.735
+8 TU Wien (Arzt et al., 2024) 0.817 0.737
+9 SmurfCat (Rykov et al., 2024) 0.814 0.723
+10 HaRMoNEE (Obiso et al., 2024) 0.814 0.626
+11 AMEX AI LABS 0.813 0.728
+12 Pollice V erso (Kobs et al., 2024) 0.803 0.676
+13 MALTO (Borra et al., 2024) 0.801 0.681
+14 UCC-NLP 0.795 0.664
+15 Team CentreBack 0.792 0.623
+16 Atresa 0.788 0.646
+17 ustc_xsong 0.785 0.695
+18 IRIT-Berger-Levrault (Bendahman et al., 2024) 0.783 0.636
+19 silk_road 0.781 0.672
+20 AILS-NTUA (Grigoriadou et al., 2024) 0.778 0.668
+21 zhuming 0.773 0.481
+22 SibNN 0.770 0.613
+23 UMUTeam (Pan et al., 2024) 0.769 0.561
+24 Noot Noot (Bahad et al., 2024) 0.765 0.584
+25 HalluSafe (Rahimi et al., 2024) 0.763 0.629
+26 Maha Bhaashya (Bhamidipati et al., 2024) 0.749 0.605
+27 DUTh (Iordanidou et al., 2024) 0.744 0.475
+28 Compos Mentis (Das and Srihari , 2024) 0.738 0.595
+29 daixiang 0.737 0.583
+30 NU-RU (Markchom et al., 2024) 0.728 0.595
+baseline system 0.697 0.403
+31 SLPL SHROOM (Fallah et al., 2024) 0.694 0.423
+32 Skoltech 0.684 0.674
+33 CAISA 0.677 −0.430
+34 AlphaIntellect (Choudhury et al., 2024) 0.654 0.295
+35 deema 0.646 0.566
+36 BrainLlama (Siino, 2024) 0.625 0.204
+37 Byun (Byun, 2024) 0.617 0.239
+38 Bolaca (Rösener et al., 2024) 0.613 0.217
+most frequent guess 0.593
+39 AI Blues 0.587 0.025
+random guess 0.500
+40 MARiA (Sanayei et al. , 2024) 0.498 0.025
+41 0x.Y uan 0.461 0.134
+(a) Model-agnostic track rankings
+team Acc ρ
+1 HaRMoNEE (Obiso et al., 2024) 0.813 0.699
+2 Halu-NLP (Mehta et al., 2024) 0.806 0.715
+3 TU Wien (Arzt et al., 2024) 0.806 0.707
+4 OPDAI (Chen et al., 2024) 0.805 0.680
+5 HIT-MI&T Lab (Liu et al., 2024) 0.805 0.712
+6 SHROOM-INDElab (Allen et al., 2024) 0.802 0.656
+7 AMEX AI LABS 0.801 0.696
+8 DeepPavlov (Belikova and Kosenko, 2024) 0.799 0.713
+9 silk_road 0.798 0.687
+10 AILS-NTUA (Grigoriadou et al. , 2024) 0.795 0.685
+11 BruceW 0.794 0.660
+12 Team CentreBack 0.789 0.606
+13 UCC-NLP 0.789 0.644
+14 ustc_xsong 0.787 0.658
+15 UMUTeam (Pan et al., 2024) 0.784 0.507
+16 HalluSafe (Rahimi et al., 2024) 0.783 0.537
+17 SmurfCat (Rykov et al., 2024) 0.783 0.671
+18 Atresa 0.783 0.624
+19 IRIT-Berger-Levrault (Bendahman et al., 2024) 0.781 0.601
+20 Pollice V erso (Kobs et al., 2024) 0.777 0.601
+21 NU-RU (Markchom et al., 2024) 0.768 0.582
+22 zhuming 0.768 0.472
+23 SibNN 0.763 0.587
+24 Compos Mentis (Das and Srihari, 2024) 0.756 0.566
+25 DUTh (Iordanidou et al., 2024) 0.755 0.528
+baseline system 0.745 0.488
+26 AlphaIntellect (Choudhury et al. , 2024) 0.711 0.426
+27 SLPL SHROOM (Fallah et al., 2024) 0.706 0.426
+28 deema 0.688 0.519
+29 BrainLlama (Siino, 2024) 0.671 0.244
+30 daixiang 0.649 0.218
+most frequent guess 0.633
+31 Bolaca (Rösener et al., 2024) 0.626 0.283
+32 Noot Noot (Bahad et al., 2024) 0.613 0.355
+33 Byun (Byun, 2024) 0.610 0.234
+34 Maha Bhaashya (Bhamidipati et al., 2024) 0.606 0.209
+35 CAISA 0.567 −0.100
+36 Skoltech 0.557 −0.011
+37 MARiA (Sanayei et al., 2024) 0.505 0.009
+random guess 0.500
+38 octavianB (Brodoceanu, 2024) 0.483 −0.064
+(b) Model-aware track rankings
+Table 1: SHROOM team rankings. Codalab usernames are used to deﬁne teams when no other information was
+provided.
+of performances: The most effective systems mis-
+classify between 15 to 19% of all items, or almost
+one in every six or ﬁve datapoints. We have dis-
+cussed above that, as hallucinations are a graded
+phenomenon, a large segment of our data (30%)
+corresponds to ambiguous cases where annotators
+are split 2 vs. 3. As such, it is worth stressing that
+top scores are consistent with models that classify
+consensual items well (where at most one annota-
+tor disagree), but perform at random chance on the
+more challenging ambiguous datapoints.
+6 A bunch of fun guys: qualitative
+analysis of participants systems
+We derive our analyses from system description pa-
+pers as well as self-reports from a handful of partic-
+ipants who elected to not provide a full description
+of their systems. This corresponds to 33 systems
+1985
+
+===== PAGE 8 =====
+
+Vectara (9 / 33)
+Mistral / Mixtral (8 / 33)
+DeBERT a (7 / 33)
+GPT (3.5 or 4) (7 / 33)
+RoBERT a / XLM-RoBERT a (5 / 33)
+LLaMA, LLaMA2 (4 / 33)
+SBERT (4 / 33)
+T5 / Sentence-T5 (4 / 33)
+LABSE (3 / 33)
+E5 (2 / 33)
+OpenChat (2 / 33)
+Figure 6: Known models used by more than one team.
+A full circle would correspond to a given model used by
+all of respondents, half a circle to 50% of respondents
+using said model. Best viewed in color.
+out of the 42 identiﬁed teams that participated to
+the shared task, out of which 7 did not provide a
+full description. See also Table 2 in Appendix A
+for further details.
+How the task was approached. The teams used
+a variety of methods to address the problem, rang-
+ing from ensemble techniques to ﬁne-tuning pre-
+trained language models (LLMs) and prompt engi-
+neering. As expected, most teams used popular pre-
+trained LLMs such as GPT, LLaMA, DeBERTa,
+RoBERTa, and XLM-RoBERTa; Figure 6 provides
+a summary of which models were most popular
+among our teams. The V ectara hallucination evalu-
+ation model10 turned out to be extremely popular,
+as more than 1 in 4 teams that provided information
+about their systems report having used it in their
+experiments. If we add other DeBERTa-based mod-
+els, this number climbs to 16/33, i.e. almost every
+other team used DeBERTa or a variant thereof.
+Y et, the ways in which these LLMs were used
+cover a wide range of approaches: Some either
+ﬁne-tuned on hallucination data or optimized with
+prompts; others employed in-context learning with
+role-playing, automatic prompt generation, and en-
+semble methods. Furthermore, some teams focused
+on zero-shot and few-shot approaches, while oth-
+ers focused on synthetic data generation and semi-
+supervised learning techniques to construct a la-
+beled training set. Especially noteworthy, Rahimi
+et al. (2024) report constructing a manual dataset
+10https://huggingface.co/vectara/
+hallucination_evaluation_model
+of 3000 datapoints for training their systems.
+Teams predominantly relied on the data con-
+structed for the SHROOM, although some teams
+added datasets such as QQP and PAWS. Interest-
+ingly, we also note ﬁve teams relying on NLI/entail-
+ment data or models, including some that achieved
+high results (Obiso et al., 2024; Sanayei et al., 2024;
+Borra et al., 2024; Liu et al., 2024 and Team Centre-
+Back)—and this matches the theoretical framework
+adopted in this shared task.
+What worked well. We now turn to what dis-
+tinguishes top scorers from other submissions.
+We note that systems based on the closed-source
+models GPT-3.5 and GPT-4 tend to fare well: 4
+out of the 6 highest scoring systems on either
+track— Mehta et al. (2024); Obiso et al. (2024);
+Liu et al. (2024); Allen et al. (2024) and Alejandro
+Mosquera—all report using these models. This is
+however not a strict requisite as OPDAI (Chen et al.,
+2024) manages to rank high (2 nd on the model-
+agnostic track and 4 th on the model-aware track)
+without it. Neither does using closed-source mod-
+els guarantee a high result: UCC-NLP and Mark-
+chom et al. (2024) also use GPT-3.5, and while
+the former is ranked 14 th on the model-agnostic
+track and 13 th on the model-aware track, the latter
+is ranked 30 th on the model-agnostic track and 21 st
+on the model-aware track, and only outperforms the
+baseline model in accuracy by 0.02 to 0.03 points.
+Remarkably, many of the top-scoring approaches
+rely on ﬁne-tuning ( Liu et al. , 2024; Obiso et al. ,
+2024; Arzt et al., 2024; Chen et al., 2024) or ensem-
+bling (Mehta et al. , 2024; Belikova and Kosenko,
+2024, Alejandro Mosquera), suggesting that high
+performances do not come out of the box from
+off-the-shelf LLMs and systems. It is necessary to
+adapt existing models or establish to what extent
+their predictions are useful to the task at hand.
+Another important trend we identify is that the
+number of submissions per team anti-correlates
+with the rank they obtain: The more participants
+submitted, the higher their best scores went. This
+is visualized in Figure 7: On both tracks, we ﬁnd
+reasonable anti-correlations ( −0.58 < ρ < −0.44)
+indicating that top-scorers tended to submit more.
+This might provide an alternative explanation for
+what distinguishes top-scorers from other partici-
+pants: If we were to model participants’ submis-
+sions as a random process, we would expect that
+sampling more often (i.e., submitting more) would
+mechanically yield a better rank.
+1986
+
+===== PAGE 9 =====
+
+0 5 10 15 20 25 30 35 40
+rank
+0
+5
+10
+15
+20
+25
+30
+35number of submissions
+track
+model-agnostic
+ ( = 0.571)
+model-aware
+ ( = 0.442)
+Figure 7: Rank obtained vs. number of submissions
+made on both tracks.
+Overall, the high methodological diversity high-
+lights the complexity of hallucination detection,
+even when contained the simple inferential seman-
+tics framework of our shared task: While a focus
+on NLI or using high-performance closed source
+models may help, the highest scores are obtained
+through thorough involvement—both in terms of
+model training and prediction set submissions.
+7 Much room to grow: conclusions and
+future perspectives
+This ﬁrst iteration of the SHROOM shared task on
+detecting hallucinations has allowed us to make
+signiﬁcant headway into understanding the confab-
+ulatory behavior of modern NLG systems. The
+data collected demonstrate that hallucinations cor-
+respond to a gradient phenomenon , and that dif-
+ferent speakers form different opinions as to what
+counts as a hallucination. We were also able to
+showcase that ambiguous items remain challeng-
+ing, and that the current state of the art on the
+dataset we provided is compatible with simple ran-
+dom guesses whenever the data is more ambiguous.
+This results underscore the massive gap that NLP
+research urgently needs to address: one out of every
+six items is still misclassiﬁed by the most effective
+systems showcased during this shared task.
+The diversity of methodologies employed by par-
+ticipants underscores how out-of-the-box solutions
+are not sufﬁcient: Highest scoring teams had to rely
+on ﬁne-tuning or ensembling and made a high num-
+ber of submissions. Relatedly, access to the model
+parameters was of limited help : Few approaches
+attempted to perform model-speciﬁc investigations,
+and performances on the model-aware track are in
+fact lower than what we observed on the model-
+agnostic track. Properly leveraging the parameter
+space for ﬁner-grained hallucination detection re-
+mains a point for future research to investigate.
+This shared task has not broached some crucial
+aspects and questions: How do these results trans-
+late insofar as modern LLMs—often much larger
+and better trained than the systems we studied
+here—are concerned? Can we leverage sentence-
+level predictions to pinpoint token-level issues with
+the output of our NLG systems? And will the difﬁ-
+culties that we underscored in this purely English
+be exacerbated when studying other languages—
+especially those that are less well-resourced and
+typologically different? Answering these questions
+and more will require further research—and per-
+haps future iterations of this shared task.
+Overall, the success of this shared task is owed
+to its committed participants. We received over 350
+submissions in the span of three weeks from across
+the world. The width of approaches studied and
+reported upon provides a useful snapshot of where
+the ﬁeld is at, what approaches are favored, and
+what gaps still need to be overcome. We expect that
+the results of the SHROOM will provide a useful
+starting point for future work on hallucinations.
+Doing SHROOM responsibly: ethical
+considerations
+We strive to adhere to the ACL Code of Ethics .
+Broader Impact. Hallucinated outputs from
+large language models can be used to further spread
+disinformation and advance misleading narratives.
+Detecting hallucinated outputs is an important step
+in elucidating the factors of this phenomena and
+contribute to ongoing efforts to mitigate halluci-
+nation. This leads to the development of more
+trustworthy generative language models.
+Data and Annotators. Our annotators were suit-
+ably compensated for their work in excess of mini-
+mum wage. Due to the nature of the proposed task,
+the data we release might contain false or mislead-
+ing statements. In the case of annotated data, these
+statements are labeled as such, but this does not for
+the unannotated portions of the data. We manually
+pre-ﬁltered the data to remove profanities before
+providing them to annotators. Such precautions
+were not taken for the unannotated portion of the
+dataset, which might therefore contain offensive,
+obscene or otherwise unconscionable items.
+1987
+
+===== PAGE 10 =====
+
+Acknowledgments
+The construction of the SHROOM dataset was
+made possible by a grant from the Oskar Öfﬂund
+Foundation. This work is also supported by the
+ICT 2023 project “Uncertainty-aware neural lan-
+guage models” funded by the Academy of Finland
+(grant agreement № 345999). We also thank the
+CSC-IT Center for Science Ltd., for computational
+resources.
+The shared task logo (cf. Figure 1) uses the
+“Retro Cool” font from Nirmana Visual (https:
+//nirmanavisual.com/), made available for
+personal / non-commercial uses.
+References
+Bradley Allen, Fina Polat, and Paul Groth. 2024.
+Shroom-indelab at semeval-2024 task 6: Zero- and
+few-shot llm-based classiﬁcation for hallucination
+detection. In Proceedings of the 18th International
+Workshop on Semantic Evaluation (SemEval-2024),
+pages 826–831, Mexico City, Mexico. Association
+for Computational Linguistics.
+V arvara Arzt, Mohammad Mahdi Azarbeik, Ilya Lasy,
+Tilman Kerl, and Gábor Recski. 2024. Tu wien
+at semeval-2024 task 6: Unifying model-agnostic
+and model-aware techniques for hallucination detec-
+tion. In Proceedings of the 18th International Work-
+shop on Semantic Evaluation (SemEval-2024) , pages
+1172–1186, Mexico City, Mexico. Association for
+Computational Linguistics.
+Sankalp Sanjay Bahad, Y ash Bhaskar, and Parameswari
+Krishnamurthy. 2024. Nootnoot at semeval-2024
+task 6: Hallucinations and related observable over-
+generation mistakes detection. In Proceedings of the
+18th International Workshop on Semantic Evalua-
+tion (SemEval-2024), pages 964–968, Mexico City,
+Mexico. Association for Computational Linguistics.
+Julia Belikova and Dmitrii Kosenko. 2024. Deeppavlov
+at semeval-2024 task 3: Multimodal large language
+models in emotion reasoning . In Proceedings of the
+18th International Workshop on Semantic Evalua-
+tion (SemEval-2024), pages 1757–1767, Mexico City,
+Mexico. Association for Computational Linguistics.
+Nihed Bendahman, Karen Pinel-Sauvagnat, Gilles Hu-
+bert, and Mokhtar BILLAMI. 2024. Irit-berger-
+levrault at semeval-2024: How sensitive sentence
+embeddings are to hallucinations? In Proceedings of
+the 18th International Workshop on Semantic Evalu-
+ation (SemEval-2024), pages 560–565, Mexico City,
+Mexico. Association for Computational Linguistics.
+Patanjali Bhamidipati, Advaith Malladi, Manish Shri-
+vastava, and Radhika Mamidi. 2024. Maha bhaashya
+at semeval-2024 task 6: Zero-shot multi-task halluci-
+nation detection. In Proceedings of the 18th Interna-
+tional Workshop on Semantic Evaluation (SemEval-
+2024), pages 1709–1713, Mexico City, Mexico. As-
+sociation for Computational Linguistics.
+Federico Borra, Claudio Savelli, Giacomo Rosso, Alkis
+Koudounas, and Flavio Giobergia. 2024. Malto at
+semeval-2024 task 6: Leveraging synthetic data for
+llm hallucination detection . In Proceedings of the
+18th International Workshop on Semantic Evalua-
+tion (SemEval-2024), pages 1688–1694, Mexico City,
+Mexico. Association for Computational Linguistics.
+Samuel R. Bowman, Gabor Angeli, Christopher Potts,
+and Christopher D. Manning. 2015. A large anno-
+tated corpus for learning natural language inference .
+In Proceedings of the 2015 Conference on Empiri-
+cal Methods in Natural Language Processing , pages
+632–642, Lisbon, Portugal. Association for Compu-
+tational Linguistics.
+Octavian Brodoceanu. 2024. octavianb at semeval-2024
+task 6: An exploration of humanlike qualities of hallu-
+cinated llm texts. In Proceedings of the 18th Interna-
+tional Workshop on Semantic Evaluation (SemEval-
+2024), pages 1149–1154, Mexico City, Mexico. As-
+sociation for Computational Linguistics.
+Cheolyeon Byun. 2024. Semeval2024 task6 group
+byun. In Proceedings of the 18th International W ork-
+shop on Semantic Evaluation (SemEval-2024) , pages
+269–272, Mexico City, Mexico. Association for Com-
+putational Linguistics.
+Ze Chen, Chengcheng Wei, Songtan Fang, Jiarong He,
+and Max Gao. 2024. Opdai at semeval-2024 task
+6: Small llms can accelerate hallucination detection
+with weakly supervised data . In Proceedings of the
+18th International Workshop on Semantic Evalua-
+tion (SemEval-2024), pages 707–715, Mexico City,
+Mexico. Association for Computational Linguistics.
+Sohan Choudhury, Priyam Saha, Subharthi Ray,
+Shankha Shubhra Das, and Dipankar Das. 2024. Al-
+phaintellect at semeval-2024 task 6: Detection of
+hallucinations in generated text . In Proceedings of
+the 18th International Workshop on Semantic Evalu-
+ation (SemEval-2024), pages 939–945, Mexico City,
+Mexico. Association for Computational Linguistics.
+Mathias Creutz. 2018. Open subtitles paraphrase corpus
+for six languages . In Proceedings of the Eleventh In-
+ternational Conference on Language Resources and
+Evaluation (LREC 2018), Miyazaki, Japan. European
+Language Resources Association (ELRA).
+Souvik Das and Rohini Srihari. 2024. Compos mentis
+at semeval2024 task6: A multi-faceted role-based
+large language model ensemble to detect hallucina-
+tion. In Proceedings of the 18th International Work-
+shop on Semantic Evaluation (SemEval-2024) , pages
+1459–1464, Mexico City, Mexico. Association for
+Computational Linguistics.
+1988
+
+===== PAGE 11 =====
+
+Thomas Dopierre, Christophe Gravier, and Wilfried
+Logerais. 2021. PROTAUGMENT: Unsupervised
+diverse short-texts paraphrasing for intent detection
+meta-learning. In Proceedings of the 59th Annual
+Meeting of the Association for Computational Lin-
+guistics and the 11th International Joint Conference
+on Natural Language Processing (V olume 1: Long
+Papers), pages 2454–2466, Online. Association for
+Computational Linguistics.
+Nouha Dziri, Hannah Rashkin, Tal Linzen, and David
+Reitter. 2022. Evaluating attribution in dialogue
+systems: The BEGIN benchmark . Transactions
+of the Association for Computational Linguistics ,
+10:1066–1083.
+Pouya Fallah, Soroush Gooran, Mohammad Jafarinasab,
+Pouya Sadeghi, Reza Farnia, Amirreza Tarabkhah,
+Zeinab Sadat Taghavi, and Hossein Sameti. 2024.
+Slpl shroom at semeval2024 task 06 : A compre-
+hensive study on models ability to detect hallucina-
+tion. In Proceedings of the 18th International Work-
+shop on Semantic Evaluation (SemEval-2024) , pages
+1137–1143, Mexico City, Mexico. Association for
+Computational Linguistics.
+Mario Giulianelli, Iris Luden, Raquel Fernandez, and
+Andrey Kutuzov. 2023. Interpretable word sense
+representations via deﬁnition generation: The case
+of semantic change analysis . In Proceedings of the
+61st Annual Meeting of the Association for Compu-
+tational Linguistics (V olume 1: Long Papers), pages
+3130–3148, Toronto, Canada. Association for Com-
+putational Linguistics.
+Natalia Grigoriadou, Maria Lymperaiou, George Filan-
+drianos, and Giorgos Stamou. 2024. Ails-ntua at
+semeval-2024 task 6: Efﬁcient model tuning for hal-
+lucination detection and analysis . In Proceedings of
+the 18th International W orkshop on Semantic Evalua-
+tion (SemEval-2024), pages 1559–1570, Mexico City,
+Mexico. Association for Computational Linguistics.
+Nuno M. Guerreiro, Elena V oita, and André Martins.
+2023. Looking for a needle in a haystack: A com-
+prehensive study of hallucinations in neural machine
+translation. In Proceedings of the 17th Conference
+of the European Chapter of the Association for Com-
+putational Linguistics, pages 1059–1075, Dubrovnik,
+Croatia. Association for Computational Linguistics.
+Zhijiang Guo, Michael Schlichtkrull, and Andreas Vla-
+chos. 2022. A survey on automated fact-checking .
+Transactions of the Association for Computational
+Linguistics, 10:178–206.
+Ioanna Iordanidou, Ioannis Maslaris, and Avi Aram-
+patzis. 2024. Duth at semeval-2024 task 6: Compar-
+ing pre-trained models on sentence similarity evalu-
+ation for detecting of hallucinations and related ob-
+servable overgeneration mistakes. In Proceedings of
+the 18th International W orkshop on Semantic Evalua-
+tion (SemEval-2024), pages 1053–1059, Mexico City,
+Mexico. Association for Computational Linguistics.
+Ziwei Ji, Nayeon Lee, Rita Frieske, Tiezheng Y u, Dan
+Su, Y an Xu, Etsuko Ishii, Y e Jin Bang, Andrea
+Madotto, and Pascale Fung. 2023. Survey of halluci-
+nation in natural language generation. ACM Comput-
+ing Surveys, 55(12):1–38.
+Albert Q Jiang, Alexandre Sablayrolles, Arthur Men-
+sch, Chris Bamford, Devendra Singh Chaplot, Diego
+de las Casas, Florian Bressand, Gianna Lengyel, Guil-
+laume Lample, Lucile Saulnier, et al. 2023. Mistral
+7b. arXiv preprint arXiv:2310.06825.
+Konstantin Kobs, Jan Pﬁster, and Andreas Hotho. 2024.
+Pollice verso at semeval-2024 task 6: The roman em-
+pire strikes back. In Proceedings of the 18th Interna-
+tional Workshop on Semantic Evaluation (SemEval-
+2024), pages 1539–1546, Mexico City, Mexico. As-
+sociation for Computational Linguistics.
+Philipp Koehn. 2005. Europarl: A parallel corpus for
+statistical machine translation . In Proceedings of
+Machine Translation Summit X: Papers, pages 79–86,
+Phuket, Thailand.
+Junyi Li, Xiaoxue Cheng, Xin Zhao, Jian-Y un Nie, and
+Ji-Rong Wen. 2023. HaluEval: A large-scale hal-
+lucination evaluation benchmark for large language
+models. In Proceedings of the 2023 Conference on
+Empirical Methods in Natural Language Processing ,
+pages 6449–6464, Singapore. Association for Com-
+putational Linguistics.
+Stephanie Lin, Jacob Hilton, and Owain Evans. 2022.
+TruthfulQA: Measuring how models mimic human
+falsehoods. In Proceedings of the 60th Annual Meet-
+ing of the Association for Computational Linguistics
+(V olume 1: Long Papers), pages 3214–3252, Dublin,
+Ireland. Association for Computational Linguistics.
+Tianyu Liu, Yizhe Zhang, Chris Brockett, Yi Mao,
+Zhifang Sui, Weizhu Chen, and Bill Dolan. 2022.
+A token-level reference-free hallucination detection
+benchmark for free-form text generation . In Proceed-
+ings of the 60th Annual Meeting of the Association
+for Computational Linguistics (V olume 1: Long Pa-
+pers), pages 6723–6737, Dublin, Ireland. Association
+for Computational Linguistics.
+Wei Liu, Wanyao Shi, Zijian Zhang, and Hui Huang.
+2024. Hit-mi&t lab at semeval-2024 task 6: Deberta-
+based entailment model is a reliable hallucination
+detector. In Proceedings of the 18th International
+Workshop on Semantic Evaluation (SemEval-2024),
+pages 1798–1808, Mexico City, Mexico. Association
+for Computational Linguistics.
+Potsawee Manakul, Adian Liusie, and Mark Gales. 2023.
+SelfCheckGPT: Zero-resource black-box hallucina-
+tion detection for generative large language models .
+In Proceedings of the 2023 Conference on Empiri-
+cal Methods in Natural Language Processing , pages
+9004–9017, Singapore. Association for Computa-
+tional Linguistics.
+1989
+
+===== PAGE 12 =====
+
+Thanet Markchom, Subin Jung, and Huizhi Liang.
+2024. Nu-ru at semeval-2024 task 6: Hallucina-
+tion and related observable overgeneration mistake
+detection using hypothesis-target similarity and self-
+checkgpt. In Proceedings of the 18th International
+Workshop on Semantic Evaluation (SemEval-2024),
+pages 253–260, Mexico City, Mexico. Association
+for Computational Linguistics.
+Joshua Maynez, Shashi Narayan, Bernd Bohnet, and
+Ryan McDonald. 2020. On faithfulness and factu-
+ality in abstractive summarization . In Proceedings
+of the 58th Annual Meeting of the Association for
+Computational Linguistics , pages 1906–1919, On-
+line. Association for Computational Linguistics.
+Rahul Mehta, Andrew Hoblitzell, Jack O’Keefe, Hyeju
+Jang, and V asudeva V arma. 2024. Halu-nlp at
+semeval-2024 task 6: Metacheckgpt - a multi-task
+hallucination detection using llm uncertainty and
+meta-models. In Proceedings of the 18th Interna-
+tional Workshop on Semantic Evaluation (SemEval-
+2024), pages 335–341, Mexico City, Mexico. Associ-
+ation for Computational Linguistics.
+Timothee Mickus, Kees V an Deemter, Mathieu Con-
+stant, and Denis Paperno. 2022. Semeval-2022 task
+1: CODWOE – comparing dictionaries and word em-
+beddings. In Proceedings of the 16th International
+Workshop on Semantic Evaluation (SemEval-2022),
+pages 1–14, Seattle, United States. Association for
+Computational Linguistics.
+Timothee Mickus and Raúl Vázquez. 2023. Why bother
+with geometry? on the relevance of linear decomposi-
+tions of transformer embeddings . In Proceedings of
+the 6th BlackboxNLP Workshop: Analyzing and In-
+terpreting Neural Networks for NLP , pages 127–141,
+Singapore. Association for Computational Linguis-
+tics.
+Yixin Nie, Xiang Zhou, and Mohit Bansal. 2020. What
+can we learn from collective human opinions on nat-
+ural language inference data? In Proceedings of the
+2020 Conference on Empirical Methods in Natural
+Language Processing (EMNLP), pages 9131–9143,
+Online. Association for Computational Linguistics.
+NLLB Team, Marta R. Costa-jussà, James Cross, Onur
+Çelebi, Maha Elbayad, Kenneth Heaﬁeld, Kevin Hef-
+fernan, Elahe Kalbassi, Janice Lam, Daniel Licht,
+Jean Maillard, Anna Sun, Skyler Wang, Guillaume
+Wenzek, Al Y oungblood, Bapi Akula, Loic Bar-
+rault, Gabriel Mejia Gonzalez, Prangthip Hansanti,
+John Hoffman, Semarley Jarrett, Kaushik Ram
+Sadagopan, Dirk Rowe, Shannon Spruit, Chau
+Tran, Pierre Andrews, Necip Fazil Ayan, Shruti
+Bhosale, Sergey Edunov, Angela Fan, Cynthia
+Gao, V edanuj Goswami, Francisco Guzmán, Philipp
+Koehn, Alexandre Mourachko, Christophe Ropers,
+Saﬁyyah Saleem, Holger Schwenk, and Jeff Wang.
+2022. No language left behind: Scaling human-
+centered machine translation.
+Thanapon Noraset, Chen Liang, Larry Birnbaum, and
+Doug Downey. 2017. Deﬁnition modeling: Learn-
+ing to deﬁne word embeddings in natural language .
+In Proceedings of the Thirty-First AAAI Conference
+on Artiﬁcial Intelligence, February 4-9, 2017, San
+Francisco, California, USA, pages 3259–3266. AAAI
+Press.
+Timothy Obiso, Jingxuan Tu, and James Pustejovsky.
+2024. Harmonee at semeval-2024 task 6: Tuning-
+based approaches to hallucination recognition . In
+Proceedings of the 18th International Workshop
+on Semantic Evaluation (SemEval-2024) , pages
+1311–1320, Mexico City, Mexico. Association for
+Computational Linguistics.
+Ronghao Pan, José Antonio García-Díaz, Tomás
+Bernal-Beltrán, and Rafael V alencia-García. 2024.
+Umuteam at semeval-2024 task 6: Leveraging zero-
+shot learning for detecting hallucinations and related
+observable overgeneration mistakes. In Proceedings
+of the 18th International W orkshop on Semantic Eval-
+uation (SemEval-2024), pages 661–667, Mexico City,
+Mexico. Association for Computational Linguistics.
+Kishore Papineni, Salim Roukos, Todd Ward, and Wei-
+Jing Zhu. 2002. Bleu: a method for automatic evalu-
+ation of machine translation . In Proceedings of the
+40th Annual Meeting of the Association for Compu-
+tational Linguistics , pages 311–318, Philadelphia,
+Pennsylvania, USA. Association for Computational
+Linguistics.
+Adrien Pavao, Isabelle Guyon, Anne-Catherine Letour-
+nel, Dinh-Tuan Tran, Xavier Baro, Hugo Jair Es-
+calante, Sergio Escalera, Tyler Thomas, and Zhen
+Xu. 2023. Codalab competitions: An open source
+platform to organize scientiﬁc challenges . Journal of
+Machine Learning Research, 24(198):1–6.
+Jiaxin Pei, Aparna Ananthasubramaniam, Xingyao
+Wang, Naitian Zhou, Apostolos Dedeloudis, Jack-
+son Sargent, and David Jurgens. 2022. POTA TO:
+The portable text annotation tool . In Proceedings of
+the 2022 Conference on Empirical Methods in Nat-
+ural Language Processing: System Demonstrations ,
+pages 327–337, Abu Dhabi, UAE. Association for
+Computational Linguistics.
+Zahra Rahimi, Hamidreza Amirzadeh, Alireza Sohrabi,
+Zeinab Taghavi, and Hossein Sameti. 2024. Hal-
+lusafe at semeval-2024 task 6: An nli-based approach
+to make llms safer by better detecting hallucinations
+and overgeneration mistakes. In Proceedings of the
+18th International Workshop on Semantic Evalua-
+tion (SemEval-2024), pages 139–147, Mexico City,
+Mexico. Association for Computational Linguistics.
+Vikas Raunak, Arul Menezes, and Marcin Junczys-
+Dowmunt. 2021. The curious case of hallucinations
+in neural machine translation . In Proceedings of
+the 2021 Conference of the North American Chap-
+ter of the Association for Computational Linguistics:
+Human Language Technologies, pages 1172–1183,
+Online. Association for Computational Linguistics.
+1990
+
+===== PAGE 13 =====
+
+Anna Rohrbach, Lisa Anne Hendricks, Kaylee Burns,
+Trevor Darrell, and Kate Saenko. 2018. Object hallu-
+cination in image captioning . In Proceedings of the
+2018 Conference on Empirical Methods in Natural
+Language Processing, pages 4035–4045, Brussels,
+Belgium. Association for Computational Linguistics.
+Elisei Sergeevich Rykov, Y ana Shishkina, Ksenia
+Petrushina, Ksenia Titova, Sergey Petrakov, and
+Alexander Panchenko. 2024. Smurfcat at semeval-
+2024 task 6: Leveraging synthetic data for hallucina-
+tion detection. In Proceedings of the 18th Interna-
+tional Workshop on Semantic Evaluation (SemEval-
+2024), pages 869–880, Mexico City, Mexico. Associ-
+ation for Computational Linguistics.
+Béla Linus Rösener, Hong-Bo Wei, and Ilinca V andici.
+2024. Team bolaca at semeval-2024 task 6: Sentence-
+transformers are all you need . In Proceedings of the
+18th International Workshop on Semantic Evalua-
+tion (SemEval-2024), pages 1687–1690, Mexico City,
+Mexico. Association for Computational Linguistics.
+Reza Sanayei, Abhyuday Singh, MohammadHossein
+Rezaei, and Steven Bethard. 2024. Maria at semeval
+2024 task-6: Hallucination detection through llms,
+mnli, and cosine similarity . In Proceedings of the
+18th International Workshop on Semantic Evalua-
+tion (SemEval-2024), pages 1594–1598, Mexico City,
+Mexico. Association for Computational Linguistics.
+Vincent Segonne and Timothee Mickus. 2023. Deﬁ-
+nition modeling : To model deﬁnitions. generating
+deﬁnitions with little to no semantics . In Proceed-
+ings of the 15th International Conference on Compu-
+tational Semantics, pages 258–266, Nancy, France.
+Association for Computational Linguistics.
+Marco Siino. 2024. Brainllama at semeval-2024 task 6:
+Prompting llama to detect hallucinations and related
+observable overgeneration mistakes. In Proceedings
+of the 18th International W orkshop on Semantic Eval-
+uation (SemEval-2024), pages 82–87, Mexico City,
+Mexico. Association for Computational Linguistics.
+Teemu V ahtola, Mathias Creutz, and Jrg Tiedemann.
+2023. Guiding zero-shot paraphrase generation with
+ﬁne-grained control tokens . In Proceedings of the
+12th Joint Conference on Lexical and Computational
+Semantics (*SEM 2023) , pages 323–337, Toronto,
+Canada. Association for Computational Linguistics.
+Kees van Deemter. 2024. The Pitfalls of Deﬁning Hal-
+lucination. Computational Linguistics, pages 1–10.
+Ashwin K Vijayakumar, Michael Cogswell, Ram-
+prasath R Selvaraju, Qing Sun, Stefan Lee, David
+Crandall, and Dhruv Batra. 2016. Diverse beam
+search: Decoding diverse solutions from neural se-
+quence models. arXiv preprint arXiv:1610.02424.
+Oriol Vinyals and Quoc Le. 2015. A neural conversa-
+tional model.
+Yijun Xiao and William Y ang Wang. 2021. On hal-
+lucination and predictive uncertainty in conditional
+language generation. In Proceedings of the 16th Con-
+ference of the European Chapter of the Association
+for Computational Linguistics: Main V olume, pages
+2734–2744, Online. Association for Computational
+Linguistics.
+Jingqing Zhang, Y ao Zhao, Mohammad Saleh, and Pe-
+ter Liu. 2020. Pegasus: Pre-training with extracted
+gap-sentences for abstractive summarization. In In-
+ternational Conference on Machine Learning , pages
+11328–11339. PMLR.
+Chunting Zhou, Graham Neubig, Jiatao Gu, Mona Diab,
+Francisco Guzmán, Luke Zettlemoyer, and Marjan
+Ghazvininejad. 2021. Detecting hallucinated content
+in conditional neural sequence generation . In Find-
+ings of the Association for Computational Linguis-
+tics: ACL-IJCNLP 2021 , pages 1393–1404, Online.
+Association for Computational Linguistics.
+Xiang Zhou, Yixin Nie, and Mohit Bansal. 2022. Dis-
+tributed NLI: Learning to predict human opinion dis-
+tributions for language reasoning . In Findings of
+the Association for Computational Linguistics: ACL
+2022, pages 972–987, Dublin, Ireland. Association
+for Computational Linguistics.
+A Shared consciousnesses: Overview of
+approaches used by SHROOM teams
+In Table 2, we provide a short overview of the
+various teams, the resources they utilized (models
+& datasets), as well as a short description of their
+approach.
+B What SHROOM makes you do:
+Annotation guidelines
+In Figure 8, we provide an exact copy of the an-
+notation guidelines given to the annotators. These
+guidelines are based on ﬁve of the organizers’ expe-
+rience of annotating the trial set, and were provided
+to annotators recruited for the validation and test
+splits.
+1991
+
+===== PAGE 14 =====
+
+Annotation guidelines for SHROOM
+Thank you for agree ing to par tic i pate in the SHROOM sur vey! The pre sent doc u ment will pro vide you some
+gen er al guide lines as to what is ex pect ed of you.
+What are we look ing for?
+Our goal is to as sess the truth ful ness of sen tences and doc u ments writ ten with ar ti fi cial in tel li gence. In par tic u lar,
+we are in ter est ed in cas es when the AI out puts are not sup port ed by the facts. Such un sup port ed out puts are col -
+lo qui al ly re ferred to as 'hal lu ci na tions'.
+You will be pre sent ed with a se ries of items. Each item con tains an AI out put, as well as one or more Ref er ences,
+i.e., ex am ples of what the mod el should have pro duced in an ide al sce nario. Out puts and ref er ences can cor re -
+spond to dif fer ent types of sen tences and para graphs: news head lines, dic tio nary de f i n i tions, movie sub ti tles…
+We ask that you mark for every item, whether the out put con tains or de scribes facts that are not sup port ed by
+the pro vid ed ref er ence. Such items are in stances of hal lu ci na tions.
+In oth er words: hal lu ci na tions are cas es where the AI out put is more spe ciﬁ c than it should be, giv en the
+avail able ref er ence.
+Some Ex am ples and coun terex am ples Hal lu ci na tions
+Hal lu ci na tions
+Be low are some ex am ples of items our re search team unan i mous ly con sid ered as hal lu ci na tions:
+Ex am ple 1
+Reference: The worship of trees.
+AI output: (uncountable) The study of trees.
+Ex am ple 2
+    Reference: Why is everyone laughing?
+    AI output: Why is everyone okay?
+Ex am ple 3
+    Reference: You’re a scam artist.
+    AI output: You’re not a good scam artist.
+Not Hal lu ci na tions
+And next, here are a few items that we unan i mous ly did not con sid er as hal lu ci na tions:
+Ex am ple 1
+    Reference: Capable of being deployed by parachute.
+    AI output: Capable of being parachuted.
+Ex am ple 2
+    Reference: When did you see him?
+    AI output:When was the last time you saw him?
+One last thing: Hal lu ci na tions vs. un der gen er a tion
+In some in stances, the AI out put can con tain less in for ma tion than the ref er ence. We re fer to such items as cas es
+of “un der gen er a tion”. These are not nec es sar i ly cas es of hal lu ci na tions: as long as what is stat ed in the AI out put
+is sup port ed by the ref er ence, such items should not be marked as hal lu ci na tions.
+Here is one straight for ward ex am ple:
+Reference: I can't do it alone. You have to help me.
+AI output:I can't do it alone.
+Giv en that all the in for ma tion pre sent in the AI out put is also found in the ref er ence, this should not be marked
+as a hal lu ci na tion.
+That's it!
+Figure 8: Annotation guidelines.
+1992
+
+===== PAGE 15 =====
+
+Team & Paper Resources Overview
+AI Blues (No report)
+AILS-NTUA
+Grigoriadou et al. (2024)
+SHROOM datasets; V ectara model. Fine-tuned models and voting classiﬁer.
+Alejandro Mosquera SHROOM datasets; COMET, V ectara,
+LaBSE, GPT35 and GPT4 models.
+Ensemble of publicly available models. Logistic Regression was used as ﬁnal scoring model.
+AlphaIntellect
+Choudhury et al. (2024)
+SHROOM dataset, SBERT Fully-connected neural network classiﬁers with SBERT embeddings as input.
+AMEX AI LABS SHROOM datasets; V ectara and Open-
+Chat models.
+Ensemble of LLM (using Openchat) zero shot and few shot with V ectara cross encoder based scores.
+Atresa (No report)
+Bolaca
+Rösener et al. (2024)
+SHROOM dataset, SBERT Logistic regression and feed-forward classiﬁer trained on SBERT embeddings
+BrainLlama
+Siino (2024)
+LLaMA model. Prompt-based approach with LLaMA.
+BruceW (No report)
+Byun
+Byun (2024)
+SHROOM dataset, data augmentation,
+RoBERTa
+Finetuned a BERT or RoBERTa model with a softmax layer to output the probability of hallucinated text.
+Finetuning data is the labelled SHROOM data augmented with data points constructed by replacing words
+with synonyms.
+CAISA (No report)
+Compos Mentis
+Das and Srihari (2024)
+HalluEval dataset; Mistral 7B instruct
+model.
+Ensemble of several role-based LLMs, which were either ﬁne-tuned on hallucination data or role-based
+prompting.
+daixiang (No report)
+deema (No report)
+DeepPavlov
+Belikova and Kosenko
+(2024)
+SHROOM dataset; OpenChat, DeBERTa,
+RoBERTa and T5 models.
+Ensemble of several pretrained Transformer-based models to get features for validation and test data of
+SHROOM dataset and trained a boosting-based meta-model on top.
+DUTh
+Iordanidou et al. (2024)
+SHROOM, LaBSE, T5, DistilUSE Using pre-trained LLMs and classiﬁers
+HalluSafe
+Rahimi et al. (2024)
+SHROOM, labeled 3000 samples of the
+training data
+Fine-tuned a DeBERTa-v3-large
+Halu-NLP
+Mehta et al. (2024)
+SHROOM datasets; GPT, SelfCheckGPT
+and V ectara models.
+Prompts and GroupCheckGPT. NB: due to a team name change, this team is also referred to as
+GroupCheckGPT by some participants.
+HaRMoNEE
+Obiso et al. (2024)
+SHROOM, SNLI, MNLI and PAWS
+datasets; V ectara and GPT4 models.
+Highest results obtained with zero-shot prompting in the model-aware track; pretraining on NLI and
+PAWS followed by ﬁnetuning on the model-agnostic track.
+HIT-MI&T Lab
+Liu et al. (2024)
+SHROOM with training dataset labeled
+using GPT-4; DeBERTaV3, InternLM2,
+SBERT, and UniEval.
+Fine-tune the DeBERTaV3 and InternLM2 models, and call the SBERT and UniEval models to select the
+optimal threshold usinf SHROOM & syntheticaly labeled data. The system obtians the ﬁnal results by
+combining the prediction results of each model.
+IRIT-Berger-Levrault
+Bendahman et al. (2024)
+SHROOM datasets; Sentence-t5, BGE, e5
+models.
+Computes the cosine similarity of sentence embeddings and classify based on an empirical threshold
+value.
+Maha Bhaashya
+Bhamidipati et al. (2024)
+DeBERTa models. Zero shot inference, pretrained cross encoder model
+MALTO
+Borra et al. (2024)
+SHROOM model-agnostic dataset, De-
+BERTa pretrained and ﬁnetuned on MNLI,
+SOLAR-10.7B quantized from TheBloke
+(for synthetic data generation)
+Encoder and classiﬁer, ﬁne-tuned in various ways (including with synthetic data)
+MARiA
+Sanayei et al. (2024)
+SHROOM dataset, SBERT, bart-large-
+mnli, Mixtral
+Three approaches: (1) Cosine similarity of SBERT embeddings between source-hypothesis and source-
+target pairs; (2) NLI classiﬁcation using bart-large-mnli model; and (3) Mixtral prompting. Only the
+Mixtral results were submitted.
+Noot Noot
+Bahad et al. (2024)
+SHROOM dataset; Mixtral and RoBERTa
+models.
+Mixtral prompting and RoBERTa ﬁnetuning.
+NU-RU
+Markchom et al. (2024)
+SHROOM, GPT-3.5, Sentence Transform-
+ers
+Tried two approaches: (1) hypothesis-target cosine similarity, using a threshold value to determine whether
+the hypothesis is a hallucation. (2) SelfCheckGPT with a customized prompt for each NLG task, designed
+to assess its coherence with the provided source and target. Each prompt is iterated through the GPT-3.5
+model ﬁve times, and the ﬁnal label is determined by the majority response.
+octavianB
+Brodoceanu (2024)
+RoBERTa Used a pretrained model (roberta-large-openai-detector) that has been trained to distinguish between text
+generated by LLMs and text written by humans.
+OPDAI
+Chen et al. (2024)
+SHROOM, Mistral-7B-Instruct-v0.2, self
+constructed training data
+Supervised ﬁne-tuning over synthetically constructed weakly supervised training data.
+Pollice V erso
+Kobs et al. (2024)
+Mistral2, LLaMa2, Phi2 and Zephyr mod-
+els; uses SHROOM train set for prompt
+optimization.
+Ensembling over the output logits of prompt-based LLMs (mistral, llama etc) after automatically optimiz-
+ing their prompts ("OPRO").
+SHROOM-INDElab
+Allen et al. (2024)
+SHROOM dataset; GPT 3.5 and GPT 4
+models.
+In-context learning with role-play and automatic prompt generation in a few-shot classﬁer, using a closed-
+source LLM.
+SibNN SHROOM datasets; XLM-RoBERTa
+model.
+Fine-tunes a self-adaptive hierarchical variant of XLM-RoBERTa-XL twice: ﬁrst as an embedder (in a
+few-shot mode), then as a binary classiﬁer. More details at
+https://huggingface.co/bond005/xlm-roberta-xl-hallucination-detector .
+silk_road SHROOM datasets; V ectara model. Fine-tunes an off-the-shelf Cross-Encoder hallucination evaluation model.
+Skoltech (No report)
+SLPL SHROOM
+Fallah et al. (2024)
+SHROOM datasets; LaBSE, DeBERTa,
+Zephyr, Mistral and Llama2 models.
+Using two LLMs to classify and explain their decision and another LLM to judge and decide based on
+those explanations.
+SmurfCat
+Rykov et al. (2024)
+SHROOM (synthetically augmented),
+QQP and PAWS datasets; E5, T5, V ectara
+models.
+Fine-tuning of e5-mistral-7b-instruct using synthetic data collected with LLaMA2-7B adapters trained
+to produce data with and without hallucinations. However, there are two other systems: one works as a
+voting ensemble of multiple LLMs, and another uses the Mutual Implication Score architecture.
+Team CentreBack SHROOM dataset; DeBERTa model. Uses an off-the-shelf library (SelfCheckGPT’s SelfCheckNLI function) to calculate contradiction scores
+on a small labeled test set and then deﬁned a threshold for hallucination.
+TU Wien
+Arzt et al. (2024)
+SHROOM dataset; V ectara model. Model-aware track best submissions uses a V ectara hallucination detection model ﬁnetuned on the
+validation set. The best model-agnostic track submission is a meta-model that utilizes linear regression
+and is trained on features that correspond to probabilities predicted by individual systems we implemented.
+UCC-NLP SHROOM dataset; GPT-3.5 and V ectara
+models.
+Uses BertScore and GPT-3.5 to create synthetic labels and ﬁne-tune a V ectara LLM.
+UMUTeam
+Pan et al. (2024)
+SHROOM dataset; TULU-DPO model. Zero-shot approach
+ustc_xsong (No report)
+zhuming (No report)
+0x.Y uan Mistral, Mixtral, LLaMA, Falcon, Wiz-
+ardLM and Capybara models.
+Zero-shot prompt engineering. Expects most LLMs will have different hallucination patterns, and tests
+whether ensembling can mitigate this.
+Table 2: Participating teams and their respective works.
+1993
