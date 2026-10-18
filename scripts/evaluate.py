@@ -47,6 +47,7 @@ def _resolve_dataset_rows(args: argparse.Namespace) -> tuple[list[dict], str]:
     """Return (rows, dataset_slug_or_label) honoring --data/--synth/--dataset."""
     if args.synth:
         rows = load_synthetic_qa()
+        slug = "synth"
     elif args.dataset:
         slug = args.dataset.strip().lower()
         defaults = _DATASET_DEFAULTS.get(slug)
