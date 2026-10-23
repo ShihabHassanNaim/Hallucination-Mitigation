@@ -36,6 +36,54 @@ def _word_set(text: str) -> set[str]:
     return set(re.findall(r"\w+", text.lower()))
 
 
+def _length_matched_control(
+    query: str, right: str, hallucinated: str, knowledge: str = ""
+) -> str:
+    """Build a FAITHFUL answer that is as long as the hallucinated one.
+
+    HaluEval gold answers are short factual spans while the hallucinated
+    answers are full sentences, so a naive (gold=0, generated=1) pairing lets
+    the detector separate the classes on ``answer_length`` alone. This
+    constructs a third example: a faithful answer expanded to full-sentence
+    length using the dataset's ``knowledge`` field (falling back to the
+    query's own words). Both classes then look like generated prose, so
+    cosine / overlap / claim structure must carry the signal.
+
+    Returns "" if no credible control can be built.
+    """
+    import re
+
+    hw = len(hallucinated.split())
+    rw = len(right.split())
+    if hw <= rw:
+        return ""  # gold is already the longer side; nothing to balance
+
+    # Context to expand with: prefer the dataset's knowledge passage, since
+    # it is the *supporting evidence* and therefore faithful by construction.
+    # Only fall back to query words when knowledge is missing/too short.
+    ctx = (knowledge or "").strip()
+    need = hw - rw
+    if len(ctx.split()) < need:
+        qwords = [
+            w
+            for w in re.findall(r"[A-Za-z0-9']+", query)
+            if w.lower() not in right.lower()
+        ]
+        ctx = f"{ctx} {' '.join(qwords)}".strip()
+    if len(ctx.split()) < need:
+        return ""  # not enough faithful context to reach the target length
+
+    # Lead with the gold fact, then the supporting context, trimmed to match.
+    control = f"{right}, {' '.join(ctx.split()[:need])}"
+    out = " ".join(control.split()[:hw]).strip(" ,.")
+
+    # Reject degenerate controls: identical to gold, or too short to be a
+    # sentence (which would re-introduce the length shortcut we're removing).
+    if len(out.split()) < 4 or out.lower() == right.lower():
+        return ""
+    return out
+
+
 def _compute_features(embedder: BGE_M3Embedder, query: str, answer: str) -> dict:
     """Compute the 4 Step-3 features for a (query, answer) pair."""
     import numpy as np
@@ -87,6 +135,14 @@ def main() -> None:
         default="data/detector_train.jsonl",
         help="Output JSONL path (default data/detector_train.jsonl).",
     )
+    ap.add_argument(
+        "--balance",
+        action="store_true",
+        help="Also emit a length-matched FAITHFUL control per hallucinated "
+             "row so `answer_length` cannot act as a label shortcut. "
+             "Strongly recommended: without it the detector learns length, "
+             "not hallucination.",
+    )
     args = ap.parse_args()
 
     if args.data:
@@ -120,11 +176,27 @@ def main() -> None:
             right = (r.get("right_answer") or "").strip()
             hallucinated = (r.get("answer") or "").strip()
 
+            # CONFOUND WARNING: in HaluEval the gold answer is a short
+            # factual span while the hallucinated answer is a full generated
+            # sentence. Emitting that pair alone teaches the detector to read
+            # `answer_length` as the label (gold ~2 words, hallucinated ~11),
+            # which inflates held-out AUC while learning nothing transferable.
+            #
+            # `--balance` neutralises this by also emitting a length-matched
+            # faithful control: the gold answer padded into a full sentence
+            # with the query's own context words. Both classes then look like
+            # generated prose, so cosine/overlap carry the signal instead.
             pairs = []
             if right:
-                pairs.append((0, right))         # label 0 = faithful
+                pairs.append((0, right))         # label 0 = faithful (short)
             if hallucinated and hallucinated != right:
-                pairs.append((1, hallucinated))  # label 1 = hallucinated
+                pairs.append((1, hallucinated))  # label 1 = hallucinated (long)
+            if args.balance and right and hallucinated and hallucinated != right:
+                control = _length_matched_control(
+                    query, right, hallucinated, r.get("knowledge") or ""
+                )
+                if control and control != right:
+                    pairs.append((0, control))   # label 0 = faithful (long)
 
             if not pairs:
                 skipped += 1

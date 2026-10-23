@@ -136,40 +136,38 @@ def main() -> None:
             retrieved = set(e["doc_id"] for e in d["evidence"])
             gt = 0 if gold and not (gold & retrieved) else 1
 
-        # Compute the XGBoost detector score using the SAME feature pipeline
-        # the detector was trained on: (cosine, claim_count, overlap, answer_length)
-        # of the ground-truth answer vs the query. This matches
-        # scripts/generate_detector_data_v2.py so the detector sees features
-        # in the same distribution it was fitted on.
-        from src.models.embedder_bge_m3 import BGE_M3Embedder
+        # Detector score: predict hallucination from the answer the pipeline
+        # ACTUALLY generated (d["answer"]). The ground-truth `right_answer` is
+        # deliberately never touched here — scoring it would leak the label
+        # into its own feature and yield a meaningless ROC-AUC of 1.0.
+        # Features use the same four signals as generate_detector_data_v2.py:
+        # (cosine, claim_count, overlap, answer_length).
         from src.utils.claim_extractor import extract_claims, intrinsic_overlap
-        import numpy as np
 
-        gt_answer = ""
-        if gt == 0 and r.get("right_answer"):
-            gt_answer = r["right_answer"]
-        elif gt == 1 and r.get("answer"):
-            gt_answer = r["answer"]
-        else:
-            gt_answer = r.get("right_answer") or r.get("answer") or ""
-
-        if gt_answer:
+        gen_answer = d.get("answer") or ""
+        if gen_answer:
             try:
                 embedder = pipe.embedder
                 qv = embedder.encode([r["query"]])[0]
-                av = embedder.encode([gt_answer])[0]
-                cosine = float(np.dot(qv, av) / (np.linalg.norm(qv) * np.linalg.norm(av) + 1e-12))
+                av = embedder.encode([gen_answer])[0]
+                cosine = float(
+                    np.dot(qv, av)
+                    / (np.linalg.norm(qv) * np.linalg.norm(av) + 1e-12)
+                )
             except Exception:
                 cosine = 0.0
-            claim_count = max(1, len(extract_claims(gt_answer, mode="rule")))
-            overlap = intrinsic_overlap(gt_answer, r["query"])
-            answer_length = float(len(gt_answer.split()))
+            claim_count = max(1, len(extract_claims(gen_answer, mode="rule")))
+            overlap = intrinsic_overlap(gen_answer, r["query"])
+            answer_length = float(len(gen_answer.split()))
             feats = [cosine, float(claim_count), overlap, answer_length]
-            xgb_prob = pipe.early_classifier.predict_proba(feats)
+            try:
+                score = float(pipe.early_classifier.predict_proba(feats))
+            except Exception:
+                score = 1.0 - d.get("confidence", 0.5)
         else:
-            xgb_prob = None
-
-        score = float(xgb_prob) if xgb_prob is not None else 1.0 - d.get("confidence", 0.5)
+            # No generated answer to judge — fall back to pipeline confidence
+            # inverted (higher => more likely hallucinated).
+            score = 1.0 - d.get("confidence", 0.5)
         detector_truth.append(gt)
         detector_score.append(score)
 
