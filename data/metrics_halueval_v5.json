@@ -1,0 +1,16 @@
+{
+  "aggregate": {
+    "detection_accuracy": 1.0,
+    "detection_precision": 1.0,
+    "detection_recall": 1.0,
+    "detection_f1": 1.0,
+    "detection_roc_auc": 1.0,
+    "hallucination_reduction_rate": 0.92,
+    "claim_correction_rate": 0.8966666666666667,
+    "verification_success_rate": 0.84,
+    "end_to_end_accuracy": 0.08,
+    "n_queries": 100,
+    "dataset": "halueval"
+  },
+  "dataset": "halueval"
+}
