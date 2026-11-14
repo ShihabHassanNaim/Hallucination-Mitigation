@@ -18,6 +18,19 @@ from pathlib import Path
 
 from . import Step, StepContext
 
+# Config metric names -> per-row keys produced by this step. The list in
+# configs/default.yaml uses the shorter literature-style names; these map
+# them onto the actual emitted keys.
+_METRIC_KEY_ALIASES: dict[str, str] = {
+    "recall_at_k": "retrieval_recall_at_5",
+    "precision_at_k": "retrieval_precision_at_5",
+    "mrr": "retrieval_mrr",
+    "ndcg": "retrieval_ndcg",
+    "claim_precision": "claim_precision",
+    "claim_recall": "claim_recall",
+    "claim_f1": "claim_f1",
+}
+
 
 def _tokenize(text: str) -> list[str]:
     import re
@@ -202,7 +215,21 @@ class Step13Evaluation(Step):
             encoding="utf-8",
         )
 
+        # The configured metric list gates what is emitted. Config names map
+        # onto the row keys; names with no per-row equivalent (bleu, rouge_l,
+        # bert_score — computed by the external evaluator) are reported as
+        # not available at this level rather than silently ignored.
+        selected: dict[str, Any] = {}
+        unavailable: list[str] = []
+        for name in metrics_block:
+            key = _METRIC_KEY_ALIASES.get(name, name)
+            if key in row_metrics:
+                selected[key] = row_metrics[key]
+            else:
+                unavailable.append(name)
+
         self.ctx.metadata[f"step{self.number:02d}_{self.name}"] = {
-            "metrics": row_metrics,
+            "metrics": selected if selected else row_metrics,
             "requested": metrics_block,
+            "unavailable_at_step_level": unavailable,
         }
