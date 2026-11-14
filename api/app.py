@@ -118,22 +118,6 @@ def _try_load_index(pipeline: Pipeline, index_dir: Optional[str]) -> bool:
         return False
 
 
-async def _pipeline_lifespan(app: FastAPI, *, index_dir: Optional[str]) -> None:
-    """Replace the synchronous ``Pipeline.run`` with no-op at startup."""
-    pipeline = _build_pipeline()
-    app.state.pipeline = pipeline
-    app.state.index_loaded = False
-    app.state.n_documents = 0
-    app.state.index_loaded = _try_load_index(pipeline, index_dir)
-    if app.state.index_loaded:
-        # ``index_dir`` may be a directory whose contents reflect how many
-        # chunks the loader produces; we don't know exactly without
-        # reading the index files, so report 0 on startup unless later
-        # indices report it.
-        app.state.n_documents = 0
-    yield  # type: ignore[unreachable]  # FastAPI turns this into an ASGI lifespan.
-
-
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
@@ -155,7 +139,6 @@ def create_app(index_dir: Optional[str] = None) -> FastAPI:
         import os
         index_dir = os.environ.get("CRISP_INDEX") or None
 
-    lifespan_handler = _pipeline_lifespan
     # FastAPI lifespan can be a contextmanager OR (app, ...) callable in
     # modern FastAPI; the simpler form (decorator) keeps it short.
     app = FastAPI(
