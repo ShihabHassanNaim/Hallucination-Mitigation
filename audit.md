@@ -614,6 +614,52 @@ documents sharing a boilerplate opening do not match. Step 13 now reports
 - `scripts/evaluate_full.py` now reports percentile bootstrap 95% CIs,
   resampling **queries** rather than rows.
 
+### 17.6 Only three of nine headline metrics had confidence intervals
+
+The bootstrap introduced in §17.5 computed intervals for
+`detection_accuracy`, `detection_roc_auc` and `end_to_end_accuracy` only.
+The remaining six reported metrics — precision, recall, F1, HRR, CCR and
+VSR — were published as bare point estimates, so the results table gave
+readers no way to tell whether a 0.62 F1 differed from chance.
+
+The bootstrap now covers all nine. The intervals are still computed at the
+query level (resampling whole queries, not rows), and the per-row HRR/CCR/VSR
+values are persisted into `per_query` so the intervals can be recomputed from
+the output file alone.
+
+A related defect: the aggregate block was assembled from in-memory lists
+while the per-row records were assembled separately. If the two ever
+diverged the headline numbers and the rows would disagree. Both now come
+from a single `_aggregate_from_rows` helper, so the metrics and their
+intervals are derived from the same records by construction.
+
+### 17.7 Long evaluations were not crash-safe
+
+A 1000-row evaluation takes roughly 2.3 hours, and an ablation sweep over
+seven ablations takes hours more. Every one of these scripts wrote its
+output only at the very end, so a crash, an OOM kill or a manual interrupt
+discarded the entire run — the first HaluEval pass was lost this way after
+140 of 1000 rows.
+
+All three long-running scripts now checkpoint as they go:
+
+- `scripts/evaluate_full.py` writes `per_query` every 10 rows.
+- `scripts/evaluate.py` writes `per_query` every 10 rows.
+- `scripts/ablation_study.py` writes the results block after each ablation.
+
+`scripts/evaluate_full.py --recompute` rebuilds the aggregate block (metrics
+plus all nine confidence intervals) from the rows already on disk, without
+running the pipeline again. This makes a killed run recoverable instead of
+merely survivable.
+
+### 17.8 The latency figure was silently skipped
+
+`scripts/plot_results.py` read per-step timings from a `step_traces` list,
+but `scripts/evaluate_full.py` stores a `step_times_ms` map keyed by step
+name. The figure found no timings and was skipped with a message that named
+the wrong missing field, so the cause was not obvious from the output. The
+plot now accepts either shape.
+
 ---
 
 *End of audit.*
