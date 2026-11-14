@@ -84,6 +84,12 @@ class PipelineResult:
     iterations: int = 1
     step_traces: list[StepTrace] = field(default_factory=list)
     report_markdown: str = ""
+    # The answer after step 10. Equals `answer` when nothing was
+    # regenerated; the mitigation evaluation needs both to measure what
+    # regeneration changed.
+    final_answer: str = ""
+    # The answer before step 10, i.e. what the generator produced.
+    original_answer: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -96,4 +102,6 @@ class PipelineResult:
             "iterations": self.iterations,
             "step_traces": [t.to_dict() for t in self.step_traces],
             "report_markdown": self.report_markdown,
+            "final_answer": self.final_answer or self.answer,
+            "original_answer": self.original_answer or self.answer,
         }

@@ -233,6 +233,9 @@ class Pipeline:
         return PipelineResult(
             query=ctx.query,
             answer=ctx.final_answer or ctx.answer,
+            # The pre-mitigation text, so the mitigation evaluation can
+            # compare what step 10 produced against what it started from.
+            original_answer=ctx.answer,
             claims=ctx.claims,
             evidence=ctx.evidence,
             confidence=ctx.confidence,
@@ -240,6 +243,7 @@ class Pipeline:
             iterations=ctx.iterations,
             step_traces=traces,
             report_markdown=ctx.metadata.get("report_markdown", ""),
+            final_answer=ctx.final_answer or ctx.answer,
         )
 
     # ----- FastAPI compatibility helpers --------------------------------

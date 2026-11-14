@@ -674,7 +674,11 @@ def main() -> None:
         if (idx + 1) % 10 == 0 or (idx + 1) == len(rows):
             elapsed = time.time() - t_start
             row_dt = time.time() - row_t
-            avg = elapsed / (idx + 1)
+            # Average over the rows this run actually evaluated, not over the
+            # reused ones — otherwise a resumed run reports a near-zero
+            # average and a meaningless ETA.
+            n_done = idx + 1 - reused
+            avg = (elapsed / n_done) if n_done > 0 else 0.0
             eta = avg * (len(rows) - idx - 1)
             print(
                 f"  [{idx+1}/{len(rows)}] row_dt={row_dt:.1f}s avg={avg:.1f}s eta={eta:.0f}s",
