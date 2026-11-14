@@ -117,10 +117,22 @@ def main() -> None:
         else:
             args.out = "data/metrics.json"
 
+    # Default the index per dataset so retrieval never silently degrades to
+    # the 6-document synthetic corpus. An explicit --index still wins.
+    # When --data is used the slug is a filename stem, so match on the
+    # dataset name appearing anywhere in the path (e.g. "halueval_eval_1000").
+    if args.index is None:
+        probe = f"{slug} {args.data or ''}".lower()
+        for name, defaults in _DATASET_DEFAULTS.items():
+            if name in probe and defaults.get("index"):
+                args.index = defaults["index"]
+                break
+
     cfg = load_config()
     pipe = Pipeline(cfg=cfg)
     if args.index:
         pipe.load_index(args.index)
+        print(f"loaded index: {args.index} ({pipe.retriever.n_docs} docs)")
 
     per_query_metrics: list[dict] = []
     t_start = time.time()
