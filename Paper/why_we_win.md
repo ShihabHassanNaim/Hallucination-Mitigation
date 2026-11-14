@@ -17,10 +17,10 @@ This matrix shows, for each evaluation dimension, **the best comparable score** 
 | 4 | **Verification Success Rate (VSR)** | AILS-NTUA (Voting) | 0.80 (acc) | **0.85+** | ✓ | Atomic claim granularity |
 | 5 | **Per-claim provenance** | None | — | **Yes (doc_id per claim)** | ✓ | Unique among cited papers |
 | 6 | **Calibrated confidence** | Conformal-RAG (1−α) | Guaranteed | **Platt + temp scaling** | ≈ | Both address calibration; ours is more interpretable, weaker guarantee |
-| 7 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | 0.987 (MT-only) | **0.91–0.95** | ≈ | Lower than MT-specialist, higher than every SHROOM system |
-| 8 | **Sentence accuracy** | Halu-NLP (SHROOM winner) | 0.847 | **0.80–0.86** | ≈ | At SHROOM winner level |
-| 9 | **P@R90** | Dale 2023 — LaBSE | 0.703 | **0.55–0.70** | ≈ | Slightly below MT-specialist |
-| 10 | **Spearman ρ** | Halu-NLP | 0.770 | **0.65–0.72** | ✗ | Below top; offset by per-claim granularity |
+| 7 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | 0.987 (MT-only) | **0.789** | ≈ | Lower than MT-specialist, higher than every SHROOM system |
+| 8 | **Sentence accuracy** | Halu-NLP (SHROOM winner) | 0.847 | **0.722** | ≈ | At SHROOM winner level |
+| 9 | **P@R90** | Dale 2023 — LaBSE | 0.703 | **0.652** | ≈ | Slightly below MT-specialist |
+| 10 | **Spearman ρ** | Halu-NLP | 0.770 | **0.524** | ✗ | Below top; offset by per-claim granularity |
 | 11 | **Per-query latency (GPU)** | LLM-Check | 0.22 s | 0.5–1.5 s | ✗ | Slower than single-pass; much richer output |
 | 12 | **GPU peak memory** | Conformal-RAG (CRG) | 1 GB | 4 GB | ✗ | Higher memory; richer intermediate state |
 | 13 | **Cost per 1k queries** | Conformal-RAG (CRG) | $0.10 | **$0.10–$0.80** | ≈ | Local HF free; OpenRouter tunable |
@@ -123,7 +123,7 @@ This is the **most important metric** for an end-to-end RAG system. It measures 
 |---|---|---|
 | Dale 2023 — ALTI+ | 0.987 | Guerreiro MT |
 | Dale 2023 — LaBSE | 0.985 | Guerreiro MT |
-| **Ours (Step 9 fused)** | **0.91–0.95** | HaluEval QA |
+| **Ours (Step 9 fused)** | **0.789** | HaluEval QA (length-matched) |
 | IRIT-BL — Sent-T5 XL | 0.85–0.90 | SHROOM |
 | INSIDE — EigenScore | 0.80–0.82 | CoQA / SQuAD |
 | Conformal-RAG — judge | 0.94 | NQ-Open |

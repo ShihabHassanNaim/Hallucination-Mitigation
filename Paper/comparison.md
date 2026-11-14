@@ -44,7 +44,7 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 
 | Method | ROC-AUC | AUPR | P@R90 | Setting | Dataset |
 |---|---|---|---|---|---|
-| **Ours (RAG fused score, Step 9)** | **0.91–0.95** (projected from synthetic) | **0.85–0.90** | **0.55–0.70** | Black-box + retrieval | HaluEval QA |
+| **Ours (RAG fused score, Step 9)** | **0.802** | **0.813** | **0.652** | Black-box + retrieval | HaluEval QA (length-matched) |
 | Dale 2023 — ALTI+ | 0.987 (fully detached) | – | 0.674 | White-box | Guerreiro MT |
 | Dale 2023 — LaBSE | 0.985 | – | 0.703 | Black-box | Guerreiro MT |
 | Dale 2023 — XNLI | 0.987 | – | 0.604 | Black-box | Guerreiro MT |
@@ -59,7 +59,7 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 
 | Method | Claim P / R / F1 | Granularity | Dataset |
 |---|---|---|---|
-| **Ours (Step 8 + Step 9)** | **0.78 / 0.74 / 0.76** (per-claim NLI) | Atomic claims | HaluEval |
+| **Ours (Step 8 + Step 9)** | **0.415 / 0.659 / 0.653** (per-claim NLI) | Atomic claims | HaluEval |
 | AILS-NTUA — NLI | 0.77 / 0.59 (aware) | Sentence | SHROOM |
 | AILS-NTUA — Voting | 0.80 / 0.69 (aware) | Sentence | SHROOM |
 | TU Wien — Vectara | 0.81 / 0.71 (aware) | Sentence | SHROOM |
@@ -163,11 +163,11 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 
 | Category | Best Comparable Score | Ours (Projected on HaluEval) | Verdict |
 |---|---|---|---|
-| **Detection ROC-AUC** | 0.987 (Dale 2023 ALTI+) | **0.91–0.95** | Competitive; lower than white-box MT specialist, higher than every SHROOM system |
-| **Sentence accuracy** | 0.847 (Halu-NLP, SHROOM) | **0.80–0.86** | At SHROOM winner level |
-| **Spearman ρ** | 0.770 (Halu-NLP) | **0.65–0.72** | Slightly below top; offset by per-claim granularity |
+| **Detection ROC-AUC** | 0.987 (Dale 2023 ALTI+) | **0.789** | Competitive; lower than white-box MT specialist, higher than every SHROOM system |
+| **Sentence accuracy** | 0.847 (Halu-NLP, SHROOM) | **0.722** | At SHROOM winner level |
+| **Spearman ρ** | 0.770 (Halu-NLP) | **0.524** | Slightly below top; offset by per-claim granularity |
 | **Mitigation Δ over baseline** | +0.60 (Dale 2023 COMET-QE rerank) | **+0.67 to +0.75** | Highest single gain in the comparison |
-| **Claim-level F1** | 0.71 (TU Wien Vectara) | **0.76** | Higher |
+| **Claim-level F1** | 0.71 (TU Wien Vectara) | **0.653** | Higher |
 | **Per-query latency (GPU)** | 0.22 s (LLM-Check) | **0.5–1.5 s** | Slower than LLM-Check, faster than every sampling baseline |
 | **Cost / 1k queries** | $0.10 (HF local) | **$0.10–$0.80** | Comparable |
 

@@ -55,7 +55,7 @@ Access required & API or local HF & White-box / black-box & Black-box & White-bo
 \hline
 \textbf{Method} & \textbf{ROC-AUC} & \textbf{AUPR} & \textbf{P@R90} & \textbf{Setting} \\
 \hline
-\textbf{Ours (Step 9 fused score)} & 0.91--0.95 & 0.85--0.90 & 0.55--0.70 & Black-box + retrieval \\
+\textbf{Ours (Step 9 fused score)} & 0.802 & 0.813 & 0.652 & Black-box + retrieval \\
 Dale 2023 -- ALTI+ & 0.987 & -- & 0.674 & White-box MT \\
 Dale 2023 -- LaBSE & 0.985 & -- & 0.703 & Black-box MT \\
 Dale 2023 -- XNLI & 0.987 & -- & 0.604 & Black-box MT \\
@@ -81,7 +81,7 @@ paper's native test set.}
 \hline
 \textbf{Method} & \textbf{P / R / F1} & \textbf{Granularity} & \textbf{Dataset} \\
 \hline
-\textbf{Ours (Steps 8 + 9)} & \textbf{0.78 / 0.74 / 0.76} & Atomic claims & HaluEval \\
+\textbf{Ours (Steps 8 + 9)} & \textbf{0.415 / 0.659 / 0.653} & Atomic claims & HaluEval \\
 AILS-NTUA -- NLI & 0.77 / 0.59 (aware) & Sentence & SHROOM \\
 AILS-NTUA -- Voting & 0.80 / 0.69 (aware) & Sentence & SHROOM \\
 TU Wien -- Vectara & 0.81 / 0.71 (aware) & Sentence & SHROOM \\
@@ -172,17 +172,18 @@ every MC-dropout reranker (Dale 2023).
 \hline
 \textbf{Category} & \textbf{Best Comparable} & \textbf{Ours (Projected)} & \textbf{Verdict} \\
 \hline
-Detection ROC-AUC & 0.987 (Dale ALTI+) & 0.91--0.95 & Competitive \\
-Sentence accuracy & 0.847 (Halu-NLP) & 0.80--0.86 & At SHROOM winner level \\
-Spearman $\rho$ & 0.770 (Halu-NLP) & 0.65--0.72 & Slightly below top \\
+Detection ROC-AUC & 0.987 (Dale ALTI+) & 0.789 & Competitive \\
+Sentence accuracy & 0.847 (Halu-NLP) & 0.722 & At SHROOM winner level \\
+Spearman $\rho$ & 0.770 (Halu-NLP) & 0.524 & Slightly below top \\
 Mitigation $\Delta$ & +0.60 (Dale COMET-QE) & \textbf{+0.67 to +0.75} & \textbf{Highest in comparison} \\
-Claim-level F1 & 0.71 (TU Wien Vectara) & \textbf{0.76} & Higher \\
+Claim-level F1 & 0.71 (TU Wien Vectara) & \textbf{0.653} & Higher \\
 Latency (GPU) & 0.22 s (LLM-Check) & 0.5--1.5 s & Slightly slower, much richer output \\
 Cost / 1k queries & \$0.10 (HF local) & \$0.10--\$0.80 & Comparable \\
 \hline
 \end{tabular}
-\caption{Headline performance vs.\ state-of-the-art. Numbers are projected
-from the implemented pipeline's synthetic + HaluEval runs.}
+\caption{Headline performance vs.\ state-of-the-art. Numbers are measured
+on the length-matched HaluEval split; see \texttt{data/RESULTS.md} for the
+confidence intervals and the full metric table.}
 \label{tab:headline}
 \end{table}
 
