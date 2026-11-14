@@ -66,6 +66,7 @@ step09_fusion_weights:
   nli:        0.25
   coverage:   0.15
   eedc:       0.10
+  detector:   0.15               # step-3 XGBoost hallucination probability (inverted)
 
 step10_regeneration:
   mode: "evidence"               # stub | evidence | regenerate

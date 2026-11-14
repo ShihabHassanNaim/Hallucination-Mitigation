@@ -30,11 +30,14 @@ from src.utils.data_loader import load_jsonl, load_synthetic_qa
 
 _DATASET_DEFAULTS: dict[str, dict[str, str]] = {
     "halueval": {
-        "data": "data/halueval_qa.jsonl",
+        # Leak-free held-out split (500 unique queries, 500/500 balanced).
+        # The full pool (data/halueval_qa.jsonl) contains the 200 queries the
+        # detector was trained on, so it must NOT be used for evaluation.
+        "data": "data/halueval_eval_1000.jsonl",
         "out": "data/metrics_halueval.json",
     },
     "truthfulqa": {
-        "data": "data/truthfulqa_qa.jsonl",
+        "data": "data/truthfulqa_eval_1000.jsonl",
         "out": "data/metrics_truthfulqa.json",
     },
 }
@@ -117,6 +120,7 @@ def main() -> None:
     ccr_list: list[float] = []
     vsr_list: list[float] = []
     e2e: list[int] = []
+    per_query: list[dict] = []
 
     t_start = time.time()
     for idx, r in enumerate(rows):
@@ -182,6 +186,23 @@ def main() -> None:
         # End-to-end accuracy.
         e2e.append(1 if d["decision"] == "PASS" else 0)
 
+        # Per-query record — needed for the ROC curve, calibration plot,
+        # and latency breakdown graphs.
+        per_query.append({
+            "query": r.get("query") or r.get("question") or "",
+            "label": gt,
+            "detector_score": score,
+            "confidence": float(d.get("confidence", 0.5)),
+            "decision": d["decision"],
+            "n_claims": len(d.get("claims", [])),
+            "n_evidence": len(d.get("evidence", [])),
+            "end_to_end_accuracy": 1 if d["decision"] == "PASS" else 0,
+            "step_times_ms": {
+                t.name: round(float(t.duration_ms), 3)
+                for t in (res.step_traces or [])
+            },
+        })
+
         if (idx + 1) % 10 == 0 or (idx + 1) == len(rows):
             elapsed = time.time() - t_start
             row_dt = time.time() - row_t
@@ -223,6 +244,8 @@ def main() -> None:
             existing = {}
     existing["aggregate"] = aggregate
     existing["dataset"] = slug
+    existing["per_query"] = per_query
+    existing["n_queries"] = len(per_query)
     out_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
     print(f"wrote {out_path} ({slug}, {len(rows)} rows)")
     print(json.dumps({"aggregate": aggregate}, indent=2))

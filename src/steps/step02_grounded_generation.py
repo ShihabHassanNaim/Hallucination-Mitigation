@@ -1,7 +1,13 @@
 """Step 2 — Grounded Generation.
 
-Calls Llama 3.1 (or Qwen 3 alt) with the prompt template and the
-retrieved evidence (if any). Initial answer is stored in ctx.answer.
+Calls the generator with the prompt template and the retrieved evidence.
+Initial answer is stored in ctx.answer.
+
+Grounding note: retrieval and reranking run *before* this step (see
+``src/steps/__init__.py`` — the registry orders step 6/7 ahead of step 2),
+so ``ctx.evidence`` is populated here and the prompt template receives real
+retrieved context. The step numbers are retained for traceability to the
+architecture diagram, but the *execution* order is what matters.
 """
 from __future__ import annotations
 
@@ -41,4 +47,5 @@ class Step02GroundedGeneration(Step):
             "backend": backend,
             "answer": answer,
             "evidence_count": len(evidence),
+            "grounded": bool(evidence),
         }

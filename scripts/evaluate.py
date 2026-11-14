@@ -33,11 +33,14 @@ _METRIC_NUMERIC_KEYS = [
 # output filenames listed below, so keep them in sync.
 _DATASET_DEFAULTS: dict[str, dict[str, str]] = {
     "halueval": {
-        "data": "data/halueval_qa.jsonl",
+        # Leak-free held-out split (500 unique queries, 500/500 balanced).
+        # The full pool (data/halueval_qa.jsonl) contains the 200 queries the
+        # detector was trained on, so it must NOT be used for evaluation.
+        "data": "data/halueval_eval_1000.jsonl",
         "out": "data/metrics_halueval.json",
     },
     "truthfulqa": {
-        "data": "data/truthfulqa_qa.jsonl",
+        "data": "data/truthfulqa_eval_1000.jsonl",
         "out": "data/metrics_truthfulqa.json",
     },
 }

@@ -57,7 +57,13 @@ class Step(ABC):
 
 
 def step_registry() -> list[type[Step]]:
-    """Return the 13 step classes in order. Imported lazily to avoid cycles."""
+    """Return the 13 step classes in *execution* order. Imported lazily to avoid cycles.
+
+    Execution order differs from the step numbering: retrieval (6) and
+    reranking (7) run *before* generation (2) so the generator receives real
+    retrieved context in its prompt. Step numbers are kept stable for
+    traceability to the architecture diagram and to the per-step traces.
+    """
     from . import (
         step01_query_understanding,
         step02_grounded_generation,
@@ -76,13 +82,16 @@ def step_registry() -> list[type[Step]]:
 
     return [
         step01_query_understanding.Step01QueryUnderstanding,
-        step02_grounded_generation.Step02GroundedGeneration,
-        step03_early_detection.Step03EarlyDetection,
-        step04_confidence_assessment.Step04ConfidenceAssessment,
-        step05_claim_extraction.Step05ClaimExtraction,
+        # --- grounding first: retrieve + rerank so generation is grounded ---
         step06_hybrid_retrieval.Step06HybridRetrieval,
         step07_reranking.Step07Reranking,
+        step02_grounded_generation.Step02GroundedGeneration,
+        # --- then detection over the generated answer ---
+        step03_early_detection.Step03EarlyDetection,
+        step05_claim_extraction.Step05ClaimExtraction,
         step08_nli_verification.Step08NLIVerification,
+        # EEDC consumes NLI verdict entropy, so it runs after step 8.
+        step04_confidence_assessment.Step04ConfidenceAssessment,
         step09_confidence_fusion.Step09ConfidenceFusion,
         step10_regeneration.Step10Regeneration,
         step11_final_gate.Step11FinalGate,

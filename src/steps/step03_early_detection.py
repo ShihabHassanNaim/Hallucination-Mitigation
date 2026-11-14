@@ -54,6 +54,8 @@ class Step03EarlyDetection(Step):
                 prob = float(clf.predict_proba(features))
             except Exception:
                 prob = 0.5
+        # Publish the probability so downstream fusion (step 9) can consume it.
+        self.ctx.metadata["hallucination_probability"] = prob
         self.ctx.metadata[f"step{self.number:02d}_{self.name}"] = {
             "features": self.ctx.feature_vector,
             "hallucination_probability": prob,

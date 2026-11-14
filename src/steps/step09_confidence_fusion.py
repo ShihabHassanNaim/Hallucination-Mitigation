@@ -20,9 +20,15 @@ class Step09ConfidenceFusion(Step):
         w_nli = float(weights.get("nli", 0.25))
         w_cov = float(weights.get("coverage", 0.15))
         w_eedc = float(weights.get("eedc", 0.10))
+        w_det = float(weights.get("detector", 0.0))
         # Normalise.
-        s = max(1e-9, w_sim + w_ret + w_nli + w_cov + w_eedc)
-        w_sim, w_ret, w_nli, w_cov, w_eedc = (w_sim / s, w_ret / s, w_nli / s, w_cov / s, w_eedc / s)
+        s = max(1e-9, w_sim + w_ret + w_nli + w_cov + w_eedc + w_det)
+        w_sim = w_sim / s
+        w_ret = w_ret / s
+        w_nli = w_nli / s
+        w_cov = w_cov / s
+        w_eedc = w_eedc / s
+        w_det = w_det / s
 
         claims = self.ctx.claims
         evidence = self.ctx.evidence
@@ -37,7 +43,22 @@ class Step09ConfidenceFusion(Step):
         coverage = (sum(1 for c in claims if c.verdict == "supported") / len(claims)) if claims else 0.0
         eedc = self.ctx.eedc_score or 0.0
 
-        overall = w_sim * cosine + w_ret * ret_top1 + w_nli * avg_nli + w_cov * coverage + w_eedc * eedc
+        # The early detector (step 3) emits a *hallucination* probability, so
+        # invert it to obtain a trust signal before fusing.
+        halluc_prob = self.ctx.metadata.get("hallucination_probability")
+        if halluc_prob is None:
+            detector_trust = 0.5
+        else:
+            detector_trust = 1.0 - float(halluc_prob)
+
+        overall = (
+            w_sim * cosine
+            + w_ret * ret_top1
+            + w_nli * avg_nli
+            + w_cov * coverage
+            + w_eedc * eedc
+            + w_det * detector_trust
+        )
 
         # Per-claim scores:
         for c in claims:
@@ -46,16 +67,19 @@ class Step09ConfidenceFusion(Step):
             cs += w_cov * (1.0 if c.verdict == "supported" else 0.0)
             cs += w_sim * cosine
             cs += w_eedc * eedc
+            cs += w_det * detector_trust
             c.confidence = float(cs)
 
         self.ctx.confidence = float(overall)
         self.ctx.metadata[f"step{self.number:02d}_{self.name}"] = {
             "weights": {
-                "similarity": w_sim, "retrieval": w_ret, "nli": w_nli, "coverage": w_cov, "eedc": w_eedc,
+                "similarity": w_sim, "retrieval": w_ret, "nli": w_nli,
+                "coverage": w_cov, "eedc": w_eedc, "detector": w_det,
             },
             "components": {
                 "similarity": cosine, "retrieval_top1": ret_top1,
                 "nli": avg_nli, "coverage": coverage, "eedc": eedc,
+                "detector_trust": detector_trust,
             },
             "overall_confidence": overall,
             "per_claim_confidence": [c.confidence for c in claims],
