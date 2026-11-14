@@ -355,6 +355,155 @@ def _fill_comparison_tex(
     return replacements
 
 
+def _fill_why_we_win_md(
+    path: Path, agg: dict, dry_run: bool = False
+) -> list[tuple[str, str, str]]:
+    """Replace the projected rows in ``Paper/why_we_win.md``."""
+    if not path.exists():
+        return []
+
+    text = path.read_text(encoding="utf-8")
+
+    def _v(key: str) -> str | None:
+        value = agg.get(key)
+        if not isinstance(value, (int, float)):
+            return None
+        return f"{float(value):.3f}"
+
+    specs = [
+        (
+            "row 7: ROC-AUC",
+            "| 7 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | 0.987 (MT-only) | **0.91–0.95** |",
+            lambda v: (
+                "| 7 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | "
+                f"0.987 (MT-only) | **{v('detection_roc_auc')}** |"
+            ),
+            ("detection_roc_auc",),
+        ),
+        (
+            "row 8: sentence accuracy",
+            "| 8 | **Sentence accuracy** | Halu-NLP (SHROOM winner) | 0.847 | **0.80–0.86** |",
+            lambda v: (
+                "| 8 | **Sentence accuracy** | Halu-NLP (SHROOM winner) | "
+                f"0.847 | **{v('detection_accuracy')}** |"
+            ),
+            ("detection_accuracy",),
+        ),
+        (
+            "row 9: P@R90",
+            "| 9 | **P@R90** | Dale 2023 — LaBSE | 0.703 | **0.55–0.70** |",
+            lambda v: (
+                "| 9 | **P@R90** | Dale 2023 — LaBSE | 0.703 | "
+                f"**{v('precision_at_recall_90')}** |"
+            ),
+            ("precision_at_recall_90",),
+        ),
+        (
+            "row 10: Spearman rho",
+            "| 10 | **Spearman ρ** | Halu-NLP | 0.770 | **0.65–0.72** |",
+            lambda v: (
+                "| 10 | **Spearman ρ** | Halu-NLP | 0.770 | "
+                f"**{v('spearman_rho')}** |"
+            ),
+            ("spearman_rho",),
+        ),
+        (
+            "detection table row",
+            "| **Ours (Step 9 fused)** | **0.91–0.95** | HaluEval QA |",
+            lambda v: (
+                f"| **Ours (Step 9 fused)** | **{v('detection_roc_auc')}** | "
+                "HaluEval QA (length-matched) |"
+            ),
+            ("detection_roc_auc",),
+        ),
+    ]
+
+    replacements: list[tuple[str, str, str]] = []
+    for label, old, build, needed in specs:
+        if old not in text:
+            continue
+        values = {k: _v(k) for k in needed}
+        if any(val is None for val in values.values()):
+            continue
+        new = build(lambda k: values[k])
+        text = text.replace(old, new)
+        replacements.append((label, old, new))
+
+    if replacements and not dry_run:
+        path.write_text(text, encoding="utf-8")
+    return replacements
+
+
+def _fill_why_we_win_tex(
+    path: Path, agg: dict, dry_run: bool = False
+) -> list[tuple[str, str, str]]:
+    """Replace the projected rows in ``Paper/why_we_win_summary.tex``."""
+    if not path.exists():
+        return []
+
+    text = path.read_text(encoding="utf-8")
+
+    def _v(key: str) -> str | None:
+        value = agg.get(key)
+        if not isinstance(value, (int, float)):
+            return None
+        return f"{float(value):.3f}"
+
+    specs = [
+        (
+            "summary: ROC-AUC",
+            r"Detection ROC-AUC            & 0.987 (Dale ALTI+, MT) & 0.91--0.95 &",
+            lambda v: (
+                r"Detection ROC-AUC            & 0.987 (Dale ALTI+, MT) & "
+                f"{v('detection_roc_auc')} &"
+            ),
+            ("detection_roc_auc",),
+        ),
+        (
+            "summary: sentence accuracy",
+            r"Sentence accuracy            & 0.847 (Halu-NLP) & 0.80--0.86 &",
+            lambda v: (
+                r"Sentence accuracy            & 0.847 (Halu-NLP) & "
+                f"{v('detection_accuracy')} &"
+            ),
+            ("detection_accuracy",),
+        ),
+        (
+            "summary: P@R90",
+            r"P@R90                        & 0.703 (Dale LaBSE) & 0.55--0.70 &",
+            lambda v: (
+                r"P@R90                        & 0.703 (Dale LaBSE) & "
+                f"{v('precision_at_recall_90')} &"
+            ),
+            ("precision_at_recall_90",),
+        ),
+        (
+            "detection table row",
+            r"\textbf{Ours (Step 9 fused)} & \textbf{0.91--0.95} \\",
+            lambda v: (
+                r"\textbf{Ours (Step 9 fused)} & \textbf{"
+                f"{v('detection_roc_auc')}" r"} \\"
+            ),
+            ("detection_roc_auc",),
+        ),
+    ]
+
+    replacements: list[tuple[str, str, str]] = []
+    for label, old, build, needed in specs:
+        if old not in text:
+            continue
+        values = {k: _v(k) for k in needed}
+        if any(val is None for val in values.values()):
+            continue
+        new = build(lambda k: values[k])
+        text = text.replace(old, new)
+        replacements.append((label, old, new))
+
+    if replacements and not dry_run:
+        path.write_text(text, encoding="utf-8")
+    return replacements
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--csv", type=Path, default=CSV_PATH)
@@ -420,9 +569,25 @@ def main(argv: list[str] | None = None) -> int:
     for label, old, new in tex_changes:
         print(f"  comparison_summary.tex {label}: {_safe(old)} -> {_safe(new)}")
 
+    ww_md_changes = _fill_why_we_win_md(
+        Path("Paper/why_we_win.md"), agg, dry_run=args.dry_run
+    )
+    for label, old, new in ww_md_changes:
+        print(f"  why_we_win.md {label}: {_safe(old)} -> {_safe(new)}")
+
+    ww_tex_changes = _fill_why_we_win_tex(
+        Path("Paper/why_we_win_summary.tex"), agg, dry_run=args.dry_run
+    )
+    for label, old, new in ww_tex_changes:
+        print(f"  why_we_win_summary.tex {label}: {_safe(old)} -> {_safe(new)}")
+
+    total_changes = (
+        len(changed) + len(md_changes) + len(tex_changes)
+        + len(ww_md_changes) + len(ww_tex_changes)
+    )
+
     if args.dry_run:
-        total = len(changed) + len(md_changes) + len(tex_changes)
-        print(f"\n[dry-run] {total} cell(s) would change")
+        print(f"\n[dry-run] {total_changes} cell(s) would change")
         return 0
 
     if changed:
@@ -433,6 +598,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Updated {len(md_changes)} row(s) in Paper/comparison.md")
     if tex_changes:
         print(f"Updated {len(tex_changes)} row(s) in Paper/comparison_summary.tex")
+    if ww_md_changes:
+        print(f"Updated {len(ww_md_changes)} row(s) in Paper/why_we_win.md")
+    if ww_tex_changes:
+        print(f"Updated {len(ww_tex_changes)} row(s) in Paper/why_we_win_summary.tex")
     return 0
 
 
