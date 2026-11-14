@@ -30,8 +30,9 @@ import numpy as np  # noqa: E402
 OUT_DIR = Path("data/graphs")
 
 DATASETS = [
-    ("halueval", "HaluEval QA", "data/metrics_halueval.json", "#2563eb"),
+    ("halueval", "HaluEval QA (length-matched)", "data/metrics_halueval.json", "#2563eb"),
     ("truthfulqa", "TruthfulQA", "data/metrics_truthfulqa.json", "#059669"),
+    ("halueval_raw", "HaluEval QA (raw)", "data/metrics_halueval_raw.json", "#f59e0b"),
     ("synth", "Synthetic", "data/metrics.json", "#a855f7"),
 ]
 
