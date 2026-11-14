@@ -47,6 +47,62 @@ _DATASET_DEFAULTS: dict[str, dict[str, str]] = {
 }
 
 
+def _bootstrap_intervals(
+    truth: list[int],
+    scores: list[float],
+    e2e: list[int],
+    groups: list[str],
+    n_boot: int = 1000,
+    seed: int = 0,
+) -> dict:
+    """Percentile bootstrap 95% CIs for the headline metrics.
+
+    Resamples *queries* with replacement rather than rows, because each
+    query contributes two rows (one hallucinated, one correct) and sampling
+    rows independently would treat the pair as independent evidence.
+    Returns {} when there is not enough data to resample.
+    """
+    n = len(truth)
+    if n < 10:
+        return {}
+
+    by_query: dict[str, list[int]] = {}
+    for i, g in enumerate(groups):
+        by_query.setdefault(g, []).append(i)
+    keys = list(by_query.keys())
+
+    rng = np.random.default_rng(seed)
+    accs: list[float] = []
+    aucs: list[float] = []
+    e2es: list[float] = []
+
+    for _ in range(n_boot):
+        picked = rng.choice(len(keys), size=len(keys), replace=True)
+        idx: list[int] = []
+        for j in picked:
+            idx.extend(by_query[keys[j]])
+        bt = [truth[i] for i in idx]
+        bs = [scores[i] for i in idx]
+        bp = [1 if s >= 0.5 else 0 for s in bs]
+        accs.append(_accuracy(bt, bp))
+        aucs.append(_roc_auc(bt, bs))
+        be = [e2e[i] for i in idx] if e2e else []
+        e2es.append((float(sum(be)) / len(be)) if be else 0.0)
+
+    def _ci(vals: list[float]) -> list[float]:
+        if not vals:
+            return [0.0, 0.0]
+        return [float(np.percentile(vals, 2.5)), float(np.percentile(vals, 97.5))]
+
+    return {
+        "detection_accuracy_ci95": _ci(accs),
+        "detection_roc_auc_ci95": _ci(aucs),
+        "end_to_end_accuracy_ci95": _ci(e2es),
+        "n_bootstrap": n_boot,
+        "n_unique_queries": len(keys),
+    }
+
+
 def _resolve_dataset_rows(args: argparse.Namespace) -> tuple[list[dict], str]:
     """Return (rows, dataset_slug_or_label) honoring --data/--synth/--dataset."""
     if args.synth:
@@ -137,6 +193,7 @@ def main() -> None:
     vsr_list: list[float] = []
     e2e: list[int] = []
     per_query: list[dict] = []
+    query_groups: list[str] = []
 
     t_start = time.time()
     for idx, r in enumerate(rows):
@@ -190,6 +247,7 @@ def main() -> None:
             score = 1.0 - d.get("confidence", 0.5)
         detector_truth.append(gt)
         detector_score.append(score)
+        query_groups.append(r.get("query") or r.get("question") or f"row-{idx}")
 
         # HRR — hallucination reduction rate: #rejected bad / #bad
         if gt == 0:
@@ -249,6 +307,7 @@ def main() -> None:
         "n_queries": len(rows),
         "dataset": slug,
     }
+    aggregate.update(_bootstrap_intervals(detector_truth, detector_score, e2e, query_groups))
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

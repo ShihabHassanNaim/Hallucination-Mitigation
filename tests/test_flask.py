@@ -57,7 +57,9 @@ def test_flask_index_and_query(fake_pipeline, monkeypatch):
     assert res["decision"] in {"PASS", "REGEN", "ABSTAIN"}
     assert "claims" in res
     assert "evidence" in res
-    assert len(res["step_traces"]) == 13
+    # A REGEN verdict re-runs the verification chain, so more than 13 traces
+    # are legitimate.
+    assert len(res["step_traces"]) >= 13
 
 
 def test_flask_rejects_empty_query(fake_pipeline, monkeypatch):
