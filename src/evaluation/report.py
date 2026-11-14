@@ -65,14 +65,31 @@ _DEFAULT_METRICS_PATH = Path("data/metrics.json")
 
 DATASET_REGISTRY: dict[str, Dict[str, str]] = {
     "halueval": {
-        "label": "HaluEval QA",
+        "label": "HaluEval QA (length-matched)",
         "path": "data/metrics_halueval.json",
-        "description": "10k QA pairs, paired right vs hallucinated answer (faithfulness).",
+        "description": (
+            "500 questions × 2 answers, length-matched so that answer word "
+            "count alone classifies 50.3% of rows — i.e. the detection "
+            "score reflects the answer, not its verbosity."
+        ),
     },
     "truthfulqa": {
         "label": "TruthfulQA",
         "path": "data/metrics_truthfulqa.json",
-        "description": "817 questions × 2 references (truthful vs misconception).",
+        "description": (
+            "500 questions × 2 references (truthful vs misconception). No "
+            "answer-length confound: length alone classifies 45.1% of rows."
+        ),
+    },
+    "halueval_raw": {
+        "label": "HaluEval QA (raw, length-confounded)",
+        "path": "data/metrics_halueval_raw.json",
+        "description": (
+            "The unpaired split, shown for transparency. Its faithful answers "
+            "are short spans and its hallucinated ones are full sentences, "
+            "so answer length alone classifies 94.7% of rows — treat these "
+            "numbers as a verbosity measurement, not a detection result."
+        ),
     },
 }
 

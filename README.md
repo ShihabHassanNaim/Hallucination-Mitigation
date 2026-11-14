@@ -225,6 +225,36 @@ python -m scripts.evaluate_datasets --only truthfulqa --skip-base  # FULL on one
 python -m scripts.evaluate_full --dataset halueval --out runs/v2/halueval.json
 ```
 
+#### What the evaluation actually measures
+
+The benchmark rows are *paired*: for one question the dataset supplies both a
+faithful answer (label 0) and a hallucinated one (label 1). The evaluation
+passes the dataset's own answer to the pipeline, so the detector scores the
+faithful and the hallucinated answer for the same question separately. The
+pipeline judges that answer rather than generating one, which also makes the
+run roughly four times faster.
+
+HaluEval has a confound worth knowing about: its faithful answer is a short
+factual span while its hallucinated answer is a full sentence, so answer
+word count alone classifies the raw split 94.7% correctly. The headline
+HaluEval numbers therefore come from a length-matched split built by
+`scripts/build_length_matched_split.py`, which mirrors the composition of
+the detector's training data and brings length-only accuracy down to 50.3%.
+TruthfulQA has no such confound and needs no matching.
+
+```bash
+# Rebuild the length-matched split (deterministic, no model needed)
+python -m scripts.build_length_matched_split
+
+# Run the whole evaluation programme on one GPU, in order
+bash scripts/run_all_evals.sh
+```
+
+Every evaluation script checkpoints as it goes. If a run is interrupted,
+`python -m scripts.evaluate_full --recompute --out <file>` rebuilds the
+aggregate — metrics and all nine confidence intervals — from the rows
+already on disk.
+
 Once both `data/metrics_halueval.json` and `data/metrics_truthfulqa.json`
 exist, the Flask demo page (`/`) shows a dataset-pill selector on the
 **Accuracy** and **Evaluation** panels, and a side-by-side **Cross-dataset
