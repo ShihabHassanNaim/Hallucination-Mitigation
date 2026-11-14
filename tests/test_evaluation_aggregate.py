@@ -273,3 +273,118 @@ def _argparse_stub(out: Path):
 
     ns = argparse.Namespace(out=str(out))
     return ns
+
+
+# ---------------------------------------------------------------------------
+# AUPR / precision-at-recall / Spearman rho
+# ---------------------------------------------------------------------------
+
+
+def test_average_precision_is_one_for_perfect_separation():
+    from scripts.evaluate_full import _average_precision
+
+    truth = [1, 1, 0, 0]
+    scores = [0.9, 0.8, 0.2, 0.1]
+    assert _average_precision(truth, scores) == pytest.approx(1.0)
+
+
+def test_average_precision_is_about_half_for_chance():
+    from scripts.evaluate_full import _average_precision
+
+    truth = [1, 0, 1, 0]
+    scores = [0.9, 0.8, 0.7, 0.6]  # all positives ranked first -> AP ~ 0.833
+    ap = _average_precision(truth, scores)
+    assert 0.0 <= ap <= 1.0
+    # Reversed ranking -> positives at the bottom.
+    ap_rev = _average_precision(truth, [0.1, 0.2, 0.3, 0.4])
+    assert ap_rev < ap
+
+
+def test_average_precision_handles_no_positives():
+    from scripts.evaluate_full import _average_precision
+
+    assert _average_precision([0, 0, 0], [0.5, 0.4, 0.3]) == 0.0
+
+
+def test_precision_at_recall_is_one_for_perfect_separation():
+    from scripts.evaluate_full import _precision_at_recall
+
+    # Needs at least 10 positives: at 90% recall the constraint must tolerate
+    # missing one positive, otherwise "recall >= 0.9" is vacuous.
+    truth = [1] * 10 + [0] * 10
+    scores = [0.9 - 0.001 * i for i in range(10)] + [0.1] * 10
+    assert _precision_at_recall(truth, scores, 0.9) == pytest.approx(1.0)
+
+
+def test_precision_at_recall_is_vacuous_below_ten_positives():
+    from scripts.evaluate_full import _precision_at_recall
+
+    # Four positives at 90% recall means "find all four" -- the constraint
+    # carries no information, so the metric reports 0.0 rather than 1.0.
+    truth = [1] * 4 + [0] * 4
+    scores = [0.9 - 0.001 * i for i in range(4)] + [0.1] * 4
+    assert _precision_at_recall(truth, scores, 0.9) == 0.0
+
+
+def test_precision_at_recall_is_zero_when_recall_unreachable():
+    from scripts.evaluate_full import _precision_at_recall
+
+    # Only one positive, but recall 0.9 would require retrieving 0.9 of a
+    # single instance -> not a meaningful operating point.
+    truth = [1, 0, 0]
+    scores = [0.9, 0.2, 0.1]
+    assert _precision_at_recall(truth, scores, 0.9) == 0.0
+
+
+def test_spearman_rho_is_high_for_perfect_rank_agreement():
+    from scripts.evaluate_full import _spearman_rho
+
+    # Spearman on tied binary labels is bounded below 1.0 (rank agreement
+    # cannot be exact when the labels themselves contain ties), so assert
+    # the correlation is strongly positive rather than exactly 1.
+    truth = [1, 1, 0, 0]
+    scores = [0.9, 0.8, 0.2, 0.1]
+    rho = _spearman_rho(truth, scores)
+    assert 0.85 < rho < 1.0
+
+
+def test_spearman_rho_is_minus_one_for_inverted_ranks():
+    from scripts.evaluate_full import _spearman_rho
+
+    truth = [1, 1, 0, 0]
+    scores = [0.1, 0.2, 0.8, 0.9]
+    rho = _spearman_rho(truth, scores)
+    assert rho < -0.85
+    # Reversing the scores must mirror the correlation exactly.
+    assert rho == pytest.approx(-_spearman_rho(truth, [0.9, 0.8, 0.2, 0.1]))
+
+
+def test_spearman_rho_is_one_for_untied_labels():
+    from scripts.evaluate_full import _spearman_rho
+
+    # Four distinct labels give four distinct ranks -> exact rho of 1.0
+    # when the scores rank the labels in the same order.
+    truth = [1, 2, 3, 4]
+    scores = [0.4, 0.5, 0.6, 0.7]
+    assert _spearman_rho(truth, scores) == pytest.approx(1.0)
+
+
+def test_spearman_rho_handles_tied_scores():
+    from scripts.evaluate_full import _spearman_rho
+
+    # All-identical scores -> zero variance -> must not raise ZeroDivisionError.
+    assert _spearman_rho([1, 0, 1, 0], [0.5, 0.5, 0.5, 0.5]) == 0.0
+
+
+def test_new_metrics_appear_in_the_aggregate_with_cis():
+    from scripts.evaluate_full import _aggregate_from_rows
+
+    agg = _aggregate_from_rows("halueval", _rows(30))
+    for key in ("detection_aupr", "precision_at_recall_90", "spearman_rho"):
+        assert key in agg, f"{key} missing from the aggregate"
+        assert isinstance(agg[key], float)
+    for key in ("detection_aupr_ci95", "precision_at_recall_90_ci95",
+                "spearman_rho_ci95"):
+        ci = agg[key]
+        assert len(ci) == 2
+        assert ci[0] <= ci[1]

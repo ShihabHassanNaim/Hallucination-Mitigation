@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import statistics
 import sys
 import time
@@ -85,6 +86,9 @@ def _bootstrap_intervals(
     hrrs: list[float] = []
     ccrs: list[float] = []
     vsrs: list[float] = []
+    auprs: list[float] = []
+    p90s: list[float] = []
+    rhos: list[float] = []
 
     for _ in range(n_boot):
         picked = rng.choice(len(keys), size=len(keys), replace=True)
@@ -108,6 +112,9 @@ def _bootstrap_intervals(
             ccrs.append(statistics.fmean([ccr[i] for i in idx]))
         if vsr:
             vsrs.append(statistics.fmean([vsr[i] for i in idx]))
+        auprs.append(_average_precision(bt, bs))
+        p90s.append(_precision_at_recall(bt, bs, 0.9))
+        rhos.append(_spearman_rho(bt, bs))
 
     def _ci(vals: list[float]) -> list[float]:
         if not vals:
@@ -120,6 +127,9 @@ def _bootstrap_intervals(
         "detection_recall_ci95": _ci(recs),
         "detection_f1_ci95": _ci(f1s),
         "detection_roc_auc_ci95": _ci(aucs),
+        "detection_aupr_ci95": _ci(auprs),
+        "precision_at_recall_90_ci95": _ci(p90s),
+        "spearman_rho_ci95": _ci(rhos),
         "end_to_end_accuracy_ci95": _ci(e2es),
         "n_bootstrap": n_boot,
         "n_unique_queries": len(keys),
@@ -131,6 +141,92 @@ def _bootstrap_intervals(
     if vsrs:
         out["verification_success_rate_ci95"] = _ci(vsrs)
     return out
+
+
+def _average_precision(y_true: list[int], y_score: list[float]) -> float:
+    """Area under the precision-recall curve (average precision).
+
+    Implemented directly rather than pulled from scikit-learn, which is not
+    a dependency of this project.
+    """
+    if not y_true or sum(y_true) == 0:
+        return 0.0
+    pairs = sorted(zip(y_score, y_true), key=lambda kv: -kv[0])
+    n_pos = sum(y_true)
+    tp = 0
+    prev_recall = 0.0
+    ap = 0.0
+    for rank, (_score, label) in enumerate(pairs, 1):
+        if label == 1:
+            tp += 1
+            recall = tp / n_pos
+            precision = tp / rank
+            ap += (recall - prev_recall) * precision
+            prev_recall = recall
+    return ap
+
+
+def _precision_at_recall(y_true: list[int], y_score: list[float], target: float = 0.9) -> float:
+    """Best precision achievable while retaining at least ``target`` recall.
+
+    Scans the full ranking rather than stopping at the first threshold
+    crossing: precision at the crossing point is the *lowest* precision that
+    satisfies the recall constraint, whereas the metric is defined as the
+    best precision obtainable at that recall level. Returns 0.0 when the
+    target recall is unreachable (e.g. asking for 90% recall when only one
+    positive exists is not a meaningful operating point).
+    """
+    if not y_true or sum(y_true) == 0:
+        return 0.0
+    pairs = sorted(zip(y_score, y_true), key=lambda kv: -kv[0])
+    n_pos = sum(y_true)
+    # The smallest number of positives that satisfies "recall >= target".
+    # When that is the whole positive set the constraint is vacuous -- it
+    # just says "find every positive" -- and the metric degenerates. Require
+    # the target to be satisfiable while still tolerating at least one miss.
+    min_needed = math.ceil(target * n_pos)
+    if min_needed >= n_pos:
+        return 0.0
+    tp = 0
+    best = 0.0
+    for rank, (_score, label) in enumerate(pairs, 1):
+        if label == 1:
+            tp += 1
+        recall = tp / n_pos
+        if recall >= target:
+            best = max(best, tp / rank)
+    return best
+
+
+def _spearman_rho(y_true: list[int], y_score: list[float]) -> float:
+    """Spearman rank correlation between the label and the detector score."""
+    n = len(y_true)
+    if n < 2:
+        return 0.0
+
+    def _rank(values: list[float]) -> list[float]:
+        order = sorted(range(len(values)), key=lambda i: values[i])
+        ranks = [0.0] * len(values)
+        i = 0
+        while i < len(order):
+            j = i
+            while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+                j += 1
+            avg = (i + j) / 2.0 + 1.0
+            for k in range(i, j + 1):
+                ranks[order[k]] = avg
+            i = j + 1
+        return ranks
+
+    rx = _rank([float(t) for t in y_true])
+    ry = _rank(y_score)
+    mx, my = statistics.fmean(rx), statistics.fmean(ry)
+    num = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
+    den = (
+        sum((a - mx) ** 2 for a in rx) ** 0.5
+        * sum((b - my) ** 2 for b in ry) ** 0.5
+    )
+    return num / den if den else 0.0
 
 
 def _write_checkpoint(out_path: Path, slug: str, per_query: list[dict]) -> None:
@@ -179,6 +275,9 @@ def _aggregate_from_rows(slug: str, per_query: list[dict], seed: int = 0) -> dic
         "detection_recall": rec,
         "detection_f1": f1,
         "detection_roc_auc": auc,
+        "detection_aupr": _average_precision(truth, scores),
+        "precision_at_recall_90": _precision_at_recall(truth, scores, 0.9),
+        "spearman_rho": _spearman_rho(truth, scores),
         "hallucination_reduction_rate": statistics.fmean(hrr),
         "claim_correction_rate": statistics.fmean(ccr),
         "verification_success_rate": statistics.fmean(vsr),
