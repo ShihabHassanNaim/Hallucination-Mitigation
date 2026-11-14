@@ -660,6 +660,61 @@ name. The figure found no timings and was skipped with a message that named
 the wrong missing field, so the cause was not obvious from the output. The
 plot now accepts either shape.
 
+### 17.9 The evaluation could not measure detection at all
+
+This is the most consequential finding of the audit, and it explains the
+0.50 baseline that every earlier run reported.
+
+The benchmark rows are *paired*: for one question the dataset supplies both
+a faithful answer (label 0) and a hallucinated one (label 1). The
+evaluation called `pipe.run(r["query"])` — passing only the question — so
+the pipeline generated its own answer in both cases. The two rows of a
+question therefore received the *same* answer, produced the *same* four
+detector features, and received the *same* detector score.
+
+The consequence is arithmetic, not statistical: with the positive and
+negative classes scoring identically, the ROC-AUC is exactly 0.5 and the
+accuracy exactly 0.5, no matter how good the detector is. The reported
+baseline was an artefact of the harness, not a measurement of the model.
+
+`Pipeline.run` now accepts an optional `answer`. When supplied, step 2 uses
+it verbatim instead of generating, and step 10 passes it through untouched
+so that the gate and the detector judge the answer the benchmark supplied
+rather than an edited version of it. All three evaluation scripts pass the
+dataset's own answer.
+
+### 17.10 HaluEval carries an answer-length confound
+
+Fixing §17.9 exposed a second artefact, in the opposite direction.
+
+In HaluEval the faithful answer is a short factual span ("Suffolk County",
+typically two to three words) while the hallucinated answer is a full
+generated sentence (typically eleven words). A detector can therefore
+separate the classes using `answer_length` alone, with no understanding of
+the answer at all. Measured on the raw split, answer length alone classifies
+**94.7%** of rows correctly.
+
+The detector itself is not at fault: `scripts/generate_detector_data_v2.py`
+already builds length-matched faithful controls, and the training file
+contains them (179 of 594 faithful rows are six words or longer, against
+174 of 200 hallucinated rows). The evaluation set simply had no such
+controls, so it measured verbosity rather than hallucination.
+
+`scripts/build_length_matched_split.py` builds an evaluation split that
+mirrors the training composition — one faithful length-matched control and
+one hallucinated answer per query, using the very same
+`_length_matched_control` helper as the training script. On that split
+answer length alone classifies **50.3%** of rows, i.e. chance.
+
+TruthfulQA has no such confound: its faithful and hallucinated answers have
+medians of 10 and 9 words, and length alone classifies 45.1% of rows. It
+needs no matching and serves as an independent check on the detector.
+
+This is why both the raw and the length-matched HaluEval results are
+reported: the raw number measures how well the pipeline tells a short
+correct answer from a long wrong one, which is a real but much weaker
+claim than the one the thesis needs.
+
 ---
 
 *End of audit.*
