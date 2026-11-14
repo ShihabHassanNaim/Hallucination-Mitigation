@@ -715,6 +715,67 @@ reported: the raw number measures how well the pipeline tells a short
 correct answer from a long wrong one, which is a real but much weaker
 claim than the one the thesis needs.
 
+### 17.11 The claim-level metrics were three copies of one number
+
+`src/steps/step13_evaluation.py` emitted `claim_precision`, `claim_recall`
+and `claim_f1` all set to the same expression — the fraction of claims the
+verifier marked supported. That quantity is the *support rate*. It is not a
+recall (a recall needs a set of gold claims to recall), and it is not an F1
+(a harmonic mean of a precision and a recall).
+
+The three metrics are now computed separately against the dataset's
+`right_answer` and the row's label. A claim the verifier marks supported
+while it contradicts the gold answer is a false positive — the verifier was
+confidently wrong. A claim the verifier rejects that does agree with the
+gold answer is a false negative. Recall and F1 are reported as `null`, not
+zero, where they are genuinely undefined: on a hallucinated row the
+benchmark says the answer is wrong but not which of its claims are wrong,
+and with no gold answer only the support rate is defined.
+
+`Pipeline.run` gained `label` and `gold_answer` parameters so the
+evaluation can supply both, and all three evaluation scripts pass them.
+
+### 17.12 The comparison table contained projections, and the charts plotted them as measurements
+
+`Paper/comparison_table.csv` carried seven "Ours" cells written by hand
+before the evaluation could measure anything — for example
+`"0.91-0.95 (projected)"` for ROC-AUC. `scripts/plot_results.py` read the
+first number out of each cell and plotted it on the literature-comparison
+chart as though it had been measured. A projection was therefore
+presented, graphically, as a result.
+
+`scripts/fill_comparison_table.py` now rewrites those cells from the
+evaluation output, so the table is regenerated from the data rather than
+maintained by hand. `plot_results.py`'s number parser returns nothing for
+any cell containing the word "projected", so a guess can no longer reach a
+chart even if a cell is missed.
+
+`Paper/comparison.md` and `Paper/comparison_summary.tex` carry the same
+projections in prose and in a LaTeX table; they are updated to match the
+measured values.
+
+### 17.13 Failed rows were dropped without a trace
+
+The evaluation loop wrapped each row in `except Exception: continue`. A row
+that failed simply vanished: the sample shrank, no row was recorded as
+missing, and a systematic failure — a model that would not load, a claim
+the parser choked on — would have shown up only as a slightly lower
+sample size, with no indication of why.
+
+Failures are now counted, the first few are reported in the log, and the
+count is written to the output file as `n_failed`.
+
+### 17.14 An interrupted evaluation could not be continued
+
+Each run checkpointed its results every ten rows, which protected against
+losing work, but restarting meant re-running the rows that had already
+been done. `--resume` continues from the checkpoint instead.
+
+It deliberately **refuses** to reuse a checkpoint written by an older
+version of the code: those rows lack fields the current code produces, and
+mixing them would silently produce a metrics file whose rows are not
+comparable. In that case the run starts from scratch and says so.
+
 ---
 
 *End of audit.*

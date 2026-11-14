@@ -14,7 +14,10 @@ Which measurement fills which cell:
   * ROC-AUC, AUPR, P at R=90, Sentence Accuracy, Spearman rho
       -> ``data/metrics_halueval.json`` (length-matched HaluEval)
   * Claim F1, Claim P/R
-      -> the claim-level metrics of the same file
+      -> the claim-level metrics of the same file. These are computed on
+      the faithful rows only: on a hallucinated row the benchmark does not
+      say which of the answer's claims are wrong, so claim recall is
+      undefined there and is excluded from the average.
 
 Numbers are written with their bootstrap confidence interval, e.g.
 ``0.789 [0.732, 0.841]``.
@@ -60,6 +63,28 @@ def _load_metrics(path: Path) -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return {}
+
+
+def _load_aggregate(path: Path) -> dict:
+    """Return the aggregate block, computing it from the rows if absent.
+
+    A metrics file written by an in-progress run carries only ``per_query``
+    (the aggregate is written at the end), so the aggregate is rebuilt from
+    the rows rather than being required to be present.
+    """
+    payload = _load_metrics(path)
+    if not payload:
+        return {}
+    agg = payload.get("aggregate")
+    if isinstance(agg, dict) and agg:
+        return agg
+    rows = payload.get("per_query") or payload.get("rows") or []
+    if not rows:
+        return {}
+    from scripts.evaluate_full import _aggregate_from_rows
+
+    slug = payload.get("dataset") or "unknown"
+    return _aggregate_from_rows(slug, rows)
 
 
 def _fmt(value: float, ci: list[float] | None) -> str:
@@ -112,10 +137,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     metrics = _load_metrics(args.metrics)
-    agg = metrics.get("aggregate") or {}
+    agg = _load_aggregate(args.metrics)
     if not agg:
         print(
-            f"No aggregate block in {args.metrics}. Run the evaluation first.",
+            f"No metrics in {args.metrics}. Run the evaluation first.",
             file=sys.stderr,
         )
         return 1

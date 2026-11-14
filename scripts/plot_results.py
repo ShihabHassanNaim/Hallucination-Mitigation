@@ -176,7 +176,17 @@ def plot_literature_comparison() -> None:
     import csv as _csv
 
     def num(v):
-        m = re.search(r"[-+]?\d+(?:\.\d+)?", str(v or ""))
+        """First number in the cell, or None.
+
+        Cells marked ``projected`` return None: a projection is not a
+        measurement and must not be plotted as one. The old behaviour of
+        reading "0.91-0.95 (projected)" as 0.91 turned a guess into an
+        apparently measured point on the chart.
+        """
+        text = str(v or "")
+        if "projected" in text.lower():
+            return None
+        m = re.search(r"[-+]?\d+(?:\.\d+)?", text)
         return float(m.group(0)) if m else None
 
     with csv_path.open("r", encoding="utf-8", newline="") as f:

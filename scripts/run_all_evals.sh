@@ -19,7 +19,8 @@ echo "=== 1/3  HaluEval, length-matched split ==="
     --data data/halueval_eval_1000_matched.jsonl \
     --out data/metrics_halueval.json \
     --index data/index_halueval \
-    --limit 1000 > eval_halueval_matched.log 2>&1
+    --limit 1000 \
+    --resume > eval_halueval_matched.log 2>&1
 echo "  exit=$? -> eval_halueval_matched.log"
 
 echo "=== 2/3  TruthfulQA ==="
@@ -27,7 +28,8 @@ echo "=== 2/3  TruthfulQA ==="
     --data data/truthfulqa_eval_1000.jsonl \
     --out data/metrics_truthfulqa.json \
     --index data/index_truthfulqa \
-    --limit 1000 > eval_truthfulqa_1000.log 2>&1
+    --limit 1000 \
+    --resume > eval_truthfulqa_1000.log 2>&1
 echo "  exit=$? -> eval_truthfulqa_1000.log"
 
 echo "=== 3/3  HaluEval, raw split (length-confounded, reported for transparency) ==="
@@ -35,7 +37,8 @@ echo "=== 3/3  HaluEval, raw split (length-confounded, reported for transparency
     --data data/halueval_eval_1000.jsonl \
     --out data/metrics_halueval_raw.json \
     --index data/index_halueval \
-    --limit 1000 > eval_halueval_raw.log 2>&1
+    --limit 1000 \
+    --resume > eval_halueval_raw.log 2>&1
 echo "  exit=$? -> eval_halueval_raw.log"
 
 echo "=== 4/4  Ablation study (200 rows, length-matched split) ==="
