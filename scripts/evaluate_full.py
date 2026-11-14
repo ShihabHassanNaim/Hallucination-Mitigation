@@ -52,6 +52,9 @@ def _bootstrap_intervals(
     scores: list[float],
     e2e: list[int],
     groups: list[str],
+    hrr: list[float] | None = None,
+    ccr: list[float] | None = None,
+    vsr: list[float] | None = None,
     n_boot: int = 1000,
     seed: int = 0,
 ) -> dict:
@@ -73,8 +76,14 @@ def _bootstrap_intervals(
 
     rng = np.random.default_rng(seed)
     accs: list[float] = []
+    precs: list[float] = []
+    recs: list[float] = []
+    f1s: list[float] = []
     aucs: list[float] = []
     e2es: list[float] = []
+    hrrs: list[float] = []
+    ccrs: list[float] = []
+    vsrs: list[float] = []
 
     for _ in range(n_boot):
         picked = rng.choice(len(keys), size=len(keys), replace=True)
@@ -85,22 +94,101 @@ def _bootstrap_intervals(
         bs = [scores[i] for i in idx]
         bp = [1 if s >= 0.5 else 0 for s in bs]
         accs.append(_accuracy(bt, bp))
+        p, r, f = _precision_recall_f1(bt, bp)
+        precs.append(p)
+        recs.append(r)
+        f1s.append(f)
         aucs.append(_roc_auc(bt, bs))
         be = [e2e[i] for i in idx] if e2e else []
         e2es.append((float(sum(be)) / len(be)) if be else 0.0)
+        if hrr:
+            hrrs.append(statistics.fmean([hrr[i] for i in idx]))
+        if ccr:
+            ccrs.append(statistics.fmean([ccr[i] for i in idx]))
+        if vsr:
+            vsrs.append(statistics.fmean([vsr[i] for i in idx]))
 
     def _ci(vals: list[float]) -> list[float]:
         if not vals:
             return [0.0, 0.0]
         return [float(np.percentile(vals, 2.5)), float(np.percentile(vals, 97.5))]
 
-    return {
+    out = {
         "detection_accuracy_ci95": _ci(accs),
+        "detection_precision_ci95": _ci(precs),
+        "detection_recall_ci95": _ci(recs),
+        "detection_f1_ci95": _ci(f1s),
         "detection_roc_auc_ci95": _ci(aucs),
         "end_to_end_accuracy_ci95": _ci(e2es),
         "n_bootstrap": n_boot,
         "n_unique_queries": len(keys),
     }
+    if hrrs:
+        out["hallucination_reduction_rate_ci95"] = _ci(hrrs)
+    if ccrs:
+        out["claim_correction_rate_ci95"] = _ci(ccrs)
+    if vsrs:
+        out["verification_success_rate_ci95"] = _ci(vsrs)
+    return out
+
+
+def _write_checkpoint(out_path: Path, slug: str, per_query: list[dict]) -> None:
+    """Persist per-row results so a crash never costs the whole run.
+
+    The aggregate block is intentionally left untouched here: it is rebuilt
+    from ``per_query`` by ``_aggregate_from_rows`` once the run finishes (or
+    via ``--recompute`` on a checkpoint left by a killed run).
+    """
+    payload = {
+        "dataset": slug,
+        "n_queries": len(per_query),
+        "per_query": per_query,
+    }
+    tmp = out_path.with_suffix(out_path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.replace(out_path)
+
+
+def _aggregate_from_rows(slug: str, per_query: list[dict], seed: int = 0) -> dict:
+    """Rebuild the aggregate metric block from per-row records.
+
+    Used both at the end of a normal run and by ``--recompute`` to recover a
+    checkpoint left behind by a killed process. Keeping the aggregation in one
+    place guarantees the numbers in the output file always match the CIs.
+    """
+    if not per_query:
+        return {}
+
+    truth = [int(r["label"]) for r in per_query]
+    scores = [float(r["detector_score"]) for r in per_query]
+    groups = [r.get("query") or f"row-{i}" for i, r in enumerate(per_query)]
+    e2e = [int(r.get("end_to_end_accuracy", 0)) for r in per_query]
+    hrr = [float(r.get("hrr", 0.0)) for r in per_query]
+    ccr = [float(r.get("ccr", 0.0)) for r in per_query]
+    vsr = [float(r.get("vsr", 0.0)) for r in per_query]
+
+    detector_pred = [1 if s >= 0.5 else 0 for s in scores]
+    prec, rec, f1 = _precision_recall_f1(truth, detector_pred)
+    acc = _accuracy(truth, detector_pred)
+    auc = _roc_auc(truth, scores)
+
+    aggregate = {
+        "detection_accuracy": acc,
+        "detection_precision": prec,
+        "detection_recall": rec,
+        "detection_f1": f1,
+        "detection_roc_auc": auc,
+        "hallucination_reduction_rate": statistics.fmean(hrr),
+        "claim_correction_rate": statistics.fmean(ccr),
+        "verification_success_rate": statistics.fmean(vsr),
+        "end_to_end_accuracy": statistics.fmean(e2e),
+        "n_queries": len(per_query),
+        "dataset": slug,
+    }
+    aggregate.update(
+        _bootstrap_intervals(truth, scores, e2e, groups, hrr=hrr, ccr=ccr, vsr=vsr, seed=seed)
+    )
+    return aggregate
 
 
 def _resolve_dataset_rows(args: argparse.Namespace) -> tuple[list[dict], str]:
@@ -135,6 +223,24 @@ def _resolve_dataset_rows(args: argparse.Namespace) -> tuple[list[dict], str]:
     return rows, slug
 
 
+def _recompute(args: argparse.Namespace) -> None:
+    """Rebuild the aggregate block from per_query rows already on disk."""
+    out_path = Path(args.out or "data/metrics.json")
+    if not out_path.exists():
+        raise SystemExit(f"no such file: {out_path}")
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    per_query = payload.get("per_query") or []
+    if not per_query:
+        raise SystemExit(f"{out_path} has no per_query rows to recompute from")
+    slug = payload.get("dataset") or out_path.stem.replace("metrics_", "")
+    aggregate = _aggregate_from_rows(slug, per_query)
+    payload["aggregate"] = aggregate
+    payload["n_queries"] = len(per_query)
+    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(f"recomputed {out_path} from {len(per_query)} rows")
+    print(json.dumps({"aggregate": aggregate}, indent=2))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data")
@@ -158,7 +264,17 @@ def main() -> None:
         default=None,
         help="path to a saved FAISS+BM25 index directory; loads before running.",
     )
+    ap.add_argument(
+        "--recompute",
+        action="store_true",
+        help="skip the pipeline entirely: rebuild the aggregate block (metrics "
+             "+ bootstrap CIs) from the per_query rows already in --out.",
+    )
     args = ap.parse_args()
+
+    if args.recompute:
+        _recompute(args)
+        return
 
     rows, slug = _resolve_dataset_rows(args)
     if args.out is None:
@@ -185,6 +301,9 @@ def main() -> None:
         print(f"loaded index: {args.index} ({pipe.retriever.n_docs} docs)")
     clf = XGBClassifier()
     clf._load()
+
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     detector_truth: list[int] = []
     detector_score: list[float] = []
@@ -271,6 +390,11 @@ def main() -> None:
             "n_claims": len(d.get("claims", [])),
             "n_evidence": len(d.get("evidence", [])),
             "end_to_end_accuracy": 1 if d["decision"] == "PASS" else 0,
+            # Row-level reduction metrics, so the bootstrap CIs for HRR/CCR/VSR
+            # can be recomputed from the output file alone.
+            "hrr": 1.0 if (gt == 0 and d["decision"] in {"REGEN", "ABSTAIN"}) else 0.0,
+            "ccr": (1.0 - (contras / max(1, len(d["claims"])))) if d["claims"] else 1.0,
+            "vsr": 1.0 if contras == 0 else 0.0,
             "step_times_ms": {
                 t.name: round(float(t.duration_ms), 3)
                 for t in (res.step_traces or [])
@@ -287,27 +411,13 @@ def main() -> None:
                 file=sys.stderr,
                 flush=True,
             )
+            # Checkpoint incrementally so a crash or a kill never costs the
+            # whole run — the final aggregate is rebuilt from this file.
+            _write_checkpoint(out_path, slug, per_query)
 
-    # Detector metrics at threshold 0.5.
-    detector_pred = [1 if s >= 0.5 else 0 for s in detector_score]
-    prec, rec, f1 = _precision_recall_f1(detector_truth, detector_pred)
-    acc = _accuracy(detector_truth, detector_pred)
-    auc = _roc_auc(detector_truth, detector_score)
-
-    aggregate = {
-        "detection_accuracy": acc,
-        "detection_precision": prec,
-        "detection_recall": rec,
-        "detection_f1": f1,
-        "detection_roc_auc": auc,
-        "hallucination_reduction_rate": statistics.fmean(hrr_list) if hrr_list else 0.0,
-        "claim_correction_rate": statistics.fmean(ccr_list) if ccr_list else 0.0,
-        "verification_success_rate": statistics.fmean(vsr_list) if vsr_list else 0.0,
-        "end_to_end_accuracy": statistics.fmean(e2e) if e2e else 0.0,
-        "n_queries": len(rows),
-        "dataset": slug,
-    }
-    aggregate.update(_bootstrap_intervals(detector_truth, detector_score, e2e, query_groups))
+    # Aggregate is rebuilt from per_query so the headline numbers and the
+    # bootstrap CIs are always derived from the same rows.
+    aggregate = _aggregate_from_rows(slug, per_query)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
