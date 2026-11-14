@@ -36,6 +36,9 @@ HEADLINE = [
     ("detection_recall", "Detection Recall"),
     ("detection_f1", "Detection F1"),
     ("detection_roc_auc", "Detection ROC-AUC"),
+    ("detection_aupr", "Detection AUPR"),
+    ("precision_at_recall_90", "Precision at Recall 90"),
+    ("spearman_rho", "Spearman rho"),
     ("hallucination_reduction_rate", "Hallucination Reduction Rate (HRR)"),
     ("claim_correction_rate", "Claim Correction Rate (CCR)"),
     ("verification_success_rate", "Verification Success Rate (VSR)"),
@@ -47,7 +50,13 @@ RETRIEVAL = [
     ("retrieval_precision_at_5", "Retrieval Precision@5"),
     ("retrieval_mrr", "Retrieval MRR"),
     ("retrieval_ndcg", "Retrieval nDCG"),
+]
+
+CLAIM = [
     ("claim_precision", "Claim Precision"),
+    ("claim_recall", "Claim Recall"),
+    ("claim_f1", "Claim F1"),
+    ("claim_support_rate", "Claim Support Rate"),
 ]
 
 
@@ -59,6 +68,24 @@ def _load(path: str) -> dict:
         return json.loads(p.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return {}
+
+
+def _aggregate(data: dict) -> dict:
+    """Return the aggregate block, rebuilding it from the rows if absent.
+
+    A metrics file written by a run still in progress carries only
+    ``per_query`` — the aggregate block is written at the end — so the
+    summary can be produced from a partial run too.
+    """
+    agg = data.get("aggregate")
+    if isinstance(agg, dict) and agg:
+        return agg
+    rows = data.get("per_query") or data.get("rows") or []
+    if not rows:
+        return {}
+    from scripts.evaluate_full import _aggregate_from_rows
+
+    return _aggregate_from_rows(data.get("dataset") or "unknown", rows)
 
 
 def _fmt(value: object) -> str:
@@ -111,12 +138,16 @@ def main() -> None:
         data = loaded.get(slug)
         if not data:
             continue
-        agg = data.get("aggregate", {})
+        agg = _aggregate(data)
         lines.append(f"## {label}")
         lines.append("")
         lines.append(f"- Queries evaluated: **{agg.get('n_queries', '—')}**")
         if agg.get("n_unique_queries"):
             lines.append(f"- Unique questions: **{agg['n_unique_queries']}**")
+        if data.get("n_failed"):
+            lines.append(
+                f"- **Rows that failed and were skipped: {data['n_failed']}**"
+            )
         lines.append("")
 
         lines.append("| Metric | Value | 95% CI |")
@@ -130,10 +161,26 @@ def main() -> None:
             (key, name) for key, name in RETRIEVAL if agg.get(key) is not None
         ]
         if retrieval_rows:
-            lines.append("| Retrieval / Claim Metric | Value |")
+            lines.append("| Retrieval Metric | Value |")
             lines.append("|---|---|")
             for key, name in retrieval_rows:
                 lines.append(f"| {name} | {_fmt(agg.get(key))} |")
+            lines.append("")
+
+        claim_rows = [
+            (key, name) for key, name in CLAIM if agg.get(key) is not None
+        ]
+        if claim_rows:
+            lines.append("| Claim-Level Metric | Value |")
+            lines.append("|---|---|")
+            for key, name in claim_rows:
+                lines.append(f"| {name} | {_fmt(agg.get(key))} |")
+            lines.append("")
+            lines.append(
+                "Claim recall and F1 are measured on the faithful rows only: "
+                "on a hallucinated row the benchmark does not say which of the "
+                "answer's claims are wrong, so recall is undefined there."
+            )
             lines.append("")
 
         decisions: dict[str, int] = {}
@@ -158,7 +205,7 @@ def main() -> None:
         for slug, _label, _path in DATASETS:
             if slug not in summary_slugs:
                 continue
-            agg = loaded[slug].get("aggregate", {})
+            agg = _aggregate(loaded[slug])
             cells.append(_fmt(agg.get(key)))
         lines.append(f"| {name} | " + " | ".join(cells) + " |")
     lines.append("")
