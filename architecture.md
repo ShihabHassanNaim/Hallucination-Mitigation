@@ -18,6 +18,18 @@ All diagrams use the official [Mermaid](https://mermaid.js.org/) syntax and can 
 
 This is the heart of the project. Every step is one Python module under `src/steps/`.
 
+> **Execution order.** The step *numbers* below match the architecture diagram
+> and the per-step traces, but they are not the order in which the steps run.
+> Retrieval (6) and reranking (7) execute **before** generation (2) so the
+> generator receives real retrieved context in its prompt — otherwise
+> "grounded generation" is ungrounded. Early detection (3) runs after claim
+> extraction (5) so its `claim_count` feature is meaningful, and confidence
+> assessment (4) runs after NLI verification (8) so EEDC sees real verdict
+> entropy rather than a fallback proxy. The authoritative order lives in
+> `step_registry()` in `src/steps/__init__.py`:
+>
+> `1 → 6 → 7 → 2 → 3 → 5 → 8 → 4 → 9 → 10 → 11 → 12 → 13`
+
 ```mermaid
 flowchart TD
     Start([User Query]) --> S1
@@ -29,45 +41,9 @@ flowchart TD
         S1A --> S1D[LLM Query Rewrite<br/>Llama 3.1 / Qwen]
         S1B & S1C & S1D --> S1E[Entities + Variants]
     end
-    S1E --> S2
+    S1E --> S6
 
-    %% ====== STEP 2: GROUNDED GENERATION ======
-    subgraph S2["Step 2 — Grounded Generation"]
-        S2A[Backend Selector<br/>llama / qwen] --> S2B[LlamaGenerator<br/>meta-llama/Meta-Llama-3.1-8B-Instruct]
-        S2A --> S2C[QwenGenerator<br/>Qwen/Qwen2.5-1.5B-Instruct]
-        S2B & S2C --> S2D[Prompt:<br/>Context + Question]
-        S2D --> S2E[Initial Answer]
-    end
-    S2E --> S3
-
-    %% ====== STEP 3: EARLY DETECTION ======
-    subgraph S3["Step 3 — Early Hallucination Detection"]
-        S3A[BGE-M3 Embedder<br/>BAAI/bge-m3] --> S3B[Cosine Similarity<br/>q × answer]
-        S3A --> S3C[Feature Vector:<br/>cosine, claim_count,<br/>overlap, answer_length]
-        S3C --> S3D[XGBoost Classifier<br/>or sklearn-logreg]
-        S3D --> S3E[Hallucination Probability]
-    end
-    S3E --> S4
-
-    %% ====== STEP 4: CONFIDENCE ASSESSMENT ======
-    subgraph S4["Step 4 — Confidence Assessment (EEDC)"]
-        S4A[NLI Entropy H] --> S4B[EEDC Platt Scorer<br/>α·H + β·(1-top1) + γ·(1-cons) + δ]
-        S4B --> S4C[Temperature Scaler<br/>grid search T ∈ [0.25, 4.0]]
-        S4C --> S4D[Calibrated Score]
-    end
-    S4D --> S5
-
-    %% ====== STEP 5: ATOMIC CLAIM EXTRACTION ======
-    subgraph S5["Step 5 — Atomic Claim Extraction"]
-        S5A[Rule-based Splitter<br/>regex sentence] --> S5E[Claims + Provenance]
-        S5A --> S5B{Mode?}
-        S5B -->|llm| S5C[LLM Splitter<br/>Llama 3.1]
-        S5B -->|hybrid| S5D[Rule → LLM fallback]
-        S5C & S5D --> S5E
-    end
-    S5E --> S6
-
-    %% ====== STEP 6: HYBRID RETRIEVAL ======
+    %% ====== STEP 6: HYBRID RETRIEVAL (runs first: grounding) ======
     subgraph S6["Step 6 — Hybrid Retrieval"]
         S6A[Query Embedding<br/>BGE-M3] --> S6B[FAISS Index<br/>IndexFlatIP]
         S6A --> S6C[BM25 Index<br/>pure-python]
@@ -82,7 +58,35 @@ flowchart TD
         S7A[BGE-Reranker-v2<br/>BAAI/bge-reranker-v2-m3] --> S7B[Relevance Scores]
         S7B --> S7C[Sort + Top-K]
     end
-    S7C --> S8
+    S7C --> S2
+
+    %% ====== STEP 2: GROUNDED GENERATION ======
+    subgraph S2["Step 2 — Grounded Generation"]
+        S2A[Backend Selector<br/>llama / qwen] --> S2B[LlamaGenerator<br/>meta-llama/Meta-Llama-3.1-8B-Instruct]
+        S2A --> S2C[QwenGenerator<br/>Qwen/Qwen2.5-1.5B-Instruct]
+        S2B & S2C --> S2D[Prompt:<br/>Retrieved Context + Question]
+        S2D --> S2E[Initial Answer]
+    end
+    S2E --> S5
+
+    %% ====== STEP 5: ATOMIC CLAIM EXTRACTION ======
+    subgraph S5["Step 5 — Atomic Claim Extraction"]
+        S5A[Rule-based Splitter<br/>regex sentence] --> S5E[Claims + Provenance]
+        S5A --> S5B{Mode?}
+        S5B -->|llm| S5C[LLM Splitter<br/>Llama 3.1]
+        S5B -->|hybrid| S5D[Rule → LLM fallback]
+        S5C & S5D --> S5E
+    end
+    S5E --> S3
+
+    %% ====== STEP 3: EARLY DETECTION ======
+    subgraph S3["Step 3 — Early Hallucination Detection"]
+        S3A[BGE-M3 Embedder<br/>BAAI/bge-m3] --> S3B[Cosine Similarity<br/>q × answer]
+        S3A --> S3C[Feature Vector:<br/>cosine, claim_count,<br/>overlap, answer_length]
+        S3C --> S3D[XGBoost Classifier<br/>or sklearn-logreg]
+        S3D --> S3E[Hallucination Probability]
+    end
+    S3E --> S8
 
     %% ====== STEP 8: NLI VERIFICATION ======
     subgraph S8["Step 8 — NLI Verification"]
@@ -93,11 +97,19 @@ flowchart TD
         S8C -->|neutral| S8F[unknown]
         S8D & S8E & S8F --> S8G[Per-claim Verdicts]
     end
-    S8G --> S9
+    S8G --> S4
+
+    %% ====== STEP 4: CONFIDENCE ASSESSMENT ======
+    subgraph S4["Step 4 — Confidence Assessment (EEDC)"]
+        S4A[NLI Entropy H<br/>from step 8 verdicts] --> S4B[EEDC Platt Scorer<br/>α·H + β·(1-top1) + γ·(1-cons) + δ]
+        S4B --> S4C[Temperature Scaler<br/>grid search T ∈ [0.25, 4.0]]
+        S4C --> S4D[Calibrated Score]
+    end
+    S4D --> S9
 
     %% ====== STEP 9: CONFIDENCE FUSION ======
     subgraph S9["Step 9 — Confidence Fusion"]
-        S9A[Weights:<br/>sim 0.30 / ret 0.20<br/>nli 0.25 / cov 0.15<br/>eedc 0.10] --> S9B[Weighted Sum]
+        S9A[Weights:<br/>sim 0.30 / ret 0.20<br/>nli 0.25 / cov 0.15<br/>eedc 0.10 / det 0.15] --> S9B[Weighted Sum]
         S9B --> S9C[Per-claim Score]
         S9B --> S9D[Overall Confidence]
     end
@@ -123,6 +135,11 @@ flowchart TD
         S11E -->|no| S11G[best-of PASS/ABSTAIN]
     end
     S11C & S11D & S11F & S11G --> S12
+
+    %% ====== REGENERATION LOOP ======
+    %% A REGEN verdict re-runs the verification chain (steps 3, 5, 8, 4, 9,
+    %% 10, 11) so the revised answer is re-verified before the gate passes it.
+    S11F -.->|"retry ≤ max_regen_attempts"| S3
 
     %% ====== STEP 12: EXPLAINABLE RESPONSE ======
     subgraph S12["Step 12 — Explainable Response"]

@@ -19,9 +19,16 @@
 | Documentation | Excellent — README, paper artefacts, and a dedicated `/literature` page |
 | Datasets | Two real benchmarks integrated (HaluEval, TruthfulQA), with the synthetic corpus for smoke tests |
 | Front-end / UX | Polished — Flask + vanilla JS, three pages, accuracy & literature dashboards |
-| Real-world metric snapshot | Latest `metrics_halueval.json` (200 rows) → **detection_accuracy = 0.50**, **ROC-AUC = 0.50** → detector is currently a coin flip on HaluEval |
+| Real-world metric snapshot | Latest `metrics_halueval.json` (200 rows) → **detection_accuracy = 0.50**, **ROC-AUC = 0.50** → detector is currently a coin flip on HaluEval. **Superseded** — these figures were produced without a retrieval index (§17.1) and before the step reorder (§16, item 1). Re-measurement on the fixed pipeline is in progress. |
 
 The project is well-engineered **as a thesis artefact**, but several **silent fallback paths**, **out-of-order step invocations**, and **under-constrained step-09 weights** materially weaken the scientific claim. A non-trivial refactor pass is recommended before external publication.
+
+> **Addendum (2026-11-14).** The remediation pass recommended below has been
+> carried out for the P0 items, and two additional root causes were found: the
+> retrieval index was never loaded during evaluation, and the retrieval
+> metrics could never score above zero. Both are recorded in §17. The
+> benchmark numbers in §11 predate these fixes and must be re-measured before
+> the literature-comparison claims are treated as substantiated.
 
 ---
 
@@ -518,17 +525,83 @@ The `Paper/` directory ships 13 PDFs, a curated `comparison_table.csv`, a `why_w
 
 ## 16. Recommended Remediation Priorities
 
-1. **(P0)** Reorder the 13 steps so retrieval (Step 6) runs **before** generation (Step 2). Re-evaluate the HaluEval/TruthfulQA numbers. Until the detector is above 0.75 ROC-AUC on a real benchmark, the literature-comparison claims in `why_we_win.md` should be marked "projected".
-2. **(P0)** Implement the regeneration loop. After Step 11 emits `REGEN`, jump back to Step 10 up to `max_regen_attempts` times.
-3. **(P1)** Decouple `eedc` and `cosine` in Step 9 fusion. Either drop the EEDC term or use the genuine EEDC (which needs self-consistency sampling to be meaningful).
+> **Status update (2026-11-14).** Items 1, 2, 5, and 6 are now done, and two
+> further root causes were found that the original audit did not identify. See
+> §17 for the full record.
+
+1. ~~**(P0)** Reorder the 13 steps so retrieval (Step 6) runs **before** generation (Step 2).~~ **DONE.** `step_registry()` in `src/steps/__init__.py` now executes `1 → 6 → 7 → 2 → 3 → 5 → 8 → 4 → 9 → 10 → 11 → 12 → 13`. Step numbers are unchanged for diagram/trace traceability; only the execution order moved. The benchmark numbers in §11 still need re-measuring on the fixed pipeline.
+2. ~~**(P0)** Implement the regeneration loop.~~ **DONE.** `Pipeline.run()` in `src/pipeline.py` re-runs the verification chain when step 11 emits `REGEN`, bounded by `max_regen_attempts`.
+3. **(P1)** Decouple `eedc` and `cosine` in Step 9 fusion. Either drop the EEDC term or use the genuine EEDC (which needs self-consistency sampling to be meaningful). *Partly addressed:* EEDC now runs after NLI so `nli_entropy` is a real entropy rather than the `1 − cosine` fallback, but `self_consistency` is still a cosine proxy.
 4. **(P1)** Wire `step13_eval.metrics` from `configs/default.yaml` to actually gate the per-row output. Currently the YAML list is decorative.
-5. **(P2)** Add a real, labelled training set for `XGBClassifier`. Replace the hand-coded `(cosine>0.5) & (overlap<0.3)` rule with a real fit.
-6. **(P2)** Use the rewritten query (Step 1) in Steps 2, 6, 7. Currently the rewrite is never consumed.
+5. ~~**(P2)** Add a real, labelled training set for `XGBClassifier`.~~ **DONE.** `data/detector_train.jsonl` holds 794 real labelled rows mined from HaluEval/TruthfulQA, with a length-confound control.
+6. ~~**(P2)** Use the rewritten query (Step 1) in Steps 2, 6, 7.~~ **DONE.** All three already consume `ctx.metadata["rewritten_query"]`.
 7. **(P2)** Delete `_pipeline_lifespan` in `api/app.py:121` (dead code) and the duplicate `models_status` in `frontend/app.py:453`.
 8. **(P2)** Add a single integration test that exercises the **real** HaluEval rows (against an in-memory index) to lock the regression.
 9. **(P3)** Add CORS, request size limits, and an atomic file write helper for `data/metrics.json`.
 10. **(P3)** Add HTML output to Step 12 (the README already claims it).
 11. **(P3)** Tighten doc/code consistency around OpenRouter defaults and step ordering.
+
+---
+
+## 17. Remediation Record (2026-11-14)
+
+Beyond the items above, two defects were found that the original audit
+missed, and together they explain the 0.50 baseline more convincingly than
+the step ordering alone.
+
+### 17.1 The retrieval index was never loaded
+
+Every evaluation in `eval_both.log` was run without `--index`. `Pipeline`
+then fell back to `_build_default_index()`, which builds an index from
+`load_synthetic_corpus()` — **six documents** ("Paris is the capital of
+France. France is in Europe."). No real evidence was ever retrieved, so
+grounded generation received an irrelevant context, confidence collapsed,
+and the pipeline abstained on most inputs.
+
+With `--index data/index_halueval` (1,919 documents) the same query retrieves
+the correct source document and the gate verdict changes.
+
+**Fix:** `--index` now defaults per dataset in `scripts/evaluate.py`,
+`scripts/evaluate_full.py`, and `scripts/ablation_study.py`; `--data` paths
+are matched on the dataset name within the filename.
+
+### 17.2 The retrieval metrics could never score above zero
+
+The datasets store gold evidence as **passages**, while the index identifies
+documents by **id** (`doc-586`). Comparing retrieved ids against gold
+passages always missed, so recall/MRR/nDCG were reported as 0.0 even when
+the retriever found exactly the right document.
+
+Separately, `step13_evaluation.py` compared the retrieved ids against
+*themselves*, which always returned 1.0 — a fake perfect retriever.
+
+**Fix:** `scripts/evaluate.py::_match_gold` matches retrieved documents to
+gold passages by text, requiring a 90% common-prefix overlap so unrelated
+documents sharing a boilerplate opening do not match. Step 13 now reports
+`null` rather than a fabricated score when no gold evidence is available.
+
+### 17.3 Dead-branch defects fixed alongside the reorder
+
+- Step 3's XGBoost `hallucination_probability` was computed but never
+  consumed; it is now fused in step 9 as an inverted trust signal
+  (`detector: 0.15`).
+- Step 3's `claim_count` feature was always 1 because claims were extracted
+  later; with the reorder it sees real counts, matching the training data.
+- The ROC plot in `scripts/plot_results.py` scored against `confidence`
+  (a trust value) while the label marks the answer as hallucinated, which
+  inverted the curve. It now uses `detector_score`.
+
+### 17.4 Reproducibility and statistical reporting
+
+- The venv shipped CPU-only torch, so every logged run was CPU-bound.
+  `torch==2.13.0+cu126` is now installed: ~4.0 s/query without retrieval,
+  ~8.0 s/query with the real index, versus ~20.5 s/query on CPU.
+- Evaluation defaults now point at leak-free held-out splits
+  (`data/halueval_eval_1000.jsonl`, `data/truthfulqa_eval_1000.jsonl` —
+  500 unique queries each, balanced). The full HaluEval pool contains the
+  200 queries the detector was trained on.
+- `scripts/evaluate_full.py` now reports percentile bootstrap 95% CIs,
+  resampling **queries** rather than rows.
 
 ---
 
