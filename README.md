@@ -657,7 +657,7 @@ Hallucination/
 │   ├── models/               # HF wrappers + deterministic fallback
 │   ├── retrieval/            # FAISS, BM25, hybrid RRF
 │   └── utils/                # chunker, claim_extractor, data_loader
-├── tests/                    # 31 tests, in-memory fakes — fast + offline
+├── tests/                    # 83 tests, in-memory fakes — fast + offline
 ├── requirements.txt
 └── README.md
 ```

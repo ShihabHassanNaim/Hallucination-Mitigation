@@ -14,6 +14,26 @@ from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
 
+def _test_count() -> str:
+    """Count the test functions in the suite, so the slide cannot go stale.
+
+    Parses the test files rather than running pytest: building the
+    presentation must not require the models to be installed.
+    """
+    tests_dir = Path(__file__).resolve().parent.parent / "tests"
+    total = 0
+    for path in tests_dir.glob("test_*.py"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        total += sum(
+            1 for line in text.splitlines()
+            if line.startswith("def test_")
+        )
+    return str(total) if total else "the test suite"
+
+
 # ---------------------------------------------------------------------------
 # Theme
 # ---------------------------------------------------------------------------
@@ -196,7 +216,7 @@ def add_slide_title(prs):
     tf = slide.shapes.add_textbox(Inches(0.9), Inches(3.85), Inches(11.5), Inches(0.5))
     style_text(
         tf,
-        "Real HuggingFace models  ·  31 tests passing  ·  Flask + FastAPI UI",
+        f"Real HuggingFace models  ·  {_test_count()} tests passing  ·  Flask + FastAPI UI",
         size=18, color=LIGHT,
     )
 
@@ -319,7 +339,7 @@ def add_slide_goals(prs):
         ("G3", "Claim-level verification", "Atomic claim extraction + NLI per claim, not per sentence."),
         ("G4", "Three-way gate", "PASS / REGEN / ABSTAIN with calibrated confidence (EEDC + temperature scaling)."),
         ("G5", "Two user surfaces", "FastAPI (port 8000) + Flask (port 5000) with live metrics & project tree."),
-        ("G6", "Reproducible evaluation", "31 unit tests, metrics on HaluEval + TruthfulQA, comparison report."),
+        ("G6", "Reproducible evaluation", f"{_test_count()} unit tests, metrics on HaluEval + TruthfulQA, comparison report."),
     ]
     for i, (tag, title, body) in enumerate(goals):
         col = i % 2
@@ -749,7 +769,7 @@ def add_slide_conclusion(prs):
             "Real HuggingFace models at every step — never a mock.",
             "Claim-level NLI + 3-way gate (PASS / REGEN / ABSTAIN).",
             "Two user surfaces (FastAPI + Flask) with live metrics.",
-            "Reproducible: 31 tests, HaluEval + TruthfulQA, comparison report.",
+            f"Reproducible: {_test_count()} tests, HaluEval + TruthfulQA, comparison report.",
         ],
         size=15,
     )
