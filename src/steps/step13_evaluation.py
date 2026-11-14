@@ -99,9 +99,18 @@ def _mrr(retrieved_ids: list[str], gold_ids: list[str]) -> float:
 
 
 def _ndcg(retrieved_ids: list[str], gold_ids: list[str]) -> float:
+    """Normalised discounted cumulative gain at k.
+
+    Each gold passage may be credited only once. Without that, several
+    retrieved documents matching the same gold passage would each add a
+    gain term and the score could exceed 1.0, which nDCG cannot do by
+    definition.
+    """
     dcg = 0.0
+    credited: set[str] = set()
     for i, x in enumerate(retrieved_ids, 1):
-        if x in gold_ids:
+        if x in gold_ids and x not in credited:
+            credited.add(x)
             dcg += _safe_div(1.0, math.log2(i + 1))
     idcg = sum(_safe_div(1.0, math.log2(i + 1)) for i in range(1, len(gold_ids) + 1))
     return _safe_div(dcg, idcg)

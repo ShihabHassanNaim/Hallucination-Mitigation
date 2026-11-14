@@ -15,8 +15,19 @@ import json
 from pathlib import Path
 
 DATASETS = [
-    ("halueval", "HaluEval QA", "data/metrics_halueval.json"),
+    ("halueval", "HaluEval QA (length-matched)", "data/metrics_halueval.json"),
     ("truthfulqa", "TruthfulQA", "data/metrics_truthfulqa.json"),
+    ("halueval_raw", "HaluEval QA (raw, length-confounded)", "data/metrics_halueval_raw.json"),
+]
+
+# The length-matched HaluEval split and TruthfulQA are the defensible
+# headline results. The raw HaluEval split is reported for transparency
+# only: on it, answer word count alone classifies 94.7% of the rows, so it
+# measures answer verbosity as much as hallucination.
+HEADLINE_ORDER = [
+    "halueval",
+    "truthfulqa",
+    "halueval_raw",
 ]
 
 HEADLINE = [
@@ -29,6 +40,14 @@ HEADLINE = [
     ("claim_correction_rate", "Claim Correction Rate (CCR)"),
     ("verification_success_rate", "Verification Success Rate (VSR)"),
     ("end_to_end_accuracy", "End-to-End Accuracy"),
+]
+
+RETRIEVAL = [
+    ("retrieval_recall_at_5", "Retrieval Recall@5"),
+    ("retrieval_precision_at_5", "Retrieval Precision@5"),
+    ("retrieval_mrr", "Retrieval MRR"),
+    ("retrieval_ndcg", "Retrieval nDCG"),
+    ("claim_precision", "Claim Precision"),
 ]
 
 
@@ -76,6 +95,17 @@ def main() -> None:
         "bootstrap 95% CIs that resample queries, not rows."
     )
     lines.append("")
+    lines.append(
+        "**How to read these numbers.** Every row is judged on the answer the "
+        "dataset supplies, so the detector scores a faithful answer and a "
+        "hallucinated answer for the same question separately. The "
+        "length-matched HaluEval split and TruthfulQA are the headline "
+        "results; the raw HaluEval split is shown for transparency but is "
+        "confounded — on it, answer word count alone classifies 94.7% of "
+        "rows, so it partly measures answer verbosity rather than "
+        "hallucination."
+    )
+    lines.append("")
 
     for slug, label, _path in DATASETS:
         data = loaded.get(slug)
@@ -96,6 +126,16 @@ def main() -> None:
             lines.append(f"| {name} | {_fmt(val)} | {_ci_text(agg, key)} |")
         lines.append("")
 
+        retrieval_rows = [
+            (key, name) for key, name in RETRIEVAL if agg.get(key) is not None
+        ]
+        if retrieval_rows:
+            lines.append("| Retrieval / Claim Metric | Value |")
+            lines.append("|---|---|")
+            for key, name in retrieval_rows:
+                lines.append(f"| {name} | {_fmt(agg.get(key))} |")
+            lines.append("")
+
         decisions: dict[str, int] = {}
         for row in data.get("per_query") or []:
             d = row.get("decision")
@@ -109,13 +149,14 @@ def main() -> None:
 
     lines.append("## Cross-Dataset Summary")
     lines.append("")
+    summary_slugs = [s for s in HEADLINE_ORDER if s in loaded]
     lines.append("| Metric | " + " | ".join(
-        label for slug, label, _ in DATASETS if slug in loaded) + " |")
-    lines.append("|---" * (1 + sum(1 for slug, _l, _p in DATASETS if slug in loaded)) + "|")
+        label for slug, label, _ in DATASETS if slug in summary_slugs) + " |")
+    lines.append("|---" * (1 + len(summary_slugs)) + "|")
     for key, name in HEADLINE:
         cells = []
         for slug, _label, _path in DATASETS:
-            if slug not in loaded:
+            if slug not in summary_slugs:
                 continue
             agg = loaded[slug].get("aggregate", {})
             cells.append(_fmt(agg.get(key)))
