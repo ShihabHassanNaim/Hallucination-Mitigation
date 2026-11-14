@@ -188,7 +188,12 @@ def main() -> None:
     for idx, r in enumerate(rows):
         row_t = time.time()
         try:
-            res = pipe.run(r["query"], answer=r.get("answer"))
+            res = pipe.run(
+                r["query"],
+                answer=r.get("answer"),
+                label=int(r["label"]) if r.get("label") in {0, 1, "0", "1"} else None,
+                gold_answer=r.get("right_answer"),
+            )
             d = res.to_dict()
             # Gold evidence in the datasets is stored as evidence *text*, while
             # the index identifies documents by id (e.g. "doc-586"). Comparing

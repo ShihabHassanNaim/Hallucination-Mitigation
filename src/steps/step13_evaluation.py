@@ -157,6 +157,88 @@ def _rouge_l(reference: str, candidate: str) -> float:
     return _safe_div(2 * prec * rec, prec + rec)
 
 
+def _claim_level_metrics(
+    claims: list,
+    label: int | None,
+    gold_answer: str,
+) -> dict:
+    """Claim-level precision / recall / F1 against the row's ground truth.
+
+    Two situations are distinguished, because conflating them would make the
+    metric look better than it is:
+
+    * **A gold answer is available** (the evaluation datasets supply
+      ``right_answer``). A claim counts as a *true positive* when the
+      verifier marks it supported **and** it is consistent with the gold
+      answer. A claim the verifier marks supported but which contradicts
+      the gold answer is a *false positive* — the verifier was confidently
+      wrong. Claims the verifier rejects are false negatives when the
+      answer actually contains them, i.e. when the claim agrees with the
+      gold answer.
+
+      For a hallucinated row (``label == 1``) there is no correct claim
+      set to recall, so recall is reported as ``None``: the benchmark tells
+      us the answer is wrong but not which of its claims are wrong.
+
+    * **No gold answer** — only the raw support rate is meaningful, and
+      the P/R/F1 triple is reported as ``None`` rather than as three
+      copies of the same number.
+
+    Previously this step set ``claim_precision``, ``claim_recall`` and
+    ``claim_f1`` all to the same value (the support rate), which is not a
+    recall and not an F1.
+    """
+    if not claims:
+        return {
+            "claim_precision": None,
+            "claim_recall": None,
+            "claim_f1": None,
+            "claim_support_rate": None,
+        }
+
+    gold_tokens = set(_tokenize(gold_answer)) if gold_answer else set()
+    support_rate = sum(c.verdict == "supported" for c in claims) / len(claims)
+
+    if not gold_tokens:
+        # Without a gold answer only the support rate is well defined.
+        return {
+            "claim_precision": None,
+            "claim_recall": None,
+            "claim_f1": None,
+            "claim_support_rate": support_rate,
+        }
+
+    def _agrees_with_gold(text: str) -> bool:
+        """True when the claim shares a content token with the gold answer."""
+        toks = set(_tokenize(text))
+        return bool(toks & gold_tokens)
+
+    tp = fp = fn = 0
+    for c in claims:
+        supported = c.verdict == "supported"
+        agrees = _agrees_with_gold(c.text)
+        if supported and agrees:
+            tp += 1
+        elif supported and not agrees:
+            fp += 1
+        elif not supported and agrees:
+            fn += 1
+
+    prec = _safe_div(tp, tp + fp)
+    rec = None if label == 1 else _safe_div(tp, tp + fn)
+    if rec is None:
+        f1 = None
+    else:
+        f1 = _safe_div(2 * prec * rec, prec + rec)
+
+    return {
+        "claim_precision": prec,
+        "claim_recall": rec,
+        "claim_f1": f1,
+        "claim_support_rate": support_rate,
+    }
+
+
 class Step13Evaluation(Step):
     number = 13
     name = "evaluation"
@@ -192,10 +274,12 @@ class Step13Evaluation(Step):
                 "retrieval_ndcg": None,
             }
 
+        row_metrics.update(_claim_level_metrics(
+            claims,
+            self.ctx.metadata.get("row_label"),
+            str(self.ctx.metadata.get("gold_answer") or ""),
+        ))
         row_metrics.update({
-            "claim_precision": _safe_div(verdict_dist.get("supported", 0), max(1, len(claims))),
-            "claim_recall": _safe_div(verdict_dist.get("supported", 0), max(1, len(claims))),
-            "claim_f1": _safe_div(verdict_dist.get("supported", 0), max(1, len(claims))),
             "verification_success_rate": 1.0 if not claims or verdict_dist.get("contradicted", 0) == 0 else 0.0,
             "end_to_end_accuracy": 1.0 if self.ctx.decision == "PASS" else 0.0,
             "confidence": self.ctx.confidence,

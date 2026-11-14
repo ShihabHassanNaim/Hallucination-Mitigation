@@ -24,8 +24,9 @@ from src.config import load_config
 from src.models.xgb_classifier import XGBClassifier
 from src.pipeline import Pipeline
 from src.steps.step13_evaluation import (
-    _precision_recall_f1, _accuracy, _roc_auc,
+    _precision_recall_f1, _accuracy, _roc_auc, _claim_level_metrics,
 )
+from src.types import Claim
 from src.utils.data_loader import load_jsonl, load_synthetic_qa
 from scripts.evaluate import _match_gold
 
@@ -246,6 +247,25 @@ def _write_checkpoint(out_path: Path, slug: str, per_query: list[dict]) -> None:
     tmp.replace(out_path)
 
 
+def _load_checkpoint(out_path: Path) -> list[dict]:
+    """Return the per-row records of an existing checkpoint, or [].
+
+    Used by ``--resume`` so a run that was killed (or that needs to be
+    restarted after a code change) does not throw away the rows it already
+    finished. Rows are matched to their dataset rows by ``query`` +
+    ``label`` + ``answer`` position, so a checkpoint is only reused for the
+    exact row it was produced from.
+    """
+    if not out_path.exists():
+        return []
+    try:
+        payload = json.loads(out_path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+    rows = payload.get("per_query")
+    return rows if isinstance(rows, list) else []
+
+
 def _aggregate_from_rows(slug: str, per_query: list[dict], seed: int = 0) -> dict:
     """Rebuild the aggregate metric block from per-row records.
 
@@ -298,8 +318,18 @@ def _aggregate_from_rows(slug: str, per_query: list[dict], seed: int = 0) -> dic
         "retrieval_mrr",
         "retrieval_ndcg",
         "claim_precision",
+        "claim_recall",
+        "claim_f1",
+        "claim_support_rate",
     ):
-        vals = [r[key] for r in per_query if key in r]
+        # ``None`` marks a metric that is undefined for that row (claim recall
+        # on a hallucinated row, for instance) — skip those rows rather than
+        # averaging them in as zero.
+        vals = [
+            r[key] for r in per_query
+            if key in r and isinstance(r[key], (int, float))
+            and not isinstance(r[key], bool)
+        ]
         if vals:
             aggregate[key] = statistics.fmean(vals)
     return aggregate
@@ -384,6 +414,13 @@ def main() -> None:
         help="skip the pipeline entirely: rebuild the aggregate block (metrics "
              "+ bootstrap CIs) from the per_query rows already in --out.",
     )
+    ap.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse the rows already present in --out and only evaluate the "
+             "remaining ones. Lets a killed run continue without repeating "
+             "completed work.",
+    )
     args = ap.parse_args()
 
     if args.recompute:
@@ -427,26 +464,100 @@ def main() -> None:
     e2e: list[int] = []
     per_query: list[dict] = []
     query_groups: list[str] = []
+    n_failed = 0
+    failures: list[str] = []
 
     t_start = time.time()
+
+    # Resume support: reuse the rows an earlier run already finished so a
+    # killed run — or a run restarted after a code change — does not throw
+    # away completed work. A checkpoint row is reused only when it came
+    # from the same dataset row (same query, same label), so a checkpoint
+    # from a different split can never be silently mixed in.
+    reused = 0
+    if getattr(args, "resume", False):
+        checkpoint = _load_checkpoint(out_path)
+        # A checkpoint row is only reusable if it carries every field the
+        # current code produces. A checkpoint written by an older version
+        # would otherwise be mixed in silently and produce a metrics file
+        # whose rows are not comparable.
+        required = ("detector_score", "label", "claim_recall", "claim_f1")
+        usable = [
+            rec for rec in checkpoint
+            if all(k in rec for k in required)
+        ]
+        if checkpoint and not usable:
+            print(
+                f"  resume: {out_path} has {len(checkpoint)} row(s) but none "
+                f"carry the current fields {required}; starting from scratch.",
+                file=sys.stderr, flush=True,
+            )
+        by_key: dict[tuple, dict] = {}
+        for rec in usable:
+            key = (rec.get("query", ""), rec.get("label"))
+            by_key.setdefault(key, rec)
+        for idx, r in enumerate(rows):
+            gt_pre = int(r["label"]) if r.get("label") in {0, 1, "0", "1"} else None
+            key = (r.get("query") or r.get("question") or "", gt_pre)
+            rec = by_key.get(key)
+            if rec is None:
+                break
+            per_query.append(rec)
+            detector_truth.append(int(rec["label"]))
+            detector_score.append(float(rec["detector_score"]))
+            query_groups.append(rec.get("query") or f"row-{idx}")
+            e2e.append(int(rec.get("end_to_end_accuracy", 0)))
+            if "hrr" in rec:
+                hrr_list.append(float(rec["hrr"]))
+            if "ccr" in rec:
+                ccr_list.append(float(rec["ccr"]))
+            if "vsr" in rec:
+                vsr_list.append(float(rec["vsr"]))
+            reused += 1
+        if reused:
+            print(
+                f"  resuming: reused {reused}/{len(rows)} rows from {out_path}",
+                file=sys.stderr, flush=True,
+            )
+            _write_checkpoint(out_path, slug, per_query)
+
     for idx, r in enumerate(rows):
+        if idx < reused:
+            continue
         row_t = time.time()
+
+        # Determine ground truth *before* running the pipeline: step 13 needs
+        # the label and the gold answer to compute claim-level recall.
+        if "label" in r and r["label"] in {0, 1, "0", "1"}:
+            gt = int(r["label"])
+            gt_known = True
+        else:
+            gt = None
+            gt_known = False
+
         try:
             # Verify the dataset's own answer. The rows are paired: for one
             # question the dataset supplies a correct answer (label 0) and a
             # hallucinated one (label 1). Generating an answer from the
             # query alone would give both rows the same answer and the same
             # detector features, forcing the ROC-AUC to exactly 0.5.
-            res = pipe.run(r["query"], answer=r.get("answer"))
+            res = pipe.run(
+                r["query"],
+                answer=r.get("answer"),
+                label=gt if gt_known else None,
+                gold_answer=r.get("right_answer"),
+            )
             d = res.to_dict()
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            # A row that fails is dropped, but never silently: count it and
+            # keep the first few messages so a systematic failure is visible
+            # in the log instead of quietly shrinking the sample.
+            n_failed += 1
+            if len(failures) < 5:
+                failures.append(f"row {idx}: {type(exc).__name__}: {exc}")
             continue
 
-        # Determine ground truth: if the row has explicit label use it, else
-        # infer from gold evidence presence.
-        if "label" in r and r["label"] in {0, 1, "0", "1"}:
-            gt = int(r["label"])
-        else:
+        if not gt_known:
             # Gold evidence is stored as passages while retrieved documents
             # carry index ids, so the two must be matched on text.
             gold_texts = [e for e in (r.get("evidence") or []) if e]
@@ -518,6 +629,14 @@ def main() -> None:
         retrieved_texts = [e.get("text", "") for e in d.get("evidence", [])]
         gold_hits = _match_gold(retrieved_texts, gold_texts)
         gold_ids = list(range(len(gold_texts)))
+
+        # Claim-level metrics against the row's ground truth. Uses the same
+        # helper as step 13 so the two can never disagree.
+        claim_metrics = _claim_level_metrics(
+            [Claim(**c) for c in d.get("claims", [])],
+            gt,
+            str(r.get("right_answer") or ""),
+        )
         n_supported = sum(c["verdict"] == "supported" for c in d.get("claims", []))
 
         per_query.append({
@@ -539,8 +658,13 @@ def main() -> None:
             "retrieval_precision_at_5": _precision_at_k(gold_hits, gold_ids, 5),
             "retrieval_mrr": _mrr(gold_hits, gold_ids),
             "retrieval_ndcg": _ndcg(gold_hits, gold_ids),
-            # Claim-level metrics.
-            "claim_precision": n_supported / max(1, len(d.get("claims", []))),
+            # Claim-level metrics. Recall and F1 are None when they are
+            # undefined (no gold answer, or a hallucinated row where the
+            # benchmark does not say which claims are wrong).
+            "claim_precision": claim_metrics["claim_precision"],
+            "claim_recall": claim_metrics["claim_recall"],
+            "claim_f1": claim_metrics["claim_f1"],
+            "claim_support_rate": claim_metrics["claim_support_rate"],
             "step_times_ms": {
                 t.name: round(float(t.duration_ms), 3)
                 for t in (res.step_traces or [])
@@ -577,8 +701,15 @@ def main() -> None:
     existing["dataset"] = slug
     existing["per_query"] = per_query
     existing["n_queries"] = len(per_query)
+    existing["n_failed"] = n_failed
     out_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
-    print(f"wrote {out_path} ({slug}, {len(rows)} rows)")
+    if n_failed:
+        print(
+            f"WARNING: {n_failed} row(s) failed and were skipped. "
+            f"First few: {failures}",
+            file=sys.stderr, flush=True,
+        )
+    print(f"wrote {out_path} ({slug}, {len(per_query)} rows)")
     print(json.dumps({"aggregate": aggregate}, indent=2))
 
 

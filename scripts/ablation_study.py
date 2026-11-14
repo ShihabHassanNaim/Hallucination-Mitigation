@@ -78,7 +78,12 @@ def _evaluate(pipe: Pipeline, rows: list[dict]) -> dict:
         try:
             # Verify the dataset's own answer so the detector sees the
             # correct and the hallucinated answer for each paired question.
-            res = pipe.run(query, answer=r.get("answer"))
+            res = pipe.run(
+                query,
+                answer=r.get("answer"),
+                label=int(r["label"]) if r.get("label") in {0, 1, "0", "1"} else None,
+                gold_answer=r.get("right_answer"),
+            )
         except Exception:  # noqa: BLE001
             continue
         d = res.to_dict()

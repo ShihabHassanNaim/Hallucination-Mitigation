@@ -7,6 +7,7 @@ than in the thesis.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,9 @@ def _rows(n_queries: int = 30, perfect: bool = True) -> list[dict]:
                 "retrieval_mrr": 1.0,
                 "retrieval_ndcg": 1.0,
                 "claim_precision": 0.9,
+                "claim_recall": 0.9 if label == 0 else None,
+                "claim_f1": 0.9 if label == 0 else None,
+                "claim_support_rate": 0.9,
                 "step_times_ms": {"nli_verification": 120.0},
             })
     return rows
@@ -388,3 +392,128 @@ def test_new_metrics_appear_in_the_aggregate_with_cis():
         ci = agg[key]
         assert len(ci) == 2
         assert ci[0] <= ci[1]
+
+
+# ---------------------------------------------------------------------------
+# --resume
+# ---------------------------------------------------------------------------
+
+
+def test_load_checkpoint_returns_nothing_for_a_missing_file(tmp_path):
+    from scripts.evaluate_full import _load_checkpoint
+
+    assert _load_checkpoint(tmp_path / "absent.json") == []
+
+
+def test_load_checkpoint_returns_the_per_query_rows(tmp_path):
+    from scripts.evaluate_full import _load_checkpoint, _write_checkpoint
+
+    out = tmp_path / "metrics.json"
+    _write_checkpoint(out, "halueval", _rows(3))
+    loaded = _load_checkpoint(out)
+    assert len(loaded) == 6
+    assert loaded[0]["label"] in (0, 1)
+
+
+def test_load_checkpoint_tolerates_a_corrupt_file(tmp_path):
+    from scripts.evaluate_full import _load_checkpoint
+
+    out = tmp_path / "metrics.json"
+    out.write_text("{not json", encoding="utf-8")
+    assert _load_checkpoint(out) == []
+
+
+class _StopRun(BaseException):
+    """Raised by the fake pipeline to end a test run early.
+
+    Derives from BaseException, not Exception, so the evaluation loop's
+    ``except Exception`` (which drops failed rows) does not swallow it.
+    """
+
+
+class _FakePipe:
+    """Minimal stand-in for Pipeline that records the queries it is given."""
+
+    class _Retriever:
+        n_docs = 0
+
+    def __init__(self, evaluated: list[str]) -> None:
+        self.evaluated = evaluated
+        self.retriever = self._Retriever()
+
+    def load_index(self, index_dir: str) -> None:  # noqa: ARG002
+        pass
+
+    def run(self, query, answer=None, label=None, gold_answer=None):  # noqa: ARG002
+        self.evaluated.append(query)
+        raise _StopRun()
+
+
+def test_resume_rejects_a_checkpoint_from_an_older_version(tmp_path, monkeypatch):
+    """Rows lacking the current fields must not be silently reused."""
+    from scripts import evaluate_full as ef
+
+    out = tmp_path / "metrics.json"
+    # A checkpoint written before the claim metrics existed.
+    stale = [{k: v for k, v in rec.items() if k not in {"claim_recall", "claim_f1"}}
+             for rec in _rows(2)]
+    ef._write_checkpoint(out, "halueval", stale)
+
+    dataset_rows = [
+        {"query": r["query"], "label": r["label"], "answer": "x"}
+        for r in _rows(2)
+    ]
+    monkeypatch.setattr(ef, "_resolve_dataset_rows", lambda args: (dataset_rows, "halueval"))
+
+    import io
+
+    stderr = io.StringIO()
+    monkeypatch.setattr("sys.stderr", stderr)
+
+    evaluated: list[str] = []
+    monkeypatch.setattr(ef, "Pipeline", lambda *a, **k: _FakePipe(evaluated))
+    monkeypatch.setattr(
+        sys, "argv",
+        ["evaluate_full", "--data", "unused", "--out", str(out), "--resume"],
+    )
+
+    with pytest.raises(_StopRun):
+        ef.main()
+
+    # Every row was re-evaluated because none of the checkpoint rows were
+    # usable.
+    assert len(evaluated) > 0
+    assert "starting from scratch" in stderr.getvalue()
+
+
+def test_resume_skips_rows_the_checkpoint_already_has(tmp_path, monkeypatch):
+    """Rows already present in the checkpoint must not be evaluated again."""
+    from scripts import evaluate_full as ef
+
+    out = tmp_path / "metrics.json"
+    done = _rows(2)
+    ef._write_checkpoint(out, "halueval", done)
+
+    dataset_rows = [
+        {"query": r["query"], "label": r["label"], "answer": "x"}
+        for r in _rows(3)
+    ]
+    monkeypatch.setattr(ef, "_resolve_dataset_rows", lambda args: (dataset_rows, "halueval"))
+
+    evaluated: list[str] = []
+    monkeypatch.setattr(ef, "Pipeline", lambda *a, **k: _FakePipe(evaluated))
+    monkeypatch.setattr(
+        sys, "argv",
+        ["evaluate_full", "--data", "unused", "--out", str(out), "--resume"],
+    )
+
+    with pytest.raises(_StopRun):
+        ef.main()
+
+    # The first four rows (two queries x two labels) came from the
+    # checkpoint; only the fifth row reached the pipeline.
+    assert len(evaluated) == 1, (
+        f"expected only the un-finished row to be evaluated, got {evaluated}"
+    )
+
+

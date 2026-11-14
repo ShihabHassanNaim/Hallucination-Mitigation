@@ -143,7 +143,13 @@ class Pipeline:
         ret.add(doc_ids, docs, vecs)
         return ret
 
-    def run(self, query: str, answer: str | None = None) -> PipelineResult:
+    def run(
+        self,
+        query: str,
+        answer: str | None = None,
+        label: int | None = None,
+        gold_answer: str | None = None,
+    ) -> PipelineResult:
         """Run the pipeline over ``query``.
 
         Parameters
@@ -160,11 +166,22 @@ class Pipeline:
             rows that differ only in the answer. Generating an answer from
             the query alone would give both rows the same answer, the same
             detector features and therefore a ROC-AUC of exactly 0.5.
+        label
+            Optional ground-truth label for the answer (1 = hallucinated,
+            0 = faithful). Used by step 13 to compute claim-level recall,
+            which is undefined without it.
+        gold_answer
+            Optional correct answer text. Used by step 13 to decide which
+            claims are true positives.
         """
         ctx = StepContext(query=query, cfg=self.cfg)
         ctx.metadata["pipeline"] = self
         if answer is not None:
             ctx.metadata["provided_answer"] = answer
+        if label is not None:
+            ctx.metadata["row_label"] = int(label)
+        if gold_answer is not None:
+            ctx.metadata["gold_answer"] = str(gold_answer)
         traces: list[StepTrace] = []
 
         registry = step_registry()
