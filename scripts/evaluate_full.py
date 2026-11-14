@@ -333,7 +333,12 @@ def main() -> None:
     for idx, r in enumerate(rows):
         row_t = time.time()
         try:
-            res = pipe.run(r["query"])
+            # Verify the dataset's own answer. The rows are paired: for one
+            # question the dataset supplies a correct answer (label 0) and a
+            # hallucinated one (label 1). Generating an answer from the
+            # query alone would give both rows the same answer and the same
+            # detector features, forcing the ROC-AUC to exactly 0.5.
+            res = pipe.run(r["query"], answer=r.get("answer"))
             d = res.to_dict()
         except Exception:
             continue
@@ -349,10 +354,12 @@ def main() -> None:
             retrieved_texts = [e.get("text", "") for e in d["evidence"]]
             gt = 0 if _match_gold(retrieved_texts, gold_texts) else 1
 
-        # Detector score: predict hallucination from the answer the pipeline
-        # ACTUALLY generated (d["answer"]). The ground-truth `right_answer` is
-        # deliberately never touched here — scoring it would leak the label
-        # into its own feature and yield a meaningless ROC-AUC of 1.0.
+        # Detector score: predict hallucination from the answer under
+        # judgement (d["answer"] — the dataset's own answer, since the
+        # pipeline verifies it rather than generating one). The ground-truth
+        # `right_answer` is deliberately never touched here — scoring it
+        # would leak the label into its own feature and yield a meaningless
+        # ROC-AUC of 1.0.
         # Features use the same four signals as generate_detector_data_v2.py:
         # (cosine, claim_count, overlap, answer_length).
         from src.utils.claim_extractor import extract_claims, intrinsic_overlap

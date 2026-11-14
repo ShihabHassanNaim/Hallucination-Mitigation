@@ -76,7 +76,9 @@ def _evaluate(pipe: Pipeline, rows: list[dict]) -> dict:
         if not query:
             continue
         try:
-            res = pipe.run(query)
+            # Verify the dataset's own answer so the detector sees the
+            # correct and the hallucinated answer for each paired question.
+            res = pipe.run(query, answer=r.get("answer"))
         except Exception:  # noqa: BLE001
             continue
         d = res.to_dict()

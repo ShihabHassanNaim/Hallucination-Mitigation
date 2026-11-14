@@ -188,7 +188,7 @@ def main() -> None:
     for idx, r in enumerate(rows):
         row_t = time.time()
         try:
-            res = pipe.run(r["query"])
+            res = pipe.run(r["query"], answer=r.get("answer"))
             d = res.to_dict()
             # Gold evidence in the datasets is stored as evidence *text*, while
             # the index identifies documents by id (e.g. "doc-586"). Comparing

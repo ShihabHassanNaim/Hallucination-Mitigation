@@ -143,9 +143,28 @@ class Pipeline:
         ret.add(doc_ids, docs, vecs)
         return ret
 
-    def run(self, query: str) -> PipelineResult:
+    def run(self, query: str, answer: str | None = None) -> PipelineResult:
+        """Run the pipeline over ``query``.
+
+        Parameters
+        ----------
+        query
+            The question.
+        answer
+            Optional answer to verify instead of generating one. When given,
+            step 2 uses it verbatim and the generator is not called, so the
+            detection and verification chain scores *this* answer.
+
+            This matters for evaluation: a dataset that pairs a correct
+            answer with a hallucinated one for the same question yields two
+            rows that differ only in the answer. Generating an answer from
+            the query alone would give both rows the same answer, the same
+            detector features and therefore a ROC-AUC of exactly 0.5.
+        """
         ctx = StepContext(query=query, cfg=self.cfg)
         ctx.metadata["pipeline"] = self
+        if answer is not None:
+            ctx.metadata["provided_answer"] = answer
         traces: list[StepTrace] = []
 
         registry = step_registry()

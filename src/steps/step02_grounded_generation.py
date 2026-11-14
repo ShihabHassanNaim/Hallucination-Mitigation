@@ -37,7 +37,14 @@ class Step02GroundedGeneration(Step):
             context=ctx_text, question=query
         )
 
-        if gen is None:
+        # A provided answer bypasses generation entirely. The pipeline is
+        # then verifying a supplied answer rather than producing one, which
+        # is what a hallucination-detection benchmark measures.
+        provided = self.ctx.metadata.get("provided_answer")
+        if provided is not None:
+            answer = str(provided)
+            backend = f"{backend} (provided)"
+        elif gen is None:
             answer = "I don't have enough context to answer."
         else:
             answer = gen.generate(system=prompt.get("system", ""), user=user)
@@ -48,4 +55,5 @@ class Step02GroundedGeneration(Step):
             "answer": answer,
             "evidence_count": len(evidence),
             "grounded": bool(evidence),
+            "provided": provided is not None,
         }

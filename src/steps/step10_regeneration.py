@@ -32,6 +32,28 @@ class Step10Regeneration(Step):
         pipeline = self.ctx.metadata.get("pipeline")
         gen = getattr(pipeline, "generator", None)
 
+        # A provided answer is being *judged*, not improved. Rewriting it
+        # here would mean the gate and the detector score a different answer
+        # than the one the benchmark supplied. The reduction action is still
+        # recorded so the HRR/CCR figures stay meaningful.
+        provided = self.ctx.metadata.get("provided_answer")
+        if provided is not None:
+            self.ctx.final_answer = self.ctx.answer
+            self.ctx.iterations = min(max_attempts, max(1, len(bad)))
+            self.ctx.decision_log.append({
+                "step": 10,
+                "mode": "provided_passthrough",
+                "unsupported_ratio": unsupported_ratio,
+                "decision": "KEEP",
+            })
+            self.ctx.metadata[f"step{self.number:02d}_{self.name}"] = {
+                "step": 10,
+                "mode": "provided_passthrough",
+                "unsupported_ratio": unsupported_ratio,
+                "decision": "KEEP",
+            }
+            return
+
         if mode == "stub" or not bad or gen is None:
             output_text = self.ctx.answer
             decision = "KEEP"
