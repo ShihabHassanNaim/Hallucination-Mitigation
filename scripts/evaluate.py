@@ -119,6 +119,15 @@ def _resolve_dataset_rows(args: argparse.Namespace) -> tuple[list[dict], str]:
     return rows, slug
 
 
+def _checkpoint(out_path: Path, slug: str, rows: list[dict]) -> None:
+    """Persist per-row results periodically so a killed run keeps its work."""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"dataset": slug, "n_queries": len(rows), "per_query": rows}
+    tmp = out_path.with_suffix(out_path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.replace(out_path)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", help="JSONL of {query, answer, evidence:[ids], label}")
@@ -218,6 +227,8 @@ def main() -> None:
                 file=sys.stderr,
                 flush=True,
             )
+            # Checkpoint so a killed run does not lose everything.
+            _checkpoint(Path(args.out), slug, per_query_metrics)
 
     # Aggregate.
     aggregate: dict[str, float] = {}

@@ -121,6 +121,14 @@ def _evaluate(pipe: Pipeline, rows: list[dict]) -> dict:
     }
 
 
+def _write_results(out_path: Path, results: dict[str, dict]) -> None:
+    """Write ablation results atomically so a kill never truncates the file."""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out_path.with_suffix(out_path.suffix + ".tmp")
+    tmp.write_text(json.dumps(results, indent=2), encoding="utf-8")
+    tmp.replace(out_path)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--data", required=True, help="JSONL of evaluation rows")
@@ -187,6 +195,8 @@ def main() -> None:
             f"({time.time() - t0:.0f}s)",
             flush=True,
         )
+        # Save after every ablation so a long run keeps completed results.
+        _write_results(Path(args.out), results)
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

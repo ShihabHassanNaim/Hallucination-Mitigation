@@ -402,6 +402,14 @@ def plot_latency_breakdown() -> None:
             continue
         step_times: dict[str, list[float]] = {}
         for r in rows:
+            # scripts/evaluate_full.py stores {"step_name": duration_ms}; the
+            # older scripts/evaluate.py stores a list of {"name","duration_ms"}.
+            # Accept both so the figure works whichever file it reads.
+            timings = r.get("step_times_ms")
+            if isinstance(timings, dict):
+                for name, ms in timings.items():
+                    step_times.setdefault(name, []).append(float(ms))
+                continue
             for t in r.get("step_traces", []) or []:
                 step_times.setdefault(t.get("name", "step"), []).append(
                     float(t.get("duration_ms", 0.0)))
@@ -409,7 +417,7 @@ def plot_latency_breakdown() -> None:
             traces_by_ds[slug] = step_times
 
     if not traces_by_ds:
-        print("  [skip] 7 latency_breakdown (no step_traces in metrics)")
+        print("  [skip] 7 latency_breakdown (no per-step timings in metrics)")
         return
 
     slug = next((s for s in PRIMARY if s in traces_by_ds), list(traces_by_ds)[0])
