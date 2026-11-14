@@ -26,6 +26,7 @@ from src.steps.step13_evaluation import (
     _precision_recall_f1, _accuracy, _roc_auc,
 )
 from src.utils.data_loader import load_jsonl, load_synthetic_qa
+from scripts.evaluate import _match_gold
 
 
 _DATASET_DEFAULTS: dict[str, dict[str, str]] = {
@@ -188,6 +189,20 @@ def _aggregate_from_rows(slug: str, per_query: list[dict], seed: int = 0) -> dic
     aggregate.update(
         _bootstrap_intervals(truth, scores, e2e, groups, hrr=hrr, ccr=ccr, vsr=vsr, seed=seed)
     )
+
+    # Retrieval and claim metrics, averaged over the same rows. These are
+    # absent from older checkpoint files, so they are only reported when the
+    # rows actually carry them.
+    for key in (
+        "retrieval_recall_at_5",
+        "retrieval_precision_at_5",
+        "retrieval_mrr",
+        "retrieval_ndcg",
+        "claim_precision",
+    ):
+        vals = [r[key] for r in per_query if key in r]
+        if vals:
+            aggregate[key] = statistics.fmean(vals)
     return aggregate
 
 
@@ -328,9 +343,11 @@ def main() -> None:
         if "label" in r and r["label"] in {0, 1, "0", "1"}:
             gt = int(r["label"])
         else:
-            gold = set(r.get("evidence") or [])
-            retrieved = set(e["doc_id"] for e in d["evidence"])
-            gt = 0 if gold and not (gold & retrieved) else 1
+            # Gold evidence is stored as passages while retrieved documents
+            # carry index ids, so the two must be matched on text.
+            gold_texts = [e for e in (r.get("evidence") or []) if e]
+            retrieved_texts = [e.get("text", "") for e in d["evidence"]]
+            gt = 0 if _match_gold(retrieved_texts, gold_texts) else 1
 
         # Detector score: predict hallucination from the answer the pipeline
         # ACTUALLY generated (d["answer"]). The ground-truth `right_answer` is
@@ -381,6 +398,22 @@ def main() -> None:
 
         # Per-query record — needed for the ROC curve, calibration plot,
         # and latency breakdown graphs.
+        #
+        # The retrieval and claim metrics are computed here too, so a single
+        # pipeline pass yields the whole catalogue and no separate BASE-metrics
+        # run over the same rows is needed. Gold evidence is stored as passages
+        # while retrieved documents carry index ids, so the two are matched on
+        # text (see scripts/evaluate.py::_match_gold).
+        from src.steps.step13_evaluation import (
+            _recall_at_k, _precision_at_k, _mrr, _ndcg,
+        )
+
+        gold_texts = [e for e in (r.get("evidence") or []) if e]
+        retrieved_texts = [e.get("text", "") for e in d.get("evidence", [])]
+        gold_hits = _match_gold(retrieved_texts, gold_texts)
+        gold_ids = list(range(len(gold_texts)))
+        n_supported = sum(c["verdict"] == "supported" for c in d.get("claims", []))
+
         per_query.append({
             "query": r.get("query") or r.get("question") or "",
             "label": gt,
@@ -395,6 +428,13 @@ def main() -> None:
             "hrr": 1.0 if (gt == 0 and d["decision"] in {"REGEN", "ABSTAIN"}) else 0.0,
             "ccr": (1.0 - (contras / max(1, len(d["claims"])))) if d["claims"] else 1.0,
             "vsr": 1.0 if contras == 0 else 0.0,
+            # Retrieval metrics against the gold passages.
+            "retrieval_recall_at_5": _recall_at_k(gold_hits, gold_ids, 5),
+            "retrieval_precision_at_5": _precision_at_k(gold_hits, gold_ids, 5),
+            "retrieval_mrr": _mrr(gold_hits, gold_ids),
+            "retrieval_ndcg": _ndcg(gold_hits, gold_ids),
+            # Claim-level metrics.
+            "claim_precision": n_supported / max(1, len(d.get("claims", []))),
             "step_times_ms": {
                 t.name: round(float(t.duration_ms), 3)
                 for t in (res.step_traces or [])
