@@ -19,6 +19,14 @@ from scripts.fill_comparison_table import (
     main as fill_main,
 )
 
+# The projected detection row as it appears in Paper/comparison_summary.tex.
+# Kept as a raw string so the trailing LaTeX row terminator ("\\") is
+# unambiguous.
+_TEX_DETECTION_ROW = (
+    r"\textbf{Ours (Step 9 fused score)} & 0.91--0.95 & 0.85--0.90 & "
+    r"0.55--0.70 & Black-box + retrieval \\"
+)
+
 
 def _metrics_file(tmp_path: Path, aggregate: dict, rows: list[dict] | None = None) -> Path:
     path = tmp_path / "metrics.json"
@@ -148,3 +156,79 @@ def test_plot_results_refuses_a_projected_cell():
 
     assert num("0.91-0.95 (projected)") is None
     assert num("0.789 [0.730, 0.840]") == pytest.approx(0.789)
+
+
+def test_fill_comparison_tex_replaces_the_projected_rows(tmp_path):
+    """The LaTeX summary carries the same estimates and must be regenerated."""
+    from scripts.fill_comparison_table import _fill_comparison_tex
+
+    tex = tmp_path / "comparison_summary.tex"
+    tex.write_text(
+        _TEX_DETECTION_ROW
+        + "\n"
+        + "\\caption{Headline performance vs.\\ state-of-the-art. Numbers are projected\n"
+        + "from the implemented pipeline's synthetic + HaluEval runs.}\n",
+        encoding="utf-8",
+    )
+
+    agg = {
+        "detection_roc_auc": 0.78,
+        "detection_aupr": 0.79,
+        "precision_at_recall_90": 0.63,
+    }
+    changes = _fill_comparison_tex(tex, agg)
+    assert changes, "expected the projected rows to be replaced"
+
+    out = tex.read_text(encoding="utf-8")
+    assert "0.91--0.95" not in out
+    assert "0.780" in out
+    assert "projected" not in out
+
+
+def test_fill_comparison_tex_leaves_rows_alone_when_a_metric_is_missing(tmp_path):
+    """A missing metric must not be substituted with a guess."""
+    from scripts.fill_comparison_table import _fill_comparison_tex
+
+    tex = tmp_path / "comparison_summary.tex"
+    original = _TEX_DETECTION_ROW + "\n"
+    tex.write_text(original, encoding="utf-8")
+
+    # Only ROC-AUC is measured; AUPR and P@R=90 are not.
+    changes = _fill_comparison_tex(tex, {"detection_roc_auc": 0.78})
+    assert changes == []
+    assert tex.read_text(encoding="utf-8") == original
+
+
+def test_fill_comparison_tex_dry_run_does_not_write(tmp_path):
+    from scripts.fill_comparison_table import _fill_comparison_tex
+
+    tex = tmp_path / "comparison_summary.tex"
+    original = _TEX_DETECTION_ROW + "\n"
+    tex.write_text(original, encoding="utf-8")
+
+    _fill_comparison_tex(
+        tex,
+        {
+            "detection_roc_auc": 0.78,
+            "detection_aupr": 0.79,
+            "precision_at_recall_90": 0.63,
+        },
+        dry_run=True,
+    )
+    assert tex.read_text(encoding="utf-8") == original
+
+
+def test_fill_comparison_md_leaves_rows_alone_when_a_metric_is_missing(tmp_path):
+    from scripts.fill_comparison_table import _fill_comparison_md
+
+    md = tmp_path / "comparison.md"
+    original = (
+        "| **Ours (RAG fused score, Step 9)** | **0.91–0.95** "
+        "(projected from synthetic) | **0.85–0.90** | **0.55–0.70** | "
+        "Black-box + retrieval | HaluEval QA |\n"
+    )
+    md.write_text(original, encoding="utf-8")
+
+    changes = _fill_comparison_md(md, {"detection_roc_auc": 0.78})
+    assert changes == []
+    assert md.read_text(encoding="utf-8") == original

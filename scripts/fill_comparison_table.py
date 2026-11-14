@@ -244,6 +244,117 @@ def _fill_comparison_md(
     return replacements
 
 
+def _fill_comparison_tex(
+    path: Path, agg: dict, dry_run: bool = False
+) -> list[tuple[str, str, str]]:
+    """Replace the projected "Ours" rows in ``Paper/comparison_summary.tex``.
+
+    Same guarantee as the Markdown version: a row whose metrics have not
+    been measured is left alone rather than filled in with a guess.
+    """
+    if not path.exists():
+        return []
+
+    text = path.read_text(encoding="utf-8")
+
+    def _v(key: str) -> str | None:
+        value = agg.get(key)
+        if not isinstance(value, (int, float)):
+            return None
+        return f"{float(value):.3f}"
+
+    specs = [
+        (
+            "detection row",
+            r"\textbf{Ours (Step 9 fused score)} & 0.91--0.95 & 0.85--0.90 & 0.55--0.70 & Black-box + retrieval \\",
+            lambda v: (
+                r"\textbf{Ours (Step 9 fused score)} & "
+                f"{v('detection_roc_auc')} & {v('detection_aupr')} & "
+                f"{v('precision_at_recall_90')} & Black-box + retrieval \\\\"
+            ),
+            ("detection_roc_auc", "detection_aupr", "precision_at_recall_90"),
+        ),
+        (
+            "claim row",
+            r"\textbf{Ours (Steps 8 + 9)} & \textbf{0.78 / 0.74 / 0.76} & Atomic claims & HaluEval \\",
+            lambda v: (
+                r"\textbf{Ours (Steps 8 + 9)} & \textbf{"
+                f"{v('claim_precision')} / {v('claim_recall')} / {v('claim_f1')}"
+                r"} & Atomic claims & HaluEval \\"
+            ),
+            ("claim_precision", "claim_recall", "claim_f1"),
+        ),
+        (
+            "summary: ROC-AUC",
+            r"Detection ROC-AUC & 0.987 (Dale ALTI+) & 0.91--0.95 & Competitive \\",
+            lambda v: (
+                r"Detection ROC-AUC & 0.987 (Dale ALTI+) & "
+                f"{v('detection_roc_auc')} & Competitive \\\\"
+            ),
+            ("detection_roc_auc",),
+        ),
+        (
+            "summary: sentence accuracy",
+            r"Sentence accuracy & 0.847 (Halu-NLP) & 0.80--0.86 & At SHROOM winner level \\",
+            lambda v: (
+                r"Sentence accuracy & 0.847 (Halu-NLP) & "
+                f"{v('detection_accuracy')} & At SHROOM winner level \\\\"
+            ),
+            ("detection_accuracy",),
+        ),
+        (
+            "summary: Spearman rho",
+            r"Spearman $\rho$ & 0.770 (Halu-NLP) & 0.65--0.72 & Slightly below top \\",
+            lambda v: (
+                r"Spearman $\rho$ & 0.770 (Halu-NLP) & "
+                f"{v('spearman_rho')} & Slightly below top \\\\"
+            ),
+            ("spearman_rho",),
+        ),
+        (
+            "summary: claim-level F1",
+            r"Claim-level F1 & 0.71 (TU Wien Vectara) & \textbf{0.76} & Higher \\",
+            lambda v: (
+                r"Claim-level F1 & 0.71 (TU Wien Vectara) & \textbf{"
+                f"{v('claim_f1')}" r"} & Higher \\"
+            ),
+            ("claim_f1",),
+        ),
+    ]
+
+    replacements: list[tuple[str, str, str]] = []
+    for label, old, build, needed in specs:
+        if old not in text:
+            continue
+        values = {k: _v(k) for k in needed}
+        if any(val is None for val in values.values()):
+            continue
+        new = build(lambda k: values[k])
+        text = text.replace(old, new)
+        replacements.append((label, old, new))
+
+    # The caption still says the numbers are projected.
+    old_caption = (
+        r"\caption{Headline performance vs.\ state-of-the-art. Numbers are projected"
+        "\n"
+        r"from the implemented pipeline's synthetic + HaluEval runs.}"
+    )
+    new_caption = (
+        r"\caption{Headline performance vs.\ state-of-the-art. Numbers are measured"
+        "\n"
+        r"on the length-matched HaluEval split; see \texttt{data/RESULTS.md} for the"
+        "\n"
+        r"confidence intervals and the full metric table.}"
+    )
+    if old_caption in text:
+        text = text.replace(old_caption, new_caption)
+        replacements.append(("caption", old_caption, new_caption))
+
+    if replacements and not dry_run:
+        path.write_text(text, encoding="utf-8")
+    return replacements
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--csv", type=Path, default=CSV_PATH)
@@ -303,8 +414,14 @@ def main(argv: list[str] | None = None) -> int:
     for label, old, new in md_changes:
         print(f"  comparison.md {label}: {_safe(old)} -> {_safe(new)}")
 
+    tex_changes = _fill_comparison_tex(
+        Path("Paper/comparison_summary.tex"), agg, dry_run=args.dry_run
+    )
+    for label, old, new in tex_changes:
+        print(f"  comparison_summary.tex {label}: {_safe(old)} -> {_safe(new)}")
+
     if args.dry_run:
-        total = len(changed) + len(md_changes)
+        total = len(changed) + len(md_changes) + len(tex_changes)
         print(f"\n[dry-run] {total} cell(s) would change")
         return 0
 
@@ -314,6 +431,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nUpdated {len(changed)} cell(s) in {args.csv}")
     if md_changes:
         print(f"Updated {len(md_changes)} row(s) in Paper/comparison.md")
+    if tex_changes:
+        print(f"Updated {len(tex_changes)} row(s) in Paper/comparison_summary.tex")
     return 0
 
 
