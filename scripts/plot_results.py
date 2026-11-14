@@ -216,7 +216,13 @@ def plot_literature_comparison() -> None:
         others = [x for x in others if x is not None and x <= 1.5]
         if not others:
             continue
-        labels.append(metric)
+        # A cell holding a pair ("0.41 / 0.66") is compared on its first
+        # number. Say so in the label, otherwise the bar looks like it is
+        # the whole metric.
+        label = metric
+        if "/" in str(r[ours_idx]):
+            label = f"{metric} (precision)"
+        labels.append(label)
         ours_vals.append(o)
         best_vals.append(max(others))
 
