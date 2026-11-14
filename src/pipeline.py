@@ -148,9 +148,26 @@ class Pipeline:
         ctx.metadata["pipeline"] = self
         traces: list[StepTrace] = []
 
-        for cls in step_registry():
+        registry = step_registry()
+        # Steps re-run on each regeneration attempt: a regenerated answer must
+        # be re-verified before the gate is allowed to pass it.
+        reverify = {
+            "early_detection",
+            "claim_extraction",
+            "nli_verification",
+            "confidence_assessment",
+            "confidence_fusion",
+            "regeneration",
+            "final_gate",
+        }
+        max_attempts = int((self.cfg.step(11) or {}).get("max_regen_attempts", 2))
+
+        attempt = 0
+        index = 0
+        while index < len(registry):
+            cls = registry[index]
             step = cls(ctx)
-            log.info("Running step %02d %s", step.number, step.name)
+            log.info("Running step %02d %s (attempt %d)", step.number, step.name, attempt)
             started = time.time()
             try:
                 step.run()
@@ -164,6 +181,18 @@ class Pipeline:
             key = f"step{step.number:02d}_{step.name}"
             payload = ctx.metadata.pop(key, {})
             traces.append(step.trace(payload, duration_ms))
+
+            # The gate asked for a regeneration: re-run the verification
+            # chain so the revised answer is re-checked before gating again.
+            if step.name == "final_gate" and ctx.decision == "REGEN" and attempt < max_attempts:
+                attempt += 1
+                ctx.metadata["regeneration_attempt"] = attempt
+                index = 0
+                while index < len(registry) and registry[index].name not in reverify:
+                    index += 1
+                continue
+
+            index += 1
 
         return PipelineResult(
             query=ctx.query,
