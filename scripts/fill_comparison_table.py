@@ -125,6 +125,125 @@ def build_replacements(agg: dict) -> dict[str, str]:
     return out
 
 
+def _safe(text: str) -> str:
+    """Render a string for the console, replacing non-cp1252 characters.
+
+    The Windows console uses cp1252, which cannot encode characters like the
+    Greek rho used in the paper's tables.
+    """
+    return text.encode("ascii", errors="replace").decode("ascii")
+
+
+def _fill_comparison_md(
+    path: Path, agg: dict, dry_run: bool = False
+) -> list[tuple[str, str, str]]:
+    """Replace the projected "Ours" rows in ``Paper/comparison.md``.
+
+    The prose table and the summary table below it both carried the same
+    hand-written estimates as the CSV. Each replacement is anchored on the
+    row's own text, so an unrelated number is never touched.
+    """
+    if not path.exists():
+        return []
+
+    text = path.read_text(encoding="utf-8")
+
+    def _v(key: str) -> str | None:
+        """Formatted value, or None when the metric was not measured."""
+        value = agg.get(key)
+        if not isinstance(value, (int, float)):
+            return None
+        return f"{float(value):.3f}"
+
+    replacements: list[tuple[str, str, str]] = []
+
+    # Each substitution is described by the metrics it needs. A row whose
+    # metrics have not been measured is left alone rather than filled in
+    # with a guess.
+    row_specs = [
+        (
+            "3.1 detection row",
+            (
+                "| **Ours (RAG fused score, Step 9)** | **0.91–0.95** "
+                "(projected from synthetic) | **0.85–0.90** | **0.55–0.70** | "
+                "Black-box + retrieval | HaluEval QA |"
+            ),
+            lambda v: (
+                f"| **Ours (RAG fused score, Step 9)** | "
+                f"**{v('detection_roc_auc')}** | **{v('detection_aupr')}** | "
+                f"**{v('precision_at_recall_90')}** | "
+                "Black-box + retrieval | HaluEval QA (length-matched) |"
+            ),
+            ("detection_roc_auc", "detection_aupr", "precision_at_recall_90"),
+        ),
+        (
+            "3.2 claim row",
+            (
+                "| **Ours (Step 8 + Step 9)** | **0.78 / 0.74 / 0.76** "
+                "(per-claim NLI) | Atomic claims | HaluEval |"
+            ),
+            lambda v: (
+                f"| **Ours (Step 8 + Step 9)** | **{v('claim_precision')} / "
+                f"{v('claim_recall')} / {v('claim_f1')}** (per-claim NLI) | "
+                "Atomic claims | HaluEval |"
+            ),
+            ("claim_precision", "claim_recall", "claim_f1"),
+        ),
+        (
+            "summary: ROC-AUC",
+            "| **Detection ROC-AUC** | 0.987 (Dale 2023 ALTI+) | **0.91–0.95** |",
+            lambda v: (
+                f"| **Detection ROC-AUC** | 0.987 (Dale 2023 ALTI+) | "
+                f"**{v('detection_roc_auc')}** |"
+            ),
+            ("detection_roc_auc",),
+        ),
+        (
+            "summary: sentence accuracy",
+            "| **Sentence accuracy** | 0.847 (Halu-NLP, SHROOM) | **0.80–0.86** |",
+            lambda v: (
+                f"| **Sentence accuracy** | 0.847 (Halu-NLP, SHROOM) | "
+                f"**{v('detection_accuracy')}** |"
+            ),
+            ("detection_accuracy",),
+        ),
+        (
+            "summary: Spearman rho",
+            "| **Spearman ρ** | 0.770 (Halu-NLP) | **0.65–0.72** |",
+            lambda v: (
+                f"| **Spearman ρ** | 0.770 (Halu-NLP) | "
+                f"**{v('spearman_rho')}** |"
+            ),
+            ("spearman_rho",),
+        ),
+        (
+            "summary: claim-level F1",
+            "| **Claim-level F1** | 0.71 (TU Wien Vectara) | **0.76** |",
+            lambda v: (
+                f"| **Claim-level F1** | 0.71 (TU Wien Vectara) | "
+                f"**{v('claim_f1')}** |"
+            ),
+            ("claim_f1",),
+        ),
+    ]
+
+    for label, old, build, needed in row_specs:
+        if old not in text:
+            continue
+        values = {k: _v(k) for k in needed}
+        if any(val is None for val in values.values()):
+            # The metric was not measured — leave the row untouched rather
+            # than substituting a number that does not exist.
+            continue
+        new = build(lambda k: values[k])
+        text = text.replace(old, new)
+        replacements.append((label, old, new))
+
+    if replacements and not dry_run:
+        path.write_text(text, encoding="utf-8")
+    return replacements
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--csv", type=Path, default=CSV_PATH)
@@ -179,13 +298,22 @@ def main(argv: list[str] | None = None) -> int:
     for label, old, new in changed:
         print(f"  {label}: {old!r} -> {new!r}")
 
+    # The prose version of the same comparison carries the same estimates.
+    md_changes = _fill_comparison_md(Path("Paper/comparison.md"), agg, dry_run=args.dry_run)
+    for label, old, new in md_changes:
+        print(f"  comparison.md {label}: {_safe(old)} -> {_safe(new)}")
+
     if args.dry_run:
-        print(f"\n[dry-run] {len(changed)} cell(s) would change in {args.csv}")
+        total = len(changed) + len(md_changes)
+        print(f"\n[dry-run] {total} cell(s) would change")
         return 0
 
-    with args.csv.open("w", encoding="utf-8", newline="") as f:
-        csv.writer(f).writerows(rows)
-    print(f"\nUpdated {len(changed)} cell(s) in {args.csv}")
+    if changed:
+        with args.csv.open("w", encoding="utf-8", newline="") as f:
+            csv.writer(f).writerows(rows)
+        print(f"\nUpdated {len(changed)} cell(s) in {args.csv}")
+    if md_changes:
+        print(f"Updated {len(md_changes)} row(s) in Paper/comparison.md")
     return 0
 
 
