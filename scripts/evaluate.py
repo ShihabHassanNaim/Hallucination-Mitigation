@@ -19,6 +19,46 @@ from src.pipeline import Pipeline
 from src.utils.data_loader import load_jsonl, load_synthetic_qa
 
 
+def _match_gold(retrieved_texts: list[str], gold_texts: list[str]) -> list[int]:
+    """Map retrieved documents onto gold-evidence indices.
+
+    The datasets store gold evidence as passages, while the retriever returns
+    chunked documents whose text may be a prefix of the gold passage (the
+    index chunks longer documents). A retrieved chunk counts as gold when it
+    is a prefix of, or contained in, the gold passage, or when the two share
+    a long enough common prefix. The overlap threshold keeps unrelated
+    documents from matching by accident.
+    """
+    hits: list[int] = []
+    for rtext in retrieved_texts:
+        norm = " ".join((rtext or "").split()).lower()
+        if not norm:
+            continue
+        for gi, gtext in enumerate(gold_texts):
+            gnorm = " ".join((gtext or "").split()).lower()
+            if not gnorm:
+                continue
+            if norm in gnorm or gnorm in norm:
+                hits.append(gi)
+                break
+            # The chunk may be a prefix of the gold passage. Require the
+            # common prefix to cover most of the shorter text, so that
+            # unrelated documents sharing only a boilerplate opening do not
+            # count as a match.
+            shorter, longer = (norm, gnorm) if len(norm) <= len(gnorm) else (gnorm, norm)
+            if len(shorter) < 80:
+                continue
+            common = 0
+            for a, b in zip(shorter, longer):
+                if a != b:
+                    break
+                common += 1
+            if common >= 0.9 * len(shorter) and common >= 80:
+                hits.append(gi)
+                break
+    return hits
+
+
 _METRIC_NUMERIC_KEYS = [
     "claim_precision", "claim_recall", "claim_f1",
     "retrieval_recall_at_5", "retrieval_precision_at_5",
@@ -141,12 +181,18 @@ def main() -> None:
         try:
             res = pipe.run(r["query"])
             d = res.to_dict()
-            # If gold evidence provided, compute retrieval metrics against it.
-            gold = [e for e in (r.get("evidence") or []) if e]
-            retrieved = [e["doc_id"] for e in d["evidence"]]
+            # Gold evidence in the datasets is stored as evidence *text*, while
+            # the index identifies documents by id (e.g. "doc-586"). Comparing
+            # the two directly can never match, so match on text: a retrieved
+            # document counts as gold when its text matches a gold passage.
+            gold_texts = [e for e in (r.get("evidence") or []) if e]
+            retrieved_texts = [e.get("text", "") for e in d["evidence"]]
             from src.steps.step13_evaluation import (
                 _recall_at_k, _precision_at_k, _mrr, _ndcg,
             )
+            gold_hits = _match_gold(retrieved_texts, gold_texts)
+            retrieved = gold_hits
+            gold = list(range(len(gold_texts)))
             per_query_metrics.append({
                 "query": r["query"],
                 "decision": d["decision"],

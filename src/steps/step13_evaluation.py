@@ -150,19 +150,35 @@ class Step13Evaluation(Step):
         verdict_dist = Counter(c.verdict for c in claims)
         retrieval_ids = [e.doc_id for e in evidence]
 
-        row_metrics = {
+        # Gold evidence ids, when the caller supplied a dataset row. Without
+        # them the retrieval metrics are undefined: scoring the retrieved ids
+        # against themselves would always return 1.0 and look like a perfect
+        # retriever. Report null instead.
+        gold_ids: list[str] = list(self.ctx.metadata.get("gold_evidence_ids") or [])
+        if gold_ids:
+            row_metrics = {
+                "retrieval_recall_at_5": _recall_at_k(retrieval_ids, gold_ids, 5),
+                "retrieval_precision_at_5": _precision_at_k(retrieval_ids, gold_ids, 5),
+                "retrieval_mrr": _mrr(retrieval_ids, gold_ids),
+                "retrieval_ndcg": _ndcg(retrieval_ids, gold_ids),
+            }
+        else:
+            row_metrics = {
+                "retrieval_recall_at_5": None,
+                "retrieval_precision_at_5": None,
+                "retrieval_mrr": None,
+                "retrieval_ndcg": None,
+            }
+
+        row_metrics.update({
             "claim_precision": _safe_div(verdict_dist.get("supported", 0), max(1, len(claims))),
             "claim_recall": _safe_div(verdict_dist.get("supported", 0), max(1, len(claims))),
             "claim_f1": _safe_div(verdict_dist.get("supported", 0), max(1, len(claims))),
-            "retrieval_recall_at_5": _recall_at_k(retrieval_ids, [e.doc_id for e in self.ctx.evidence], 5),
-            "retrieval_precision_at_5": _precision_at_k(retrieval_ids, [e.doc_id for e in self.ctx.evidence], 5),
-            "retrieval_mrr": _mrr(retrieval_ids, [e.doc_id for e in self.ctx.evidence]),
-            "retrieval_ndcg": _ndcg(retrieval_ids, [e.doc_id for e in self.ctx.evidence]),
             "verification_success_rate": 1.0 if not claims or verdict_dist.get("contradicted", 0) == 0 else 0.0,
             "end_to_end_accuracy": 1.0 if self.ctx.decision == "PASS" else 0.0,
             "confidence": self.ctx.confidence,
             "decision": self.ctx.decision,
-        }
+        })
 
         # Append row metrics to a session-level log under data/metrics.json
         # so scripts/evaluate.py can aggregate.
