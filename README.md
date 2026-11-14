@@ -15,32 +15,18 @@
 
 ## Architecture (one-to-one with the diagram)
 
+The boxes carry the step numbers used in `architecture.md` and in the
+per-step traces. The **execution order** differs, because retrieval must
+precede generation for the generation to be grounded:
+
+`1 → 6 → 7 → 2 → 3 → 5 → 8 → 4 → 9 → 10 → 11 → 12 → 13`
+
 ```
                               User Question
                                     |
                                     v
   +------------------------------+
   | 1. Query Understanding       |   GLiNER + spaCy + Llama 3.1
-  +-------------+----------------+
-                |
-                v
-  +------------------------------+
-  | 2. Grounded Generation       |   Llama 3.1 / Qwen 3
-  +-------------+----------------+
-                |
-                v
-  +------------------------------+
-  | 3. Early Detection           |   BGE-M3 cosine + XGBoost
-  +-------------+----------------+
-                |
-                v
-  +------------------------------+
-  | 4. Confidence Assessment     |   EEDC + temperature scaling
-  +-------------+----------------+
-                |
-                v
-  +------------------------------+
-  | 5. Atomic Claim Extraction  |   rule-based + LLM splitter
   +-------------+----------------+
                 |
                 v
@@ -55,7 +41,27 @@
                 |
                 v
   +------------------------------+
+  | 2. Grounded Generation       |   Llama 3.1 / Qwen 3  (gets real context)
+  +-------------+----------------+
+                |
+                v
+  +------------------------------+
+  | 3. Early Detection           |   BGE-M3 cosine + XGBoost
+  +-------------+----------------+
+                |
+                v
+  +------------------------------+
+  | 5. Atomic Claim Extraction  |   rule-based + LLM splitter
+  +-------------+----------------+
+                |
+                v
+  +------------------------------+
   | 8. NLI Verification          |   DeBERTa-v3-MNLI
+  +-------------+----------------+
+                |
+                v
+  +------------------------------+
+  | 4. Confidence Assessment     |   EEDC + temperature scaling
   +-------------+----------------+
                 |
                 v
@@ -85,6 +91,10 @@
 ```
 
 Every step is one Python module under `src/steps/step0N_<name>.py`.
+
+A `REGEN` verdict from step 11 re-runs the verification chain (steps 3, 5,
+8, 4, 9, 10, 11) so the revised answer is re-verified before the gate is
+allowed to pass it, bounded by `max_regen_attempts`.
 
 ---
 
