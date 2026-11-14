@@ -532,14 +532,14 @@ The `Paper/` directory ships 13 PDFs, a curated `comparison_table.csv`, a `why_w
 1. ~~**(P0)** Reorder the 13 steps so retrieval (Step 6) runs **before** generation (Step 2).~~ **DONE.** `step_registry()` in `src/steps/__init__.py` now executes `1 → 6 → 7 → 2 → 3 → 5 → 8 → 4 → 9 → 10 → 11 → 12 → 13`. Step numbers are unchanged for diagram/trace traceability; only the execution order moved. The benchmark numbers in §11 still need re-measuring on the fixed pipeline.
 2. ~~**(P0)** Implement the regeneration loop.~~ **DONE.** `Pipeline.run()` in `src/pipeline.py` re-runs the verification chain when step 11 emits `REGEN`, bounded by `max_regen_attempts`.
 3. **(P1)** Decouple `eedc` and `cosine` in Step 9 fusion. Either drop the EEDC term or use the genuine EEDC (which needs self-consistency sampling to be meaningful). *Partly addressed:* EEDC now runs after NLI so `nli_entropy` is a real entropy rather than the `1 − cosine` fallback, but `self_consistency` is still a cosine proxy.
-4. **(P1)** Wire `step13_eval.metrics` from `configs/default.yaml` to actually gate the per-row output. Currently the YAML list is decorative.
+4. ~~**(P1)** Wire `step13_eval.metrics` from `configs/default.yaml` to actually gate the per-row output.~~ **DONE.** The list now gates the emitted row, with aliases mapping the literature-style config names onto the emitted keys; metrics with no per-row equivalent are reported as unavailable rather than silently dropped.
 5. ~~**(P2)** Add a real, labelled training set for `XGBClassifier`.~~ **DONE.** `data/detector_train.jsonl` holds 794 real labelled rows mined from HaluEval/TruthfulQA, with a length-confound control.
 6. ~~**(P2)** Use the rewritten query (Step 1) in Steps 2, 6, 7.~~ **DONE.** All three already consume `ctx.metadata["rewritten_query"]`.
-7. **(P2)** Delete `_pipeline_lifespan` in `api/app.py:121` (dead code) and the duplicate `models_status` in `frontend/app.py:453`.
+7. ~~**(P2)** Delete `_pipeline_lifespan` in `api/app.py:121` (dead code) and the duplicate `models_status` in `frontend/app.py:453`.~~ **DONE.** `_pipeline_lifespan` removed — `_make_lifespan(index_dir)` is the handler actually in use. The alleged duplicate `models_status` did **not** exist; `frontend/app.py` defines a single `/models/status` route, so the original audit was mistaken on that half.
 8. **(P2)** Add a single integration test that exercises the **real** HaluEval rows (against an in-memory index) to lock the regression.
 9. **(P3)** Add CORS, request size limits, and an atomic file write helper for `data/metrics.json`.
 10. **(P3)** Add HTML output to Step 12 (the README already claims it).
-11. **(P3)** Tighten doc/code consistency around OpenRouter defaults and step ordering.
+11. **(P3)** Tighten doc/code consistency around OpenRouter defaults and step ordering. *Partly done:* the README and `architecture.md` now show the corrected execution order.
 
 ---
 
@@ -587,11 +587,22 @@ documents sharing a boilerplate opening do not match. Step 13 now reports
   (`detector: 0.15`).
 - Step 3's `claim_count` feature was always 1 because claims were extracted
   later; with the reorder it sees real counts, matching the training data.
+- Step 4's EEDC `nli_entropy` always fell back to `1 − cosine` because it
+  ran before NLI; it now consumes real verdict entropy.
+- `step13_eval.metrics` in the config was decorative — step 13 emitted a
+  fixed key set regardless. It now gates the output.
 - The ROC plot in `scripts/plot_results.py` scored against `confidence`
   (a trust value) while the label marks the answer as hallucinated, which
   inverted the curve. It now uses `detector_score`.
 
-### 17.4 Reproducibility and statistical reporting
+### 17.4 Two claims in the original audit that did not hold
+
+- The duplicate `models_status` in `frontend/app.py:453` does not exist.
+  There is a single `/models/status` route. The dead `_pipeline_lifespan`
+  in `api/app.py` was real and has been removed.
+- `step13_eval.metrics` "is decorative" was correct, and has been fixed.
+
+### 17.5 Reproducibility and statistical reporting
 
 - The venv shipped CPU-only torch, so every logged run was CPU-bound.
   `torch==2.13.0+cu126` is now installed: ~4.0 s/query without retrieval,
