@@ -250,10 +250,39 @@ python -m scripts.build_length_matched_split
 bash scripts/run_all_evals.sh
 ```
 
-Every evaluation script checkpoints as it goes. If a run is interrupted,
-`python -m scripts.evaluate_full --recompute --out <file>` rebuilds the
-aggregate — metrics and all nine confidence intervals — from the rows
-already on disk.
+Every evaluation script checkpoints as it goes. If a run is interrupted:
+
+```bash
+# Rebuild the aggregate — metrics and all confidence intervals — from the
+# rows already on disk. No pipeline re-run.
+python -m scripts.evaluate_full --recompute --out <file>
+
+# Continue the run: reuse the rows already finished and evaluate the rest.
+python -m scripts.evaluate_full --resume --out <file> ...
+```
+
+`--resume` refuses to reuse a checkpoint written by an older version of the
+code — those rows lack fields the current code produces, and mixing them
+would silently produce a metrics file whose rows are not comparable. In
+that case the run starts from scratch and says so.
+
+Rows that fail during evaluation are counted and reported in the log
+rather than dropped silently, and the count is written to the output file
+as `n_failed`.
+
+#### Keeping the comparison table honest
+
+`Paper/comparison_table.csv` compares the pipeline against published
+systems. The "Ours" column is generated from the evaluation output, never
+written by hand:
+
+```bash
+python -m scripts.fill_comparison_table           # rewrite the cells
+python -m scripts.fill_comparison_table --dry-run # show what would change
+```
+
+The plotting script refuses to read any cell marked "projected", so an
+estimate can never be drawn on a chart as though it were a measurement.
 
 Once both `data/metrics_halueval.json` and `data/metrics_truthfulqa.json`
 exist, the Flask demo page (`/`) shows a dataset-pill selector on the
