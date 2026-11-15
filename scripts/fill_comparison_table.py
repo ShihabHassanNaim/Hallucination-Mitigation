@@ -1555,6 +1555,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--metrics", type=Path, default=METRICS_PATH)
     parser.add_argument("--mitigation", type=Path, default=MITIGATION_PATH)
     parser.add_argument(
+        "--paper-dir",
+        type=Path,
+        default=Path("Paper"),
+        help=(
+            "directory holding the prose files. These paths used to be "
+            "hard-coded, so a test that passed a temporary metrics file "
+            "wrote that file's numbers into the real paper — which is how "
+            "a superseded ROC-AUC kept reappearing. Pointing this at a "
+            "temporary directory keeps a test off the real files."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="print the proposed changes without writing the file",
@@ -1612,30 +1624,32 @@ def main(argv: list[str] | None = None) -> int:
     # It is refreshed even when the CSV is already current: an earlier
     # version returned early in that case, which left the prose tables
     # frozen at whatever number they happened to hold.
-    md_changes = _fill_comparison_md(Path("Paper/comparison.md"), agg, dry_run=args.dry_run)
+    md_changes = _fill_comparison_md(
+        args.paper_dir / "comparison.md", agg, dry_run=args.dry_run
+    )
     for label, old, new in md_changes:
         print(f"  comparison.md {label}: {_safe(old)} -> {_safe(new)}")
 
     tex_changes = _fill_comparison_tex(
-        Path("Paper/comparison_summary.tex"), agg, dry_run=args.dry_run
+        args.paper_dir / "comparison_summary.tex", agg, dry_run=args.dry_run
     )
     for label, old, new in tex_changes:
         print(f"  comparison_summary.tex {label}: {_safe(old)} -> {_safe(new)}")
 
     ww_md_changes = _fill_why_we_win_md(
-        Path("Paper/why_we_win.md"), agg, dry_run=args.dry_run
+        args.paper_dir / "why_we_win.md", agg, dry_run=args.dry_run
     )
     for label, old, new in ww_md_changes:
         print(f"  why_we_win.md {label}: {_safe(old)} -> {_safe(new)}")
 
     ww_tex_changes = _fill_why_we_win_tex(
-        Path("Paper/why_we_win_summary.tex"), agg, dry_run=args.dry_run
+        args.paper_dir / "why_we_win_summary.tex", agg, dry_run=args.dry_run
     )
     for label, old, new in ww_tex_changes:
         print(f"  why_we_win_summary.tex {label}: {_safe(old)} -> {_safe(new)}")
 
     fp_changes = _fill_five_position_md(
-        Path("Paper/five_position_comparison.md"), agg, dry_run=args.dry_run
+        args.paper_dir / "five_position_comparison.md", agg, dry_run=args.dry_run
     )
     for label, old, new in fp_changes:
         print(f"  five_position_comparison.md {label}: {_safe(old)} -> {_safe(new)}")

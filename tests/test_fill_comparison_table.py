@@ -39,6 +39,20 @@ def _metrics_file(tmp_path: Path, aggregate: dict, rows: list[dict] | None = Non
     return path
 
 
+def _paper_dir(tmp_path: Path) -> Path:
+    """An empty stand-in for ``Paper/``.
+
+    ``main()`` refreshes the prose files alongside the CSV. Those paths
+    used to be hard-coded, so a test that passed a temporary metrics file
+    wrote that file's numbers into the *real* paper — which is how a
+    superseded ROC-AUC kept reappearing in the working tree. Every test
+    that calls ``main()`` now points the prose at a temporary directory.
+    """
+    paper = tmp_path / "paper"
+    paper.mkdir(exist_ok=True)
+    return paper
+
+
 def test_build_replacements_uses_the_measured_values():
     agg = {
         "detection_roc_auc": 0.789,
@@ -99,6 +113,7 @@ def test_fill_rewrites_the_projected_cells(tmp_path, monkeypatch):
     rc = fill_main([
         "--csv", str(csv_path),
         "--metrics", str(metrics),
+        "--paper-dir", str(_paper_dir(tmp_path)),
     ])
     assert rc == 0
 
@@ -108,6 +123,67 @@ def test_fill_rewrites_the_projected_cells(tmp_path, monkeypatch):
     assert ours["AUPR"] == "0.800"
     # No cell may still claim to be a projection.
     assert not any("projected" in v.lower() for v in ours.values())
+
+
+def test_fill_cannot_write_to_the_real_paper(tmp_path):
+    """A run with temporary metrics must not touch the real paper.
+
+    The prose paths used to be hard-coded, so any test that called
+    ``main()`` with a temporary metrics file wrote *that file's* numbers
+    into ``Paper/``. In practice that meant a test fixture's ROC-AUC of
+    0.789 silently overwrote the measured 0.843 in the working tree, and
+    the paper reverted every time the suite ran.
+
+    This test pins the guarantee: the prose files are written relative to
+    ``--paper-dir``, so pointing it at a temporary directory keeps every
+    write inside that directory.
+    """
+    csv_path = tmp_path / "comparison_table.csv"
+    csv_path.write_text(
+        "Category,Metric,Ours (Hallucination-Mitigation),Other\n"
+        "Detection,ROC-AUC,\"0.91-0.95 (projected)\",0.987\n",
+        encoding="utf-8",
+    )
+    paper = _paper_dir(tmp_path)
+    # The fill functions only rewrite a file that already exists, so the
+    # temporary paper directory needs a copy of the row under test.
+    (paper / "why_we_win.md").write_text(
+        "| 7 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | "
+        "0.987 (MT-only) | **0.843** | ≈ | below |\n",
+        encoding="utf-8",
+    )
+
+    metrics = _metrics_file(tmp_path, {
+        "detection_roc_auc": 0.111,
+        "detection_roc_auc_ci95": [0.10, 0.12],
+    })
+
+    rc = fill_main([
+        "--csv", str(csv_path),
+        "--metrics", str(metrics),
+        "--paper-dir", str(paper),
+    ])
+    assert rc == 0
+
+    # The temporary copy was refreshed with the fixture's number.
+    assert "0.111" in (paper / "why_we_win.md").read_text(encoding="utf-8")
+
+    # Every file the run wrote lives under the temporary paper directory.
+    written = {p.resolve() for p in paper.rglob("*") if p.is_file()}
+    assert written, "the run wrote nothing into the temporary paper dir"
+    for path in written:
+        assert paper.resolve() in path.parents, (
+            f"{path} was written outside the temporary paper directory"
+        )
+
+    # And the real paper still holds the measured value.
+    real = Path("Paper/why_we_win.md")
+    if real.exists():
+        text = real.read_text(encoding="utf-8")
+        assert "0.111" not in text, (
+            "the fixture's ROC-AUC reached the real paper; the prose paths "
+            "are still hard-coded somewhere"
+        )
 
 
 def test_fill_dry_run_leaves_the_file_untouched(tmp_path, monkeypatch):
@@ -122,6 +198,7 @@ def test_fill_dry_run_leaves_the_file_untouched(tmp_path, monkeypatch):
     rc = fill_main([
         "--csv", str(csv_path),
         "--metrics", str(metrics),
+        "--paper-dir", str(_paper_dir(tmp_path)),
         "--dry-run",
     ])
     assert rc == 0
@@ -137,6 +214,7 @@ def test_fill_reports_an_error_when_there_are_no_metrics(tmp_path, capsys):
     rc = fill_main([
         "--csv", str(csv_path),
         "--metrics", str(metrics),
+        "--paper-dir", str(_paper_dir(tmp_path)),
     ])
     assert rc == 1
 
@@ -327,6 +405,7 @@ def test_fill_rewrites_the_mitigation_cells(tmp_path, monkeypatch):
     rc = fill_main([
         "--csv", str(csv_path),
         "--metrics", str(metrics),
+        "--paper-dir", str(_paper_dir(tmp_path)),
         "--mitigation", str(mitigation),
     ])
     assert rc == 0
@@ -354,6 +433,7 @@ def test_mitigation_cells_are_left_alone_without_a_measurement(tmp_path, monkeyp
     rc = fill_main([
         "--csv", str(csv_path),
         "--metrics", str(metrics),
+        "--paper-dir", str(_paper_dir(tmp_path)),
         "--mitigation", str(missing),
     ])
     assert rc == 0
@@ -454,6 +534,7 @@ def test_prose_rows_are_refreshed_even_when_the_csv_is_current(tmp_path):
     rc = fill_main([
         "--csv", str(csv_path),
         "--metrics", str(metrics),
+        "--paper-dir", str(_paper_dir(tmp_path)),
     ])
     assert rc == 0
 

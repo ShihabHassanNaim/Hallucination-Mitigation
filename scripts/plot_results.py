@@ -167,6 +167,26 @@ def plot_custom_metrics() -> None:
 # ---------------------------------------------------------------------------
 # 3. Literature comparison
 # ---------------------------------------------------------------------------
+
+# Rows that cannot be drawn as a pair of bars on one [0,1] score axis.
+#
+# "Pre/Post-mitigation Score" compares our absolute BERTScore F1 (0.863)
+# against Dale's *delta* (-0.63) — an absolute score against a change, on
+# different metric scales. "Delta" is a signed change and our value is
+# negative. The efficiency rows mix units (seconds, ms, cost per 1k
+# queries, "K=6 perturbations") and, for latency and cost, lower is better.
+# Drawing any of these as "ours vs best published" invites the reader to
+# compare two different quantities, and the old code marked four of them
+# with a check mark.
+#
+# They are not discarded: the mitigation numbers appear on the mitigation
+# chart and the efficiency numbers on the latency chart.
+NOT_BAR_COMPARABLE = {
+    "Pre-mitigation Score", "Post-mitigation Score", "Delta",
+    "Per-query Latency (GPU)", "GPU Peak", "Cost per 1k queries",
+}
+
+
 def plot_literature_comparison() -> None:
     csv_path = Path("Paper/comparison_table.csv")
     if not csv_path.exists():
@@ -182,12 +202,25 @@ def plot_literature_comparison() -> None:
         measurement and must not be plotted as one. The old behaviour of
         reading "0.91-0.95 (projected)" as 0.91 turned a guess into an
         apparently measured point on the chart.
+
+        A leading sign is only kept when the whole cell is a signed number.
+        The comparison table writes cells such as "-0.63" and
+        "+0.56 / +0.49", where the sign is meaningful, but it also writes
+        "0.85-0.90 (Sent-T5 XL)", where the minus is a range separator and
+        must not turn the value negative.
         """
-        text = str(v or "")
+        text = str(v or "").strip()
         if "projected" in text.lower():
             return None
         m = re.search(r"[-+]?\d+(?:\.\d+)?", text)
-        return float(m.group(0)) if m else None
+        if not m:
+            return None
+        # If the sign is followed by another number, it belongs to a range
+        # ("0.85-0.90"), not to this value.
+        tail = text[m.end():]
+        if m.group(0)[0] in "+-" and re.match(r"\s*\d", tail):
+            return float(re.search(r"\d+(?:\.\d+)?", m.group(0)).group(0))
+        return float(m.group(0))
 
     with csv_path.open("r", encoding="utf-8", newline="") as f:
         rows = list(_csv.reader(f))
@@ -202,12 +235,15 @@ def plot_literature_comparison() -> None:
         return
 
     other_idx = [i for i in range(2, len(header)) if i != ours_idx]
+
     labels, ours_vals, best_vals = [], [], []
     for r in rows[1:]:
         if len(r) < 3:
             continue
         metric = (r[1] if len(r) > 1 else "").strip()
         if not metric:
+            continue
+        if metric in NOT_BAR_COMPARABLE:
             continue
         o = num(r[ours_idx]) if ours_idx < len(r) else None
         if o is None or o > 1.5:
@@ -230,19 +266,26 @@ def plot_literature_comparison() -> None:
         print("  [skip] 3 comparison_literature")
         return
 
-    fig, ax = plt.subplots(figsize=(11, max(5, 0.45 * len(labels))))
+    # Every row that reaches the chart is a rate in [0,1] where higher is
+    # better and both sides use the same definition, so a larger value is a
+    # genuine win. The tie test is exact so a rounded-equal pair is not
+    # flagged as a win.
+    def is_win(label: str, o: float, b: float) -> bool:
+        return o > b + 1e-9
+
+    fig, ax = plt.subplots(figsize=(11.5, max(6, 0.5 * len(labels))))
     xs = np.arange(len(labels))
     ax.barh(xs - 0.2, ours_vals, 0.4, label="Ours (13-step)", color="#2563eb",
             edgecolor="white")
     ax.barh(xs + 0.2, best_vals, 0.4, label="Best published", color="#94a3b8",
             edgecolor="white")
 
-    for x, o, b in zip(xs, ours_vals, best_vals):
+    for x, o, b, label in zip(xs, ours_vals, best_vals, labels):
         ax.text(o + 0.012, x - 0.2, f"{o:.2f}", va="center", fontsize=8,
                 fontweight="bold", color="#2563eb")
         ax.text(b + 0.012, x + 0.2, f"{b:.2f}", va="center", fontsize=8,
                 color="#475569")
-        if o >= b:
+        if is_win(label, o, b):
             ax.text(max(o, b) + 0.06, x, "✓", va="center", fontsize=11,
                     fontweight="bold", color="#16a34a")
 
@@ -250,12 +293,23 @@ def plot_literature_comparison() -> None:
     ax.set_yticklabels(labels, fontsize=9)
     ax.set_xlim(0, 1.18)
     ax.invert_yaxis()
-    _style(ax, "Ours vs Best Published System — per metric", xlabel="Score")
+    _style(ax, "Ours vs Best Published System — comparable rates only",
+           xlabel="Score (higher is better)")
     ax.grid(axis="x", alpha=0.3, linestyle="--")
     ax.grid(axis="y", visible=False)
     ax.legend(loc="lower right", fontsize=9, framealpha=0.95)
+    ax.text(
+        0.5, -0.09,
+        "Only metrics that are rates on the same scale appear here. The "
+        "mitigation scores/deltas and the efficiency rows (latency, GPU "
+        "memory, cost) are reported on their own charts, because they are "
+        "not scores on a 0-1 scale.",
+        transform=ax.transAxes, ha="center", va="top",
+        fontsize=8.5, color="#475569",
+    )
     fig.tight_layout()
-    fig.savefig(OUT_DIR / "comparison_literature.png", dpi=160)
+    fig.savefig(OUT_DIR / "comparison_literature.png", dpi=160,
+                bbox_inches="tight")
     plt.close(fig)
     print("  [ok] 3 comparison_literature.png")
 
