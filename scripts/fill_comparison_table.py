@@ -529,18 +529,28 @@ def _fill_comparison_md(
             ("detection_roc_auc",),
         ),
         (
+            # The pattern has to match the *corrected* wording as well as the
+            # original. A pattern anchored on the old ("is in the same latency
+            # tier") sentence stops matching once the file has been fixed,
+            # so the generator silently skips the block and the prose
+            # drifts out of the generator's control.
             "latency observation",
-            r"\*\*Observation\.\*\* The pipeline is in the same latency tier "
-            r"as LLM-Check[^.]*\.[^\n]*\n",
+            r"\*\*Observation\.\*\* The pipeline is (?:not )?in the same "
+            r"latency tier as LLM-Check[^.]*\.[^\n]*\n",
             lambda v, m: (
                 "**Observation.** The pipeline is not in the same latency tier as "
                 "LLM-Check: measured on the length-matched HaluEval split, a "
                 f"query takes {_latency_band(v)} end to end (mean "
-                f"{_latency_mean(v):.2f} s), because it runs a generator call and "
-                "a full claim-level verification pass. It is faster than the "
-                "sampling-based methods (INSIDE, AutoHall, SelfCheckGPT, Decoding "
-                "Memories) and the MC-dropout rerankers (Dale 2023), but slower "
-                "than the single-pass probes.\n"
+                f"{_latency_mean(v):.2f} s). This is the *detection* path: the "
+                "benchmark supplies the answer, so step 2 skips generation and "
+                "the time is spent on query understanding, hybrid retrieval, "
+                "reranking and the claim-level verification pass. A run that "
+                "generated its own answer would add the generator's latency on "
+                "top, so the full RAG pipeline is slower than this band "
+                "suggests. It is faster than the sampling-based methods "
+                "(INSIDE, AutoHall, SelfCheckGPT, Decoding Memories) and the "
+                "MC-dropout rerankers (Dale 2023), but slower than the "
+                "single-pass probes.\n"
             ),
             ("latency_min_s", "latency_max_s", "latency_mean_s"),
         ),
@@ -552,7 +562,8 @@ def _fill_comparison_md(
                 "| **Ours (RAG, single-pass)** | **2-5 s** (CPU) / "
                 f"**{_latency_band(v)}** (GPU) | ~4 GB | "
                 "~$0.10 (HF local) / ~$0.80 (OpenRouter) | "
-                "One generator call; deterministic re-runs |"
+                "Detection path (answer supplied); add the generator call for "
+                "the full pipeline |"
             ),
             ("latency_min_s", "latency_max_s"),
         ),
@@ -617,7 +628,8 @@ def _fill_comparison_md(
                 "| **Per-query latency (GPU)** | 0.22 s (LLM-Check) | "
                 f"**{_latency_band(v)}** | "
                 "Slower than LLM-Check; measured on the length-matched "
-                "HaluEval split"
+                "HaluEval split, detection path only (the answer is "
+                "supplied, so generation is skipped)"
                 + " |"
             ),
             ("latency_min_s", "latency_max_s"),
@@ -691,8 +703,14 @@ def _fill_comparison_tex(
             ("detection_roc_auc", "detection_aupr", "precision_at_recall_90"),
         ),
         (
+            # Same reasoning as the markdown block: match the corrected
+            # wording ("is not in the same latency tier" / "is slower than")
+            # as well as the original, so a fixed file stays under the
+            # generator's control.
             "latency observation",
-            r"The pipeline sits in the same latency tier as LLM-Check"
+            r"The pipeline (?:sits in the same latency tier as LLM-Check"
+            r"|is not in the same latency tier as LLM-Check"
+            r"|is slower than the fastest single-pass detectors)"
             r"(?:[^\n]|\n(?!\n))*?\n\n",
             lambda v, m: (
                 "The pipeline is not in the same latency tier as LLM-Check: "
@@ -700,11 +718,15 @@ def _fill_comparison_tex(
                 + _latency_band(v).replace("-", "--")
                 + " end to end (mean "
                 + f"{_latency_mean(v):.2f}"
-                + " s), because it runs a generator call and a full claim-level "
-                "verification pass. It is faster than the sampling-based methods "
-                "(INSIDE, AutoHall, SelfCheckGPT, Decoding Memories) and the "
-                "MC-dropout rerankers (Dale 2023), but slower than the "
-                "single-pass probes.\n\n"
+                + " s). This is the \\emph{detection} path: the benchmark "
+                "supplies the answer, so step 2 skips generation and the time "
+                "is spent on query understanding, hybrid retrieval, reranking "
+                "and the claim-level verification pass. A run that generated "
+                "its own answer would add the generator's latency on top, so "
+                "the full RAG pipeline is slower than this band suggests. It "
+                "is faster than the sampling-based methods (INSIDE, AutoHall, "
+                "SelfCheckGPT, Decoding Memories) and the MC-dropout rerankers "
+                "(Dale 2023), but slower than the single-pass probes.\n\n"
             ),
             ("latency_min_s", "latency_max_s", "latency_mean_s"),
         ),

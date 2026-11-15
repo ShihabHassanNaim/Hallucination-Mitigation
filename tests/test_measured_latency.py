@@ -26,6 +26,41 @@ LATENCY_AGG = {
 }
 
 
+def test_the_reported_band_is_the_detection_path_not_a_generating_run():
+    """The benchmark supplies the answer, so step 2 never calls the generator.
+
+    The paper reported the measured latency band (0.8-13.8 s) and then
+    explained it "because it runs a generator call and a full claim-level
+    verification pass". The second half was false: on the length-matched
+    HaluEval split every row takes the provided-answer branch in
+    ``step02_grounded_generation``, so the band covers retrieval,
+    reranking and verification but no generation.
+
+    This test pins the mechanism so the claim cannot be restated wrongly,
+    and it fails loudly if the evaluation is ever changed to generate.
+    """
+    import json
+    from pathlib import Path
+
+    metrics = Path("data/metrics_halueval.json")
+    if not metrics.exists():
+        import pytest
+        pytest.skip("headline metrics file is not present")
+
+    rows = json.loads(metrics.read_text(encoding="utf-8")).get("per_query", [])
+    if not rows:
+        import pytest
+        pytest.skip("headline metrics file has no per-query rows")
+
+    gen = [r["step_times_ms"]["grounded_generation"] for r in rows]
+    assert max(gen) < 5.0, (
+        f"grounded_generation peaks at {max(gen):.3f} ms, which means the "
+        "evaluation now generates its own answers. The reported latency band "
+        "and every sentence that describes it as the detection path must be "
+        "re-measured before they can be reused."
+    )
+
+
 def _lookup(agg):
     return lambda key: agg.get(key)
 

@@ -113,9 +113,21 @@ def plot_detection_metrics() -> None:
     ax.set_xticklabels([l for _, l in keys])
     ax.set_ylim(0, 1.15)
     _style(ax, "Detection Performance — 13-Step Pipeline", ylabel="Score")
-    ax.legend(loc="lower right", fontsize=9, framealpha=0.95)
+    # The legend goes under the axes: inside the panel it covered the
+    # ROC-AUC bars.
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.08), ncol=4,
+              fontsize=9, framealpha=0.95)
+    ax.text(
+        0.5, -0.20,
+        "HaluEval QA (raw) carries the answer-length confound and is shown "
+        "for transparency only; the length-matched split is the headline "
+        "result.",
+        transform=ax.transAxes, ha="center", va="top",
+        fontsize=8.5, color="#475569",
+    )
     fig.tight_layout()
-    fig.savefig(OUT_DIR / "detection_metrics.png", dpi=160)
+    fig.savefig(OUT_DIR / "detection_metrics.png", dpi=160,
+                bbox_inches="tight")
     plt.close(fig)
     print("  [ok] 1 detection_metrics.png")
 
@@ -157,7 +169,10 @@ def plot_custom_metrics() -> None:
     ax.set_ylim(0, 1.15)
     _style(ax, "Pipeline-Specific Metrics\n(unique to this 13-step system)",
            ylabel="Score")
-    ax.legend(loc="lower right", fontsize=9, framealpha=0.95)
+    # The legend sat inside the axes and covered the VSR bars, so it goes
+    # below the plot where it cannot hide a value.
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.08), ncol=3,
+              fontsize=9, framealpha=0.95)
     fig.tight_layout()
     fig.savefig(OUT_DIR / "custom_metrics.png", dpi=160)
     plt.close(fig)
@@ -453,11 +468,52 @@ def plot_ablation_study() -> None:
     ax.axhline(base, color="#2563eb", linestyle="--", linewidth=1.3,
                label=f"Full pipeline ({base:.3f})")
     ax.set_ylim(0, max(1.0, max(r[1] for r in rows) * 1.2))
-    _style(ax, "Ablation Study — contribution of each pipeline stage",
-           ylabel=mlabel)
-    ax.legend(loc="lower right", fontsize=9, framealpha=0.95)
+    # The ablation is its own run on a smaller sample, so its "full
+    # pipeline" bar is not the headline ROC-AUC. Saying so stops the
+    # reader from comparing 0.823 against the paper's 0.843 and
+    # concluding that something disagrees.
+    n_queries = full.get("n_queries")
+    # The headline row count comes from the headline metrics file, not from
+    # the ablation file -- reusing n_queries here would claim the headline
+    # evaluation was 200 rows when it was 1000.
+    headline_n = None
+    headline_roc = None
+    for _slug, _lbl, _path, _key in DATASETS:
+        agg = _load(_path).get("aggregate", {})
+        if agg.get("detection_roc_auc") and agg.get("n_queries"):
+            headline_n = agg["n_queries"]
+            headline_roc = agg["detection_roc_auc"]
+            break
+    title = "Ablation Study — contribution of each pipeline stage"
+    if n_queries:
+        title += f" (separate run, n={int(n_queries)})"
+    _style(ax, title, ylabel=mlabel)
+    # The legend sat in the lower right, on top of the tallest ablation bar.
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.08), ncol=1,
+              fontsize=9, framealpha=0.95)
+    if n_queries:
+        headline_txt = (
+            f"the {int(headline_n)}-row headline evaluation"
+            if headline_n
+            else "the headline evaluation"
+        )
+        roc_txt = (
+            f"differs from the reported {headline_roc:.3f}"
+            if headline_roc
+            else "differs from the reported headline value"
+        )
+        ax.text(
+            0.5, -0.20,
+            f"This is a separate ablation run on {int(n_queries)} queries, "
+            f"not {headline_txt}, so its full-pipeline ROC-AUC "
+            f"({base:.3f}) {roc_txt}. The comparison of interest is the "
+            f"drop when a stage is removed.",
+            transform=ax.transAxes, ha="center", va="top",
+            fontsize=8.5, color="#475569",
+        )
     fig.tight_layout()
-    fig.savefig(OUT_DIR / "ablation_study.png", dpi=160)
+    fig.savefig(OUT_DIR / "ablation_study.png", dpi=160,
+                bbox_inches="tight")
     plt.close(fig)
     print("  [ok] 6 ablation_study.png")
 
@@ -515,7 +571,22 @@ def plot_latency_breakdown() -> None:
     means = [np.mean(v) for _, v in ordered]
     total = sum(means)
 
-    fig, ax = plt.subplots(figsize=(11, 6))
+    # Steps that the benchmark run does not exercise. The evaluation
+    # supplies the answer, so step 2 skips generation, and the gate never
+    # asks for a regeneration on most rows. Labelling them as "0 ms"
+    # without saying why reads as a measurement of a free step; a reader
+    # would expect an LLM call to cost hundreds of milliseconds at least.
+    SKIPPED = {
+        "grounded_generation": "answer supplied — generation skipped",
+        "regeneration": "gate rarely asks for a rewrite",
+    }
+    skipped_notes = [
+        f"{STEP_NAMES.get(k, k)}: {why}"
+        for k, why in SKIPPED.items()
+        if k in step_times and np.mean(step_times[k]) < 5.0
+    ]
+
+    fig, ax = plt.subplots(figsize=(11, 6.4))
     cmap = plt.cm.YlOrRd(np.linspace(0.25, 0.95, len(means)))
     bars = ax.bar(names, means, color=cmap, edgecolor="white", linewidth=1.2)
     for b, v in zip(bars, means):
@@ -528,8 +599,21 @@ def plot_latency_breakdown() -> None:
     _style(ax, f"Per-Step Latency Breakdown — {_label(slug)}",
            ylabel="Mean duration (ms)")
     plt.setp(ax.get_xticklabels(), rotation=32, ha="right", fontsize=9)
+
+    note = (
+        "Detection path: the benchmark supplies the answer, so step 2 skips "
+        "generation and the gate rarely asks for a rewrite. A run that "
+        "generated its own answer would add the generator's latency on top."
+    )
+    if skipped_notes:
+        note += "  Near-zero steps — " + "; ".join(skipped_notes) + "."
+    ax.text(
+        0.5, -0.30, note, transform=ax.transAxes, ha="center", va="top",
+        fontsize=8.5, color="#475569", wrap=True,
+    )
     fig.tight_layout()
-    fig.savefig(OUT_DIR / "latency_breakdown.png", dpi=160)
+    fig.savefig(OUT_DIR / "latency_breakdown.png", dpi=160,
+                bbox_inches="tight")
     plt.close(fig)
     print("  [ok] 7 latency_breakdown.png")
 

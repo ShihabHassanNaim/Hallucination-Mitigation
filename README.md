@@ -326,6 +326,12 @@ earlier draft carried "0.5–1.5 s (GPU)" from a separate timing estimate,
 which was both wrong and the basis of a "faster than every sampling
 baseline" claim the measurement does not support.
 
+This band measures the **detection path**. The benchmark supplies the
+answer, so step 2 takes the provided-answer branch and never calls the
+generator (`grounded_generation` peaks at 1.3 ms across all 1000 rows). A
+run that generated its own answer would add the generator's latency on
+top, so the full RAG pipeline is slower than this band suggests.
+
 Once both `data/metrics_halueval.json` and `data/metrics_truthfulqa.json`
 exist, the Flask demo page (`/`) shows a dataset-pill selector on the
 **Accuracy** and **Evaluation** panels, and a side-by-side **Cross-dataset

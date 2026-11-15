@@ -156,7 +156,7 @@ Dale 2023 -- MC-dropout rerank & $>$ 60 s & n/r \\
 \label{tab:efficiency}
 \end{table}
 
-The pipeline is not in the same latency tier as LLM-Check: measured on the length-matched HaluEval split, a query takes 0.8--13.8 s end to end (mean 4.84 s), because it runs a generator call and a full claim-level verification pass. It is faster than the sampling-based methods (INSIDE, AutoHall, SelfCheckGPT, Decoding Memories) and the MC-dropout rerankers (Dale 2023), but slower than the single-pass probes.
+The pipeline is not in the same latency tier as LLM-Check: measured on the length-matched HaluEval split, a query takes 0.8--13.8 s end to end (mean 4.84 s). This is the \emph{detection} path: the benchmark supplies the answer, so step 2 skips generation and the time is spent on query understanding, hybrid retrieval, reranking and the claim-level verification pass. A run that generated its own answer would add the generator's latency on top, so the full RAG pipeline is slower than this band suggests. It is faster than the sampling-based methods (INSIDE, AutoHall, SelfCheckGPT, Decoding Memories) and the MC-dropout rerankers (Dale 2023), but slower than the single-pass probes.
 
 % -----------------------------------------------------------------------------
 \subsection{Headline Comparison Summary}
@@ -264,7 +264,7 @@ Closed-book generalization & Out of scope & Future work: corpus-specific fine-tu
 \label{sec:verdict}
 
 The pipeline sits in the same accuracy band as the SHROOM winners on
-detection, is competitive with the fastest single-pass detectors on latency,
+detection, is slower than the fastest single-pass detectors on latency,
 and is the only system in the comparison that combines per-claim
 verification with an active regeneration step. Its distinctive
 contribution is \textbf{per-claim, evidence-anchored, citation-grade

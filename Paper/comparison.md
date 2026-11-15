@@ -91,7 +91,7 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 
 | Method | Per-query latency | GPU peak | Cost / 1k queries | Notes |
 |---|---|---|---|---|
-| **Ours (RAG, single-pass)** | **2-5 s** (CPU) / **0.8-13.8 s** (GPU) | ~4 GB | ~$0.10 (HF local) / ~$0.80 (OpenRouter) | One generator call; deterministic re-runs |
+| **Ours (RAG, single-pass)** | **2-5 s** (CPU) / **0.8-13.8 s** (GPU) | ~4 GB | ~$0.10 (HF local) / ~$0.80 (OpenRouter) | Detection path (answer supplied); add the generator call for the full pipeline |
 | Dale 2023 — MC-dropout rerank | >60 s (N=10), 24 h total | n/r | – | 10 stochastic forward passes |
 | LLM-Check | 0.22 s per query | ~6 GB | – | One teacher-forced pass |
 | INSIDE | 97.6 s per query | ~10 GB | – | K=10 generations required |
@@ -102,7 +102,7 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 | SelfCheckGPT (baseline) | 75.9 s | – | – | K=6 perturbations |
 | AutoHall | n/r (K=6) | – | – | K=6 perturbations |
 
-**Observation.** The pipeline is not in the same latency tier as LLM-Check: measured on the length-matched HaluEval split, a query takes 0.8-13.8 s end to end (mean 4.84 s), because it runs a generator call and a full claim-level verification pass. It is faster than the sampling-based methods (INSIDE, AutoHall, SelfCheckGPT, Decoding Memories) and the MC-dropout rerankers (Dale 2023), but slower than the single-pass probes.
+**Observation.** The pipeline is not in the same latency tier as LLM-Check: measured on the length-matched HaluEval split, a query takes 0.8-13.8 s end to end (mean 4.84 s). This is the *detection* path: the benchmark supplies the answer, so step 2 skips generation and the time is spent on query understanding, hybrid retrieval, reranking and the claim-level verification pass. A run that generated its own answer would add the generator's latency on top, so the full RAG pipeline is slower than this band suggests. It is faster than the sampling-based methods (INSIDE, AutoHall, SelfCheckGPT, Decoding Memories) and the MC-dropout rerankers (Dale 2023), but slower than the single-pass probes.
 
 ---
 
@@ -173,10 +173,10 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 | **Mitigation Δ over baseline** | +0.60 (Dale 2023 COMET-QE rerank) | **-0.035 [-0.067, -0.006] (n=18 regenerated) — not positive** | Measured on regenerated rows only; not an improvement over the no-mitigation baseline |
 | **Claim-level F1** | 0.71 (TU Wien Vectara) | **0.653** | Below the cited comparable |
 | **End-to-end accuracy** | — | **0.553** | Measured |
-| **Per-query latency (GPU)** | 0.22 s (LLM-Check) | **0.8-13.8 s** | Slower than LLM-Check; measured on the length-matched HaluEval split |
+| **Per-query latency (GPU)** | 0.22 s (LLM-Check) | **0.8-13.8 s** | Slower than LLM-Check; measured on the length-matched HaluEval split, detection path only (the answer is supplied, so generation is skipped) |
 | **Cost / 1k queries** | $0.10 (HF local) | **$0.10–$0.80** | Comparable |
 
-**Overall verdict.** The pipeline sits in the same accuracy band as the SHROOM winners on detection, is competitive with the fastest single-pass detectors on latency, and is the only system in the comparison that combines per-claim verification with an active regeneration step — a combination not present in any of the ten cited papers. On mitigation Δ the measured value is not positive, so this dimension is reported as an open result rather than a win; the rewrite step needs to be shown to improve on the no-mitigation baseline before it can be claimed as an advantage.
+**Overall verdict.** The pipeline sits in the same accuracy band as the SHROOM winners on detection, is slower than the fastest single-pass detectors on latency, and is the only system in the comparison that combines per-claim verification with an active regeneration step — a combination not present in any of the ten cited papers. On mitigation Δ the measured value is not positive, so this dimension is reported as an open result rather than a win; the rewrite step needs to be shown to improve on the no-mitigation baseline before it can be claimed as an advantage.
 
 ---
 
