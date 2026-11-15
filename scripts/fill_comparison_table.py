@@ -54,6 +54,28 @@ CLAIM_ROWS = {
     "P/R": ("claim_precision", "claim_recall"),
 }
 
+# Metric row label in the CSV -> aggregate key for the mitigation-side
+# metrics. These are measured by the same evaluation run as the detection
+# rows, so they are filled from the same aggregate.
+MITIGATION_METRIC_ROWS = {
+    "Hallucination Reduction Rate (HRR)": (
+        "hallucination_reduction_rate",
+        "hallucination_reduction_rate_ci95",
+    ),
+    "Verification Success Rate (VSR)": (
+        "verification_success_rate",
+        "verification_success_rate_ci95",
+    ),
+    "Claim Correction Rate (CCR)": (
+        "claim_correction_rate",
+        "claim_correction_rate_ci95",
+    ),
+    "End-to-End Accuracy": (
+        "end_to_end_accuracy",
+        "end_to_end_accuracy_ci95",
+    ),
+}
+
 _PROJECTED = re.compile(r"projected", re.IGNORECASE)
 
 
@@ -380,6 +402,11 @@ def build_replacements(agg: dict) -> dict[str, str]:
                 out[label] = f"{agg[p]:.3f} / {agg[r]:.3f}"
         elif key in agg:
             out[label] = _fmt(agg[key], None)
+
+    for label, (key, ci_key) in MITIGATION_METRIC_ROWS.items():
+        if key not in agg:
+            continue
+        out[label] = _fmt(agg[key], agg.get(ci_key))
 
     return out
 

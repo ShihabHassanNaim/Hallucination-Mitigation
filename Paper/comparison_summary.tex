@@ -173,11 +173,15 @@ every MC-dropout reranker (Dale 2023).
 \textbf{Category} & \textbf{Best Comparable} & \textbf{Ours (measured)} & \textbf{Verdict} \\
 \hline
 Detection ROC-AUC & 0.987 (Dale ALTI+) & 0.843 & Competitive \\
+Detection AUPR & -- & 0.853 & Above the general-purpose probes \\
 Sentence accuracy & 0.847 (Halu-NLP) & 0.745 & Below the SHROOM winner \\
 Spearman $\rho$ & 0.770 (Halu-NLP) & 0.594 & Slightly below top \\
-HRR & 0.55 (Dale, implied) & 0.172 & Measured \
-Mitigation $\Delta$ & +0.60 (Dale COMET-QE) & \textbf{-0.035 [-0.067, -0.006] (n=18 regenerated) — not positive} & Measured \\
+HRR & 0.55 (Dale, implied) & 0.172 & Below the implied baseline \\
+VSR & 0.81 (Halu-NLP) & 0.608 & Below the cited comparables \\
+CCR & 0.55 (Dale, implied) & 0.616 & Above the implied baseline \\
+Mitigation $\Delta$ & +0.60 (Dale COMET-QE) & \textbf{-0.035 [-0.067, -0.006]} (n=18 regenerated) & Not positive \\
 Claim-level F1 & 0.71 (TU Wien Vectara) & \textbf{0.653} & Below the cited comparable \\
+End-to-end accuracy & -- & 0.553 & Measured \\
 Latency (GPU) & 0.22 s (LLM-Check) & 0.5--1.5 s & Slightly slower, much richer output \\
 Cost / 1k queries & \$0.10 (HF local) & \$0.10--\$0.80 & Comparable \\
 \hline

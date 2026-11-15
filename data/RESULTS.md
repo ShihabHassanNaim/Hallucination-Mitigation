@@ -118,6 +118,22 @@ Claim recall and F1 are measured on the faithful rows only: on a hallucinated ro
 
 **Decision distribution:** ABSTAIN 437 (43.7%), PASS 563 (56.3%)
 
+## Mitigation Delta (rewrite vs. no-mitigation baseline)
+
+Measured by `scripts/evaluate_mitigation.py` on the length-matched HaluEval split. Only the rows where step 10 actually regenerated are used for the delta; the rows it left alone are unchanged by construction.
+
+| Quantity | Value |
+|---|---|
+| Rows evaluated | 60 |
+| Rows regenerated (step 10 fired) | 18 |
+| Rows left unchanged | 42 |
+| Pre-mitigation BERTScore F1 (regenerated rows) | 0.8632 |
+| Post-mitigation BERTScore F1 (regenerated rows) | 0.8279 |
+| **Delta BERTScore F1** | **-0.0354 [-0.0668, -0.0061]** |
+| Delta ROUGE-L | -0.1033 |
+
+**This delta is not positive.** The 95% CI excludes zero on the negative side, so the rewrite did not improve similarity to the gold answer on the rows where it fired. Dale 2023 reports +0.49 to +0.60 on machine translation, so the pipeline does not lead on this dimension. The rewrite path is implemented and exercised; improving it is future work.
+
 ## Cross-Dataset Summary
 
 | Metric | HaluEval QA (length-matched) | TruthfulQA | HaluEval QA (raw, length-confounded) |

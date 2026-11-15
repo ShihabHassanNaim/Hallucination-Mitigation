@@ -20,6 +20,10 @@ DATASETS = [
     ("halueval_raw", "HaluEval QA (raw, length-confounded)", "data/metrics_halueval_raw.json"),
 ]
 
+# The mitigation measurement is a separate run: the rewrite path is
+# measured against the no-mitigation baseline on the rows where it fired.
+MITIGATION_PATH = "data/mitigation_results.json"
+
 # The length-matched HaluEval split and TruthfulQA are the defensible
 # headline results. The raw HaluEval split is reported for transparency
 # only: on it, answer word count alone classifies 94.7% of the rows, so it
@@ -193,6 +197,64 @@ def main() -> None:
             dist = ", ".join(f"{k} {v} ({v / total:.1%})" for k, v in sorted(decisions.items()))
             lines.append(f"**Decision distribution:** {dist}")
             lines.append("")
+
+    mitigation = _load(MITIGATION_PATH)
+    summary = mitigation.get("summary") if isinstance(mitigation, dict) else None
+    regen = (summary or {}).get("regenerated_rows") or {}
+    if regen.get("delta_bertscore") is not None:
+        delta = regen["delta_bertscore"]
+        ci = regen.get("delta_bertscore_ci95")
+        kept = (summary.get("kept_rows") or {}).get("n")
+        rouge = regen.get("delta_rouge_l")
+
+        lines.append("## Mitigation Delta (rewrite vs. no-mitigation baseline)")
+        lines.append("")
+        lines.append(
+            "Measured by `scripts/evaluate_mitigation.py` on the length-matched "
+            "HaluEval split. Only the rows where step 10 actually regenerated "
+            "are used for the delta; the rows it left alone are unchanged by "
+            "construction."
+        )
+        lines.append("")
+        lines.append("| Quantity | Value |")
+        lines.append("|---|---|")
+        lines.append(f"| Rows evaluated | {summary.get('n_rows')} |")
+        lines.append(
+            f"| Rows regenerated (step 10 fired) | {summary.get('n_regenerated')} |"
+        )
+        if kept is not None:
+            lines.append(f"| Rows left unchanged | {kept} |")
+        lines.append(
+            "| Pre-mitigation BERTScore F1 (regenerated rows) | "
+            f"{regen.get('pre_bertscore'):.4f} |"
+        )
+        lines.append(
+            "| Post-mitigation BERTScore F1 (regenerated rows) | "
+            f"{regen.get('post_bertscore'):.4f} |"
+        )
+        ci_text = f" [{ci[0]:+.4f}, {ci[1]:+.4f}]" if ci else ""
+        lines.append(
+            f"| **Delta BERTScore F1** | **{delta:+.4f}{ci_text}** |"
+        )
+        if rouge is not None:
+            lines.append(f"| Delta ROUGE-L | {rouge:+.4f} |")
+        lines.append("")
+
+        if delta > 0:
+            lines.append(
+                "The delta is positive: the rewrite improved similarity to the "
+                "gold answer on the rows where it fired."
+            )
+        else:
+            lines.append(
+                "**This delta is not positive.** The 95% CI excludes zero on "
+                "the negative side, so the rewrite did not improve similarity "
+                "to the gold answer on the rows where it fired. Dale 2023 "
+                "reports +0.49 to +0.60 on machine translation, so the "
+                "pipeline does not lead on this dimension. The rewrite path "
+                "is implemented and exercised; improving it is future work."
+            )
+        lines.append("")
 
     lines.append("## Cross-Dataset Summary")
     lines.append("")
