@@ -776,6 +776,115 @@ version of the code: those rows lack fields the current code produces, and
 mixing them would silently produce a metrics file whose rows are not
 comparable. In that case the run starts from scratch and says so.
 
+### 17.15 The detector was fitted on one overlap and served another
+
+`scripts/generate_detector_data_v2.py` mines the training features with
+`src/utils/claim_extractor.py::intrinsic_overlap` — the Jaccard overlap
+between the query's and the answer's word sets. But
+`src/steps/step03_early_detection.py` computed the same feature inline
+with a different formula: the fraction of the answer's tokens that appear
+in the query.
+
+The detector was therefore fitted on a Jaccard value and, at inference
+time, handed a token-containment ratio. The two are correlated but not
+equal, and the model's learned thresholds did not transfer. The evaluation
+harness (`scripts/evaluate_full.py`) happened to compute the canonical
+form, so the harness's detector score and the pipeline's own step-3 score
+disagreed — and the harness's numbers were the ones being reported.
+
+Step 3 now calls the same helper the training script calls, so the
+detector is served the feature it was fitted on. With the fix, the
+standalone detector reproduces the harness's numbers exactly: ROC-AUC
+0.8024 on HaluEval and 0.6028 on TruthfulQA, to four decimals.
+
+### 17.16 The detector's training data carried the length shortcut
+
+`data/detector_train.jsonl` was mined from the first 500 rows of
+`data/halueval_qa.jsonl`. HaluEval stores both sides of a pair as
+separate rows, so that slice covers about 250 unique queries and the
+generator emitted a row per *input* row. Three artefacts followed.
+
+**The faithful class was length-short.** The gold answer was written once
+as its own input row and again as the length-matched control, so the
+short gold appeared twice, while the hallucinated answer appeared once.
+Measured over the file: median answer length 3 words for label 0 against
+9 for label 1. `answer_length` alone reached ROC-AUC 0.8227 on the
+training data and carried 0.348 of the model's feature importance.
+
+**The overlap was a second, disguised length shortcut.** The
+length-matched control is padded with words taken from the dataset's
+`knowledge` passage. Those words are not in the query, so the control's
+lexical overlap falls below the hallucinated row's for the same query.
+Across 195 query pairs the mean gap was 0.217 and 78% of pairs showed
+it, and `intrinsic_overlap` correlated with `answer_length` at r = 0.67.
+The detector could therefore read the label off either feature.
+
+**The training queries overlapped the evaluation queries.** The
+evaluation splits are carved from the same source file, and 466 of the
+first 1000 training queries also appeared in
+`data/halueval_eval_1000_matched.jsonl`.
+
+`scripts/generate_detector_data_v4.py` rebuilds the training set: one
+faithful row and one hallucinated row per query, both length-matched, the
+duplicated gold dropped, and every query that appears in any evaluation
+split excluded. The result has a median answer length of 10 words on
+*both* sides, an overlap/length correlation of 0.40 instead of 0.67, and
+zero query overlap with the evaluation splits. The detector's importance
+shifts accordingly — `cosine` rises to 0.545 and becomes the dominant
+feature.
+
+Retrained on the clean data, the detector scores **0.796** on HaluEval
+and **0.614** on TruthfulQA, against 0.760 and 0.605 for the
+length-confounded data.
+
+### 17.17 The TruthfulQA gap is a feature-quality limit, not a bug
+
+The detector scores 0.802 on HaluEval but 0.603 on TruthfulQA. The gap
+was investigated with `scripts/diagnose_feature_transfer.py` (output:
+`data/feature_transfer.json`).
+
+It is **not** a mis-calibration that retraining fixes. Removing
+`answer_length` from the feature set moves TruthfulQA only from 0.615 to
+0.627; training on length-matched rows only reaches 0.630. The gap
+survives every change to the model.
+
+It is **not** the length shortcut either. On the length-matched HaluEval
+evaluation split `answer_length` has AUC 0.4945 — chance — so the
+artifact is genuinely gone from the measurement.
+
+It **is** a weaker underlying signal. Per-feature AUC on each split:
+
+| feature | HaluEval | TruthfulQA |
+|---|---|---|
+| cosine | 0.809 | 0.633 |
+| overlap | 0.772 | 0.604 |
+| answer_length | 0.494 | 0.438 |
+| claim_count | 0.484 | 0.500 |
+
+TruthfulQA's short, generic questions ("What happens if you eat
+watermelon seeds?") have answers that are semantically near-degenerate, so
+query–answer similarity separates the classes much less well.
+`claim_count` is uninformative on both datasets (median 1.0 everywhere),
+which is expected: the claim extractor splits on sentence boundaries and
+these answers are single sentences.
+
+The honest conclusion is cross-dataset degradation in the *features*, not
+a fixable defect. The paper reports both numbers rather than only the
+favourable one.
+
+### 17.18 A checkpoint could outlive the detector that produced it
+
+`--resume` matched checkpoint rows to dataset rows by `(query, label)`
+and reused them. It had no way to know that the detector itself had
+changed. After the detector was retrained on cleaner data, a resumed run
+would have silently mixed rows scored by the old detector with rows
+scored by the new one, producing a metrics file whose rows were not
+comparable and whose aggregate meant nothing.
+
+Each checkpoint now records a fingerprint of the detector's training data
+(file size and mtime) and the XGBoost version. A resume whose fingerprint
+does not match the current detector starts from scratch and says so.
+
 ---
 
 *End of audit.*

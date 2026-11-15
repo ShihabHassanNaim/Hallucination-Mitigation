@@ -230,16 +230,53 @@ def _spearman_rho(y_true: list[int], y_score: list[float]) -> float:
     return num / den if den else 0.0
 
 
+def _detector_fingerprint() -> str:
+    """A short hash of the detector's training data and configuration.
+
+    The detector is refitted at process start from a training file on disk.
+    When that file changes — a different feature set, a different set of
+    training queries — every previously computed ``detector_score`` becomes
+    incomparable with the new ones. Recording the fingerprint in the
+    checkpoint lets ``--resume`` refuse to mix rows scored by two different
+    detectors.
+    """
+    import hashlib
+
+    from src.models.xgb_classifier import _CLEAN_DATA_PATH, _REAL_DATA_PATH
+
+    parts: list[str] = []
+    for path in (_CLEAN_DATA_PATH, _REAL_DATA_PATH):
+        if path.exists():
+            try:
+                stat = path.stat()
+                parts.append(f"{path.name}:{stat.st_size}:{int(stat.st_mtime)}")
+            except Exception:  # noqa: BLE001
+                parts.append(f"{path.name}:?")
+        else:
+            parts.append(f"{path.name}:missing")
+    try:
+        import xgboost as xgb  # type: ignore
+
+        parts.append(f"xgb:{xgb.__version__}")
+    except Exception:  # noqa: BLE001
+        parts.append("xgb:none")
+    return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
 def _write_checkpoint(out_path: Path, slug: str, per_query: list[dict]) -> None:
     """Persist per-row results so a crash never costs the whole run.
 
     The aggregate block is intentionally left untouched here: it is rebuilt
     from ``per_query`` by ``_aggregate_from_rows`` once the run finishes (or
     via ``--recompute`` on a checkpoint left by a killed run).
+
+    ``detector_fingerprint`` records which detector produced the scores, so
+    a later ``--resume`` can tell whether the rows are still comparable.
     """
     payload = {
         "dataset": slug,
         "n_queries": len(per_query),
+        "detector_fingerprint": _detector_fingerprint(),
         "per_query": per_query,
     }
     tmp = out_path.with_suffix(out_path.suffix + ".tmp")
@@ -492,6 +529,30 @@ def main() -> None:
                 f"carry the current fields {required}; starting from scratch.",
                 file=sys.stderr, flush=True,
             )
+        # Rows scored by a *different* detector are not comparable with rows
+        # scored by the current one, so they must not be mixed. The
+        # fingerprint covers the detector's training data and the library
+        # version; a mismatch means the whole checkpoint is stale.
+        fingerprint = _detector_fingerprint()
+        try:
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            stored = payload.get("detector_fingerprint")
+        except Exception:  # noqa: BLE001
+            stored = None
+        if checkpoint and stored and stored != fingerprint:
+            print(
+                f"  resume: {out_path} was scored by detector {stored} but the "
+                f"current detector is {fingerprint}; starting from scratch.",
+                file=sys.stderr, flush=True,
+            )
+            usable = []
+        elif checkpoint and not stored:
+            print(
+                f"  resume: {out_path} has no detector fingerprint; starting "
+                f"from scratch so rows from a different detector are not mixed.",
+                file=sys.stderr, flush=True,
+            )
+            usable = []
         by_key: dict[tuple, dict] = {}
         for rec in usable:
             key = (rec.get("query", ""), rec.get("label"))

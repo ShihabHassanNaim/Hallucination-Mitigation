@@ -8,6 +8,7 @@ from __future__ import annotations
 import numpy as np
 
 from . import Step, StepContext
+from ..utils.claim_extractor import intrinsic_overlap
 
 
 class Step03EarlyDetection(Step):
@@ -33,12 +34,14 @@ class Step03EarlyDetection(Step):
             cosine = 0.0
 
         claim_count = max(1, len(self.ctx.claims))
-        qtoks = set(query.lower().split())
-        atoks = answer.lower().split()
-        overlap = 0.0
-        if qtoks and atoks:
-            overlap = sum(1 for t in atoks if t in qtoks) / len(atoks)
-        ans_len = len(atoks)
+        # Use the canonical helper so the feature the detector is *fitted* on
+        # is the same feature it is *served*. The training data is mined by
+        # scripts/generate_detector_data_v2.py, which calls this function;
+        # computing the overlap inline here used a different formula
+        # (fraction of answer tokens present in the query), so the model was
+        # being fed a feature it had never seen.
+        overlap = intrinsic_overlap(answer, query)
+        ans_len = len(answer.split())
 
         features = [cosine, float(claim_count), overlap, float(ans_len)]
         self.ctx.feature_vector = {

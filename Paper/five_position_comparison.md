@@ -37,7 +37,7 @@ Every cell checks: does the system produce this output?
 
 ---
 
-## Position 2 — Highest Mitigation Δ in the Comparison (+0.67 vs. +0.60 Dale)
+## Position 2 — Mitigation Δ (Measured: −0.035 vs. +0.60 Dale)
 
 ### Caveat (stated up-front, per peer-review guidance)
 
@@ -55,7 +55,7 @@ Dale 2023 is the only published MT mitigation study with a directly comparable �
 
 | Method | Pre-mit. | Post-mit. | **Δ** | Domain |
 |---|---|---|---|---|
-| **Ours (Step 10 regen + Step 11 gate)** | −0.63 | +0.04 to +0.12 | **+0.67 to +0.75** | Synthetic QA |
+| **Ours (Step 10 regen + Step 11 gate)** | 0.863 | 0.828 | -0.035 [-0.067, -0.006] (n=18 regenerated) — not positive | Synthetic QA |
 | Dale 2023 — COMET-QE rerank | −0.63 | −0.03 | +0.60 | MT (DE→EN, WMT) |
 | Dale 2023 — LaBSE rerank | −0.63 | −0.07 | +0.56 | MT (DE→EN, WMT) |
 | Dale 2023 — XNLI rerank | −0.63 | −0.12 | +0.51 | MT (DE→EN, WMT) |
@@ -74,7 +74,7 @@ Dale 2023 is the only published MT mitigation study with a directly comparable �
 
 ### Verdict
 
-**WIN — with required caveat.** On the synthetic QA benchmark, ours has the largest reported mitigation Δ (+0.67 to +0.75) in the entire cited literature. Dale 2023 is the closest competitor at +0.60, and ours beats it by 0.07–0.15 across all four of Dale's variants. Dale's Δ is on MT; ours is on QA; reviewers should treat the comparison as "best-in-class within each domain" rather than a direct numerical comparison.
+**NOT A WIN — reported as measured.** On the length-matched HaluEval split, the mitigation Δ over the no-mitigation baseline is **−0.035 BERTScore F1** (95% CI [−0.067, −0.006], measured on the 18 of 60 rows where step 10 actually regenerated). Dale 2023 reports +0.49 to +0.60 on machine translation, so on the one published mitigation Δ we do not lead. The step that rewrites contradicted claims is implemented and exercised, but on this sample it did not improve similarity to the gold answer; that is an open result, and it is reported here rather than asserted as a win.
 
 ---
 
@@ -146,7 +146,7 @@ This is **publication-grade** — a downstream auditor can verify every claim by
 
 | Method | HRR (Hallucination Reduction Rate) |
 |---|---|
-| **Ours (Step 11 gate)** | **0.857** (1 − ABSTAIN-failure rate on REJECT) |
+| **Ours (Step 11 gate)** | **0.172** |
 | Dale 2023 — N-best rerank | ~0.55 (implied from Δ) |
 | AILS-NTUA — Voting | 0 (no mitigation) |
 | TU Wien — Vectara | 0 (no mitigation) |
@@ -159,7 +159,7 @@ This is **publication-grade** — a downstream auditor can verify every claim by
 
 | Method | VSR (fraction of answers with zero contradictions) |
 |---|---|
-| **Ours (per-claim NLI)** | **0.85+** |
+| **Ours (per-claim NLI)** | **0.608** |
 | AILS-NTUA — Voting | 0.80 (model-aware) |
 | TU Wien — Vectara | 0.81 (model-aware) |
 | Halu-NLP (SHROOM winner) | 0.81 |
@@ -169,7 +169,7 @@ This is **publication-grade** — a downstream auditor can verify every claim by
 
 | Method | CCR (fraction of contradicted claims edited out) |
 |---|---|
-| **Ours (Step 10 regen)** | **0.917** |
+| **Ours (Step 10 regen)** | **0.616** |
 | Dale 2023 — N-best rerank | ~0.55 (implied from Δ, MT only) |
 | AILS-NTUA / DUTh / TU Wien / IRIT-BL | 0 (no rewriting) |
 
@@ -180,9 +180,9 @@ This is **publication-grade** — a downstream auditor can verify every claim by
 
 ### Verdict
 
-**WIN on HRR + CCR.** Ours is the only QA-side system actively rewriting contradicted content. Dale 2023 (MT-side) is the only other; ours beats it because rewrite > rerank.
+**NOT A WIN — reported as measured.** Ours is the only QA-side system actively rewriting contradicted content, but the measured HRR (0.172) and CCR (0.616) are reported as measured rather than claimed as wins against Dale 2023's implied HRR of ~0.55.
 
-**WIN on VSR.** Atomic granularity + per-claim NLI is structurally superior to sentence-level classification for partial contradictions.
+**NOT A WIN on the rate — the structural argument stands.** Atomic granularity + per-claim NLI is structurally superior to sentence-level classification for partial contradictions, but the measured VSR (0.608) is below the cited comparables (0.80–0.81), so the granularity claim is a capability argument rather than a rate advantage.
 
 ---
 
@@ -191,12 +191,12 @@ This is **publication-grade** — a downstream auditor can verify every claim by
 | Position | Defensible? | Closest competitor | Margin |
 |---|---|---|---|
 | 1. Detect+Verify+Rewrite+Cite combination | ✅ WIN | Dale 2023 (1/4) vs. **Ours (4/4)** | **3 axes unique** |
-| 2. Mitigation Δ +0.67 (highest in literature) | ✅ WIN* | Dale 2023 +0.60 (different domain) | +0.07 to +0.15 |
+| 2. Mitigation Δ | ✗ LOSS | Dale 2023 +0.60 (different domain) | -0.035 [-0.067, -0.006] (n=18 regenerated) — not positive measured vs. +0.60 |
 | 3. Atomic claim granularity | ✅ WIN | TU Wien (split only, sentence verdict) | **unique structural win** |
 | 4. Citation provenance per claim | ✅ WIN | None of the 10 | **unique in literature** |
-| 5. HRR / VSR / CCR | ✅ WIN | Halu-NLP VSR 0.81 vs. **Ours 0.85+** | +0.04 VSR; rewrite > rerank for HRR/CCR |
+| 5. HRR / VSR / CCR | ❌ LOSS on the rates | Halu-NLP VSR 0.81 vs. **Ours 0.608** | −0.202 VSR; HRR 0.172 vs. ~0.55 implied |
 
-\* Caveat: cross-domain comparison (ours on QA, Dale on MT); reviewers should be told this up front.
+*Positions 2 and 5 are not wins and are reported as measured. The mitigation Δ is −0.035 BERTScore F1 (95% CI [−0.067, −0.006]) on the 18 of 60 rows where step 10 regenerated, and the HRR / VSR / CCR rates are below the cited comparables. The rewrite path is implemented and exercised, but on this sample it did not improve similarity to the gold answer; improving it is future work. The defensible claims are the architectural ones — Positions 1, 3 and 4.
 
 ---
 
@@ -206,7 +206,7 @@ Use the following three paragraphs verbatim in your thesis Chapter 6 (Discussion
 
 > **Paragraph 1 — Position 1 (combination win).** *Of the ten papers we compare against, no single system jointly performs detection, per-claim verification, evidence-guided regeneration, and citation-grade provenance. SHROOM-track systems (Halu-NLP, AILS-NTUA, TU Wien, IRIT-BL, DUTh) detect only. Conformal-RAG detects and rejects only. Dale 2023 detects and reranks N-best hypotheses from MC-dropout but cannot edit claim content. The implemented pipeline is the only system that emits all four of these capabilities in a single forward pass over a labelled QA set.*
 
-> **Paragraph 2 — Position 2 (Δ win, with caveat).** *On the synthetic QA benchmark, our pipeline achieves a mitigation Δ of +0.67 to +0.75 over the no-mitigation baseline — the largest reported Δ in the ten-paper comparison. Dale 2023 (ACL 2023) reports a Δ of +0.49 to +0.60 on machine translation, which is the only published Δ on a parallel task. We contextualise this by noting that Dale's evaluation is on WMT DE→EN while ours is on synthetic QA; within each domain our pipeline is the strongest reported result.*
+> **Paragraph 2 — Position 2 (Δ reported as measured).** *Our pipeline implements evidence-grounded regeneration and measures its effect: on the length-matched HaluEval split, the mitigation Δ over the no-mitigation baseline is −0.035 BERTScore F1 (95% CI [−0.067, −0.006]), measured on the 18 of 60 rows where step 10 actually regenerated. Dale 2023 (ACL 2023) reports a Δ of +0.49 to +0.60 on machine translation, which is the only published Δ on a parallel task. We therefore do not claim to lead on this dimension: the rewrite path is exercised and quantified, and improving it is future work.*
 
 > **Paragraph 3 — Positions 3 + 4 (structural wins).** *Our pipeline detects hallucination at the atomic-claim level rather than at the sentence level, enabling it to catch intra-sentence partial contradictions that every other system in the comparison misses. Furthermore, every verified claim is paired with a citation (`doc_id` + supporting passage + cross-encoder score) in the output, yielding auditable, citation-grade provenance — a capability absent from every cited paper.*
 

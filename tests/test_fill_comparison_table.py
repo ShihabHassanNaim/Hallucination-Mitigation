@@ -490,3 +490,194 @@ def test_five_position_file_is_refreshed(tmp_path):
     assert "0.85+" not in out
     assert "0.917" not in out
 
+
+
+# ---------------------------------------------------------------------------
+# Verdict cells
+#
+# The prose tables carry a win/tie/loss verdict next to every number. A
+# verdict that is not derived from the measurement is exactly the kind of
+# claim the generator exists to prevent, so the verdicts are computed from
+# the same numbers the cells quote.
+# ---------------------------------------------------------------------------
+
+
+def test_above_is_false_when_the_value_is_below_the_comparable():
+    from scripts.fill_comparison_table import _above
+
+    values = {"detection_accuracy": "0.745"}
+    assert not _above(lambda k: values[k], "detection_accuracy", 0.847)
+
+
+def test_above_flips_when_the_measurement_improves():
+    from scripts.fill_comparison_table import _above
+
+    values = {"detection_accuracy": "0.900"}
+    assert _above(lambda k: values[k], "detection_accuracy", 0.847)
+
+
+def test_above_is_false_for_a_missing_measurement():
+    from scripts.fill_comparison_table import _above
+
+    assert not _above(lambda k: (_ for _ in ()).throw(KeyError(k)),
+                      "detection_accuracy", 0.847)
+
+
+def test_delta_positive_only_for_a_positive_measurement():
+    from scripts.fill_comparison_table import _delta_positive
+
+    positive = {"delta": "+0.035 [0.006, 0.067] (n=18 regenerated)"}
+    negative = {"delta": "-0.035 [-0.067, -0.006] (n=18 regenerated)"}
+    assert _delta_positive(lambda k: positive[k])
+    assert not _delta_positive(lambda k: negative[k])
+
+
+def test_delta_positive_is_false_for_a_missing_measurement():
+    from scripts.fill_comparison_table import _delta_positive
+
+    assert not _delta_positive(lambda k: (_ for _ in ()).throw(KeyError(k)))
+
+
+def test_why_we_win_verdict_rows_are_rewritten(tmp_path):
+    """The win/tie/loss cells are recomputed, not left hand-written."""
+    from scripts.fill_comparison_table import _fill_why_we_win_md
+
+    md = tmp_path / "why_we_win.md"
+    md.write_text(
+        "| 2 | **Claim-level F1** | TU Wien 2024 \u2014 Vectara | 0.71 | "
+        "**0.76** | \u2713 | Above the cited comparable |\n"
+        "| 3 | **Hallucination Reduction Rate (HRR)** | Dale 2023 "
+        "(N-best rerank) | ~0.55 (implied) | **0.71** | \u2713 | "
+        "Above the implied baseline |\n"
+        "| 4 | **Verification Success Rate (VSR)** | AILS-NTUA (Voting) | "
+        "0.80 (acc) | **0.85+** | \u2713 | Above the cited comparables |\n"
+        "| 8 | **Sentence accuracy** | Halu-NLP (SHROOM winner) | 0.847 | "
+        "**0.83** | \u2713 | Above the SHROOM winner |\n",
+        encoding="utf-8",
+    )
+
+    _fill_why_we_win_md(md, {
+        "claim_f1": 0.653,
+        "hallucination_reduction_rate": 0.172,
+        "verification_success_rate": 0.608,
+        "detection_accuracy": 0.745,
+    })
+
+    out = md.read_text(encoding="utf-8")
+    # The measured values are in place.
+    assert "**0.653**" in out
+    assert "**0.172**" in out
+    assert "**0.608**" in out
+    assert "**0.745**" in out
+    # The stale values are gone.
+    assert "0.76" not in out
+    assert "0.85+" not in out
+    # Every row that lost the comparison now carries a loss verdict.
+    assert "Above the cited comparable |" not in out
+    assert "Above the implied baseline |" not in out
+    assert "Above the cited comparables |" not in out
+    assert "Above the SHROOM winner |" not in out
+    assert "Below the cited comparable" in out
+    assert "Below the implied baseline" in out
+    assert "Below the cited comparables" in out
+    assert "Below the SHROOM winner" in out
+
+
+def test_why_we_win_verdict_rows_are_idempotent(tmp_path):
+    """A second pass must not append a second verdict column."""
+    from scripts.fill_comparison_table import _fill_why_we_win_md
+
+    md = tmp_path / "why_we_win.md"
+    md.write_text(
+        "| 2 | **Claim-level F1** | TU Wien 2024 \u2014 Vectara | 0.71 | "
+        "**0.76** | \u2713 | Above the cited comparable |\n",
+        encoding="utf-8",
+    )
+
+    agg = {"claim_f1": 0.653}
+    _fill_why_we_win_md(md, agg)
+    once = md.read_text(encoding="utf-8")
+    _fill_why_we_win_md(md, agg)
+    assert md.read_text(encoding="utf-8") == once
+
+
+def test_why_we_win_tex_verdict_rows_are_rewritten(tmp_path):
+    """The LaTeX verdict matrix is recomputed from the measurements."""
+    from scripts.fill_comparison_table import _fill_why_we_win_tex
+
+    tex = tmp_path / "why_we_win_summary.tex"
+    tex.write_text(
+        r"Claim-level F1               & 0.71 (TU Wien Vectara) & "
+        r"\textbf{0.76} & \textbf{Win} & Per-claim NLI \\"
+        "\n"
+        r"Verification Success Rate    & 0.81 (Halu-NLP) & "
+        r"\textbf{0.85+} & \textbf{Win} & Atomic granularity \\"
+        "\n",
+        encoding="utf-8",
+    )
+
+    _fill_why_we_win_tex(tex, {
+        "claim_f1": 0.653,
+        "verification_success_rate": 0.608,
+    })
+
+    out = tex.read_text(encoding="utf-8")
+    assert "0.653" in out
+    assert "0.608" in out
+    assert "0.85+" not in out
+    assert "Loss" in out
+    # No stray column is left behind by the row rewrite.
+    assert "\\ \\ \\ &" not in out
+
+
+def test_verdict_tally_is_computed_from_the_rows():
+    """The tally summarises the matrix, so it is computed from it."""
+    from scripts.fill_comparison_table import _verdict_tally
+
+    matrix = (
+        "| 1 | **Mitigation** | x | y | z | \u2717 | lost |\n"
+        "| 2 | **Claim F1** | x | y | z | \u2713 | won |\n"
+        "| 3 | **HRR** | x | y | z | \u2248 | tied |\n"
+        "| 4 | **VSR** | x | y | z | \u2717 | lost |\n"
+    )
+    tally = _verdict_tally(matrix)
+    assert tally is not None
+    assert "**\u2713 Win** | 1 | 2 |" in tally
+    assert "**\u2248 Tie / At par** | 1 | 3 |" in tally
+    assert "**\u2717 Loss** | 2 | 1, 4 |" in tally
+
+
+def test_verdict_tally_is_none_without_a_matrix():
+    from scripts.fill_comparison_table import _verdict_tally
+
+    assert _verdict_tally("no table here\n") is None
+
+
+def test_why_we_win_tally_is_refreshed(tmp_path):
+    """A stale tally is rewritten to agree with the rows above it."""
+    from scripts.fill_comparison_table import _fill_why_we_win_md
+
+    md = tmp_path / "why_we_win.md"
+    md.write_text(
+        "| 2 | **Claim-level F1** | TU Wien 2024 \u2014 Vectara | 0.71 | "
+        "**0.76** | \u2713 | Above the cited comparable |\n"
+        "| 3 | **Hallucination Reduction Rate (HRR)** | Dale 2023 "
+        "(N-best rerank) | ~0.55 (implied) | **0.71** | \u2713 | "
+        "Above the implied baseline |\n"
+        "\n"
+        "| Outcome | Count | Dimensions |\n"
+        "|---|---|---|\n"
+        "| **\u2713 Win** | 6 | 1, 2, 3, 4, 5, 6 |\n"
+        "| **\u2248 Tie / At par** | 5 | 7, 8, 9, 10, 11 |\n"
+        "| **\u2717 Loss** | 6 | 12, 13, 14, 15, 16, 17 |\n",
+        encoding="utf-8",
+    )
+
+    _fill_why_we_win_md(md, {
+        "claim_f1": 0.653,
+        "hallucination_reduction_rate": 0.172,
+    })
+
+    out = md.read_text(encoding="utf-8")
+    assert "| **\u2713 Win** | 0 |  |" in out
+    assert "| **\u2717 Loss** | 2 | 2, 3 |" in out

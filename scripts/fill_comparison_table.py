@@ -233,6 +233,128 @@ def build_mitigation_replacements(mit: dict) -> dict[str, str]:
     return out
 
 
+def _mitigation_delta_text(mit: dict) -> str | None:
+    """The measured mitigation delta, formatted for a prose cell.
+
+    Returns None when the delta was not measured, so a caller can leave
+    the row untouched rather than substituting a number that does not
+    exist.
+    """
+    if not mit:
+        return None
+    regen = mit.get("regenerated_rows") or {}
+    if not regen or regen.get("delta_bertscore") is None:
+        return None
+
+    delta = regen["delta_bertscore"]
+    ci = regen.get("delta_bertscore_ci95")
+    n = mit.get("n_regenerated") or regen.get("n")
+
+    text = f"{delta:+.3f}"
+    if ci:
+        text += f" [{ci[0]:+.3f}, {ci[1]:+.3f}]"
+    if n:
+        text += f" (n={n} regenerated)"
+    if delta <= 0:
+        text += " — not positive"
+    return text
+
+
+def _mitigation_prose_values() -> dict:
+    """The values a prose row needs to quote the measured mitigation delta.
+
+    The verdict cell is derived from the sign of the measured delta so a
+    row cannot keep claiming a win once the measurement contradicts it.
+    """
+    mit = load_mitigation(MITIGATION_PATH)
+    delta_text = _mitigation_delta_text(mit)
+    if delta_text is None:
+        return {}
+
+    regen = mit.get("regenerated_rows") or {}
+    delta = regen.get("delta_bertscore")
+    if delta is None:
+        return {}
+
+    if delta > 0:
+        verdict = "Highest single gain in the comparison"
+    else:
+        verdict = (
+            "Measured on regenerated rows only; not an improvement over the "
+            "no-mitigation baseline"
+        )
+    return {"__mitigation_delta__": delta_text, "delta": delta_text,
+            "verdict": verdict}
+
+
+def _delta_positive(lookup) -> bool:
+    """True when the measured mitigation delta is positive.
+
+    The delta text is formatted with a leading sign, so the sign is the
+    first non-space character. A missing measurement is treated as
+    "not a win" so a prose row never claims a win it cannot support.
+    """
+    try:
+        text = lookup("delta")
+    except KeyError:
+        return False
+    if not text:
+        return False
+    return str(text).strip().startswith("+")
+
+
+def _above(lookup, key: str, threshold: float) -> bool:
+    """True when the measured value beats the cited comparable.
+
+    The values are pre-formatted strings, so the comparison is made on the
+    numeric text. A missing value is treated as "not above".
+    """
+    try:
+        raw = lookup(key)
+    except KeyError:
+        return False
+    if raw is None:
+        return False
+    try:
+        return float(str(raw).strip()) > threshold
+    except ValueError:
+        return False
+
+
+def _verdict_tally(text: str) -> str | None:
+    """Rebuild the verdict tally from the win-matrix rows.
+
+    The tally summarises the rows above it, so it is computed from those
+    rows rather than maintained by hand. Returns None when the matrix is
+    not present or a row cannot be classified.
+    """
+    rows = re.findall(
+        r"^\| (\d+) \| \*\*[^*]+\*\* \|.*?\| ([✓✗≈]) \|",
+        text,
+        flags=re.MULTILINE,
+    )
+    if not rows:
+        return None
+
+    wins, ties, losses = [], [], []
+    for number, verdict in rows:
+        if verdict == "✓":
+            wins.append(number)
+        elif verdict == "≈":
+            ties.append(number)
+        else:
+            losses.append(number)
+
+    def _fmt(label: str, numbers: list[str]) -> str:
+        return f"| **{label}** | {len(numbers)} | {', '.join(numbers)} |"
+
+    return "\n".join([
+        _fmt("✓ Win", wins),
+        _fmt("≈ Tie / At par", ties),
+        _fmt("✗ Loss", losses),
+    ])
+
+
 def _find_ours_column(header: list[str]) -> int:
     for i, h in enumerate(header):
         if h.strip().lower().startswith("ours"):
@@ -356,6 +478,20 @@ def _fill_comparison_md(
             ("spearman_rho",),
         ),
         (
+            "summary: sentence accuracy verdict",
+            r"\| \*\*Sentence accuracy\*\* \| 0\.847 \(Halu-NLP, SHROOM\) \| "
+            r"\*\*[^*]+\*\* \| [^|]* \|",
+            lambda v, m: (
+                f"| **Sentence accuracy** | 0.847 (Halu-NLP, SHROOM) | "
+                f"**{v('detection_accuracy')}** | "
+                + ("Above the SHROOM winner"
+                   if _above(v, "detection_accuracy", 0.847)
+                   else "Below the SHROOM winner")
+                + " |"
+            ),
+            ("detection_accuracy",),
+        ),
+        (
             "summary: claim-level F1",
             r"\| \*\*Claim-level F1\*\* \| 0\.71 \(TU Wien Vectara\) \| "
             r"\*\*[^*]+\*\* \|",
@@ -384,6 +520,16 @@ def _fill_comparison_md(
             ),
             ("hallucination_reduction_rate",),
         ),
+        (
+            "summary: mitigation delta",
+            r"\| \*\*Mitigation Δ over baseline\*\* \| \+0\.60 \(Dale 2023 "
+            r"COMET-QE rerank\) \| \*\*[^*]+\*\* \| [^|]*\|",
+            lambda v, m: (
+                "| **Mitigation Δ over baseline** | +0.60 (Dale 2023 "
+                f"COMET-QE rerank) | **{v('delta')}** | {v('verdict')} |"
+            ),
+            ("delta", "verdict"),
+        ),
     ]
 
     values = {k: _v(k) for k in (
@@ -391,9 +537,10 @@ def _fill_comparison_md(
         "claim_precision", "claim_recall", "claim_f1", "detection_accuracy",
         "spearman_rho", "hallucination_reduction_rate",
     )}
+    values.update(_mitigation_prose_values())
     text, replacements = _apply_specs(text, row_specs, values, dry_run=dry_run)
 
-    mit_changes = _fill_mitigation_prose(text, path, dry_run=dry_run)
+    text, mit_changes = _fill_mitigation_prose(text, path, dry_run=dry_run)
     replacements.extend(mit_changes)
 
     if replacements and not dry_run:
@@ -495,6 +642,16 @@ def _fill_comparison_tex(
             ),
             ("hallucination_reduction_rate",),
         ),
+        (
+            "summary: mitigation delta",
+            r"Mitigation \$\\Delta\$ & \+0\.60 \(Dale COMET-QE\) & "
+            r"\\textbf\{[^}]*\} & \\textbf\{[^}]*\} \\\\",
+            lambda v, m: (
+                r"Mitigation $\Delta$ & +0.60 (Dale COMET-QE) & "
+                r"\textbf{" + f"{v('delta')}" + r"} & Measured \\"
+            ),
+            ("delta",),
+        ),
     ]
 
     values = {k: _v(k) for k in (
@@ -502,6 +659,7 @@ def _fill_comparison_tex(
         "claim_precision", "claim_recall", "claim_f1", "detection_accuracy",
         "spearman_rho", "hallucination_reduction_rate",
     )}
+    values.update(_mitigation_prose_values())
     text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
 
     # The caption still says the numbers are projected.
@@ -543,12 +701,40 @@ def _fill_why_we_win_md(
 
     specs = [
         (
+            "row 1: mitigation delta",
+            r"\| 1 \| \*\*Mitigation Δ \(post-mitigation lift\)\*\* \| "
+            r"Dale 2023 — COMET-QE rerank \| \+0\.60 \| \*\*[^*]+\*\* \|",
+            lambda v, m: (
+                "| 1 | **Mitigation Δ (post-mitigation lift)** | "
+                f"Dale 2023 — COMET-QE rerank | +0.60 | **{v('delta')}** |"
+            ),
+            ("delta",),
+        ),
+        (
             "row 7: ROC-AUC",
             r"\| 7 \| \*\*Detection ROC-AUC\*\* \| Dale 2023 — ALTI\+ \| "
             r"0\.987 \(MT-only\) \| \*\*[^*]+\*\* \|",
             lambda v, m: (
                 "| 7 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | "
                 f"0.987 (MT-only) | **{v('detection_roc_auc')}** |"
+            ),
+            ("detection_roc_auc",),
+        ),
+        (
+            "row 7: detection ROC-AUC verdict",
+            r"\| 7 \| \*\*Detection ROC-AUC\*\* \| Dale 2023 — ALTI\+ \| "
+            r"0\.987 \(MT-only\) \| \*\*[^*]+\*\* \| [^|]* \| [^|]* \|",
+            lambda v, m: (
+                "| 7 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | "
+                f"0.987 (MT-only) | **{v('detection_roc_auc')}** | "
+                + ("\u2713" if _above(v, "detection_roc_auc", 0.90)
+                   else "\u2248")
+                + " | "
+                + ("Above the cited comparables"
+                   if _above(v, "detection_roc_auc", 0.90)
+                   else "Below the MT-specialist and slightly below Sent-T5 XL "
+                        "(0.85–0.90); above the general-purpose probes")
+                + " |"
             ),
             ("detection_roc_auc",),
         ),
@@ -610,36 +796,77 @@ def _fill_why_we_win_md(
             ("verification_success_rate",),
         ),
         (
+            "row 1: mitigation delta verdict",
+            r"\| 1 \| \*\*Mitigation \u0394 \(post-mitigation lift\)\*\* \| "
+            r"Dale 2023 — COMET-QE rerank \| \+0\.60 \| \*\*[^*]+\*\* \| "
+            r"[^|]* \| [^|]* \|",
+            lambda v, m: (
+                "| 1 | **Mitigation \u0394 (post-mitigation lift)** | "
+                "Dale 2023 — COMET-QE rerank | +0.60 | "
+                f"**{v('delta')}** | "
+                + ("\u2713" if _delta_positive(v) else "\u2717")
+                + " | "
+                + ("Highest single gain in the comparison"
+                   if _delta_positive(v)
+                   else "Measured on the rows step 10 regenerated; the rewrite "
+                        "does not improve on the no-mitigation baseline yet")
+                + " |"
+            ),
+            ("delta",),
+        ),
+        (
             "row 2: claim-level F1",
             r"\| 2 \| \*\*Claim-level F1\*\* \| TU Wien 2024 — Vectara \| "
-            r"0\.71 \| \*\*[^*]+\*\* \|",
+            r"0\.71 \| \*\*[^*]+\*\* \| [^|]* \| [^|]* \|",
             lambda v, m: (
                 "| 2 | **Claim-level F1** | TU Wien 2024 — Vectara | 0.71 | "
-                f"**{v('claim_f1')}** |"
+                f"**{v('claim_f1')}** | "
+                + ("\u2713" if _above(v, "claim_f1", 0.71) else "\u2717")
+                + " | "
+                + ("Above the cited comparable"
+                   if _above(v, "claim_f1", 0.71)
+                   else "Below the cited comparable")
+                + " |"
             ),
             ("claim_f1",),
         ),
         (
             "row 4: VSR",
             r"\| 4 \| \*\*Verification Success Rate \(VSR\)\*\* \| "
-            r"AILS-NTUA \(Voting\) \| 0\.80 \(acc\) \| \*\*[^*]+\*\* \|",
+            r"AILS-NTUA \(Voting\) \| 0\.80 \(acc\) \| \*\*[^*]+\*\* \| "
+            r"[^|]* \| [^|]* \|",
             lambda v, m: (
                 "| 4 | **Verification Success Rate (VSR)** | "
                 f"AILS-NTUA (Voting) | 0.80 (acc) | "
-                f"**{v('verification_success_rate')}** |"
+                f"**{v('verification_success_rate')}** | "
+                + ("\u2713"
+                   if _above(v, "verification_success_rate", 0.80)
+                   else "\u2717")
+                + " | "
+                + ("Above the cited comparables"
+                   if _above(v, "verification_success_rate", 0.80)
+                   else "Below the cited comparables")
+                + " |"
             ),
             ("verification_success_rate",),
         ),
         (
             "row 3: HRR",
             r"\| 3 \| \*\*Hallucination Reduction Rate \(HRR\)\*\* \| Dale 2023 "
-            r"\(N-best rerank\) \| ~0\.55 \(implied\) \| \*\*[^*]+\*\* \|"
-            r"(?: ✓ \| Combined detection \+ regen \+ gate \|)?",
+            r"\(N-best rerank\) \| ~0\.55 \(implied\) \| \*\*[^*]+\*\* \| "
+            r"[^|]* \| [^|]* \|",
             lambda v, m: (
                 "| 3 | **Hallucination Reduction Rate (HRR)** | Dale 2023 "
                 f"(N-best rerank) | ~0.55 (implied) | "
-                f"**{v('hallucination_reduction_rate')}** | ✓ | "
-                "Combined detection + regen + gate |"
+                f"**{v('hallucination_reduction_rate')}** | "
+                + ("\u2713"
+                   if _above(v, "hallucination_reduction_rate", 0.55)
+                   else "\u2717")
+                + " | "
+                + ("Above the implied baseline"
+                   if _above(v, "hallucination_reduction_rate", 0.55)
+                   else "Below the implied baseline")
+                + " |"
             ),
             ("hallucination_reduction_rate",),
         ),
@@ -652,6 +879,23 @@ def _fill_why_we_win_md(
             ),
             ("hallucination_reduction_rate",),
         ),
+        (
+            "row 8: sentence accuracy",
+            r"\| 8 \| \*\*Sentence accuracy\*\* \| Halu-NLP \(SHROOM winner\) "
+            r"\| 0\.847 \| \*\*[^*]+\*\* \| [^|]* \| [^|]* \|",
+            lambda v, m: (
+                "| 8 | **Sentence accuracy** | Halu-NLP (SHROOM winner) | "
+                f"0.847 | **{v('detection_accuracy')}** | "
+                + ("\u2713" if _above(v, "detection_accuracy", 0.847)
+                   else "\u2717")
+                + " | "
+                + ("Above the SHROOM winner"
+                   if _above(v, "detection_accuracy", 0.847)
+                   else "Below the SHROOM winner")
+                + " |"
+            ),
+            ("detection_accuracy",),
+        ),
     ]
 
     values = {k: _v(k) for k in (
@@ -660,9 +904,26 @@ def _fill_why_we_win_md(
         "spearman_rho", "hallucination_reduction_rate",
         "verification_success_rate",
     )}
+    values.update(_mitigation_prose_values())
     text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
 
-    mit_changes = _fill_mitigation_prose(text, path, dry_run=dry_run)
+    # The tally summarises the rows above it, so it is recomputed from
+    # them. A hand-written tally drifts the moment a verdict changes.
+    tally = _verdict_tally(text)
+    if tally is not None:
+        pattern = (
+            r"\| \*\*✓ Win\*\* \| [^\n]*\n"
+            r"\| \*\*≈ Tie / At par\*\* \| [^\n]*\n"
+            r"\| \*\*✗ Loss\*\* \| [^\n]*"
+        )
+        new_text, count = re.subn(pattern, lambda m: tally, text)
+        if count and new_text != text:
+            text = new_text
+            replacements.append(
+                ("verdict tally", pattern, f"{count} block(s)")
+            )
+
+    text, mit_changes = _fill_mitigation_prose(text, path, dry_run=dry_run)
     replacements.extend(mit_changes)
 
     if replacements and not dry_run:
@@ -726,6 +987,19 @@ def _fill_five_position_md(
             ),
             ("verification_success_rate",),
         ),
+        (
+            "position 2 row in the summary table",
+            r"\| 2\. Mitigation [^|]*\|[^|]*\|[^|]*\|[^|]*\|",
+            lambda v, m: (
+                "| 2. Mitigation \u0394 | "
+                + ("\u2713 WIN" if _delta_positive(v) else "\u2717 LOSS")
+                + " | Dale 2023 +0.60 (different domain) | "
+                + (f"{v('delta')} measured" if _delta_positive(v)
+                   else f"{v('delta')} measured vs. +0.60")
+                + " |"
+            ),
+            ("delta",),
+        ),
     ]
 
     values = {k: _v(k) for k in (
@@ -734,9 +1008,10 @@ def _fill_five_position_md(
         "spearman_rho", "hallucination_reduction_rate",
         "verification_success_rate", "claim_correction_rate",
     )}
+    values.update(_mitigation_prose_values())
     text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
 
-    mit_changes = _fill_mitigation_prose(text, path, dry_run=dry_run)
+    text, mit_changes = _fill_mitigation_prose(text, path, dry_run=dry_run)
     replacements.extend(mit_changes)
 
     if replacements and not dry_run:
@@ -786,14 +1061,19 @@ _MITIGATION_PROSE = {
 
 def _fill_mitigation_prose(
     text: str, path: Path, dry_run: bool = False
-) -> list[tuple[str, str, str]]:
-    """Replace the mitigation rows of the prose tables with measured values."""
+) -> tuple[str, list[tuple[str, str, str]]]:
+    """Replace the mitigation rows of the prose tables with measured values.
+
+    Returns the updated text along with the list of changes. The text must
+    be returned because this helper rewrites rows that live *outside* the
+    spec lists of the calling function.
+    """
     mitigation = load_mitigation(MITIGATION_PATH)
     if not mitigation:
-        return []
+        return text, []
     regen = mitigation.get("regenerated_rows") or {}
     if not regen or regen.get("delta_bertscore") is None:
-        return []
+        return text, []
 
     delta = regen["delta_bertscore"]
     ci = regen.get("delta_bertscore_ci95")
@@ -803,6 +1083,11 @@ def _fill_mitigation_prose(
     delta_text = f"{delta:+.3f}"
     if ci:
         delta_text += f" [{ci[0]:+.3f}, {ci[1]:+.3f}]"
+    n = mitigation.get("n_regenerated") or regen.get("n")
+    if n:
+        delta_text += f" (n={n} regenerated)"
+    if delta <= 0:
+        delta_text += " — not positive"
     m = {
         "pre": f"{pre:.3f}" if pre is not None else "n/a",
         "post": f"{post:.3f}" if post is not None else "n/a",
@@ -819,7 +1104,7 @@ def _fill_mitigation_prose(
             continue
         text = new_text
         out.append((label, pattern, f"{count} row(s)"))
-    return out
+    return text, out
 
 
 def _fill_why_we_win_tex(
@@ -896,6 +1181,16 @@ def _fill_why_we_win_tex(
             ("verification_success_rate",),
         ),
         (
+            "summary: mitigation delta",
+            r"Mitigation \$\\Delta\$( +) & \+0\.60 \(Dale COMET-QE\) & "
+            r"\\textbf\{[^}]*\} & \\textbf\{[^}]*\} &",
+            lambda v, m: (
+                r"Mitigation $\Delta$         & +0.60 (Dale COMET-QE) & "
+                r"\textbf{" + f"{v('delta')}" + r"} & Measured &"
+            ),
+            ("delta",),
+        ),
+        (
             "detection table row",
             r"\\textbf\{Ours \(Step 9 fused\)\} & \\textbf\{[^}]*\} \\\\",
             lambda v, m: (
@@ -924,13 +1219,80 @@ def _fill_why_we_win_tex(
             ),
             ("verification_success_rate",),
         ),
+        (
+            "summary: sentence accuracy verdict",
+            r"Sentence accuracy            & 0\.847 \(Halu-NLP\) & [^&]* & "
+            r"[^&]* & [^&]* \\\\",
+            lambda v, m: (
+                r"Sentence accuracy            & 0.847 (Halu-NLP) & "
+                f"{v('detection_accuracy')}"
+                + (r" & \textbf{Win}" if _above(v, "detection_accuracy", 0.847)
+                   else r" & Loss")
+                + (r" & Above the SHROOM winner"
+                   if _above(v, "detection_accuracy", 0.847)
+                   else r" & Below the SHROOM winner")
+                + r" \\"
+            ),
+            ("detection_accuracy",),
+        ),
+        (
+            "summary: claim-level F1 verdict",
+            r"Claim-level F1               & 0\.71 \(TU Wien Vectara\) & "
+            r"\\textbf\{[^}]*\} & [^&]* & [^&]* \\\\",
+            lambda v, m: (
+                r"Claim-level F1               & 0.71 (TU Wien Vectara) & "
+                r"\textbf{" + f"{v('claim_f1')}" + r"} & "
+                + ("\textbf{Win}" if _above(v, "claim_f1", 0.71) else "Loss")
+                + (r" & Above the cited comparable"
+                   if _above(v, "claim_f1", 0.71)
+                   else r" & Below the cited comparable")
+                + r" \\"
+            ),
+            ("claim_f1",),
+        ),
+        (
+            "summary: HRR verdict",
+            r"Hallucination Reduction Rate & 0\.55 \(Dale 2023\) & "
+            r"\\textbf\{[^}]*\} & [^&]* & [^&]* \\\\",
+            lambda v, m: (
+                r"Hallucination Reduction Rate & 0.55 (Dale 2023) & "
+                r"\textbf{" + f"{v('hallucination_reduction_rate')}" + r"} & "
+                + ("\textbf{Win}"
+                   if _above(v, "hallucination_reduction_rate", 0.55)
+                   else "Loss")
+                + (r" & Above the implied baseline"
+                   if _above(v, "hallucination_reduction_rate", 0.55)
+                   else r" & Below the implied baseline")
+                + r" \\"
+            ),
+            ("hallucination_reduction_rate",),
+        ),
+        (
+            "summary: VSR verdict",
+            r"Verification Success Rate    & 0\.81 \(Halu-NLP\) & "
+            r"\\textbf\{[^}]*\} & [^&]* & [^&]* \\\\",
+            lambda v, m: (
+                r"Verification Success Rate    & 0.81 (Halu-NLP) & "
+                r"\textbf{" + f"{v('verification_success_rate')}" + r"} & "
+                + ("\textbf{Win}"
+                   if _above(v, "verification_success_rate", 0.81)
+                   else "Loss")
+                + (r" & Above the cited comparables"
+                   if _above(v, "verification_success_rate", 0.81)
+                   else r" & Below the cited comparables")
+                + r" \\"
+            ),
+            ("verification_success_rate",),
+        ),
     ]
 
     values = {k: _v(k) for k in (
         "detection_roc_auc", "detection_aupr", "precision_at_recall_90",
         "claim_precision", "claim_recall", "claim_f1", "detection_accuracy",
         "spearman_rho", "hallucination_reduction_rate",
+        "verification_success_rate",
     )}
+    values.update(_mitigation_prose_values())
     text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
 
     if replacements and not dry_run:

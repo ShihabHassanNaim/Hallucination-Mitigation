@@ -517,3 +517,97 @@ def test_resume_skips_rows_the_checkpoint_already_has(tmp_path, monkeypatch):
     )
 
 
+# -- detector fingerprint
+
+
+def test_checkpoint_records_the_detector_fingerprint(tmp_path):
+    """A checkpoint must say which detector produced its scores."""
+    from scripts import evaluate_full as ef
+
+    out = tmp_path / "metrics.json"
+    ef._write_checkpoint(out, "halueval", _rows(2))
+
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload.get("detector_fingerprint")
+    assert payload["detector_fingerprint"] == ef._detector_fingerprint()
+
+
+def test_resume_discards_rows_scored_by_a_different_detector(tmp_path, monkeypatch):
+    """Rows scored by another detector must not be mixed into this run."""
+    from scripts import evaluate_full as ef
+
+    out = tmp_path / "metrics.json"
+    ef._write_checkpoint(out, "halueval", _rows(2))
+    # Pretend the checkpoint came from a different detector.
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    payload["detector_fingerprint"] = "some-other-detector"
+    out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    dataset_rows = [
+        {"query": r["query"], "label": r["label"], "answer": "x"}
+        for r in _rows(3)
+    ]
+    monkeypatch.setattr(ef, "_resolve_dataset_rows", lambda args: (dataset_rows, "halueval"))
+
+    import io
+
+    stderr = io.StringIO()
+    monkeypatch.setattr("sys.stderr", stderr)
+
+    evaluated: list[str] = []
+    monkeypatch.setattr(ef, "Pipeline", lambda *a, **k: _FakePipe(evaluated))
+    monkeypatch.setattr(
+        sys, "argv",
+        ["evaluate_full", "--data", "unused", "--out", str(out), "--resume"],
+    )
+
+    with pytest.raises(_StopRun):
+        ef.main()
+
+    # The fake pipeline stops the run after one call, so the point of the
+    # assertion is that the FIRST row was evaluated rather than reused.
+    assert evaluated == ["question-0"], (
+        f"the stale checkpoint must not be reused, got {evaluated}"
+    )
+    assert "starting from scratch" in stderr.getvalue()
+
+
+def test_resume_discards_a_checkpoint_with_no_fingerprint(tmp_path, monkeypatch):
+    """A checkpoint from before fingerprints existed is not trustworthy."""
+    from scripts import evaluate_full as ef
+
+    out = tmp_path / "metrics.json"
+    payload = {
+        "dataset": "halueval",
+        "n_queries": 2,
+        "per_query": _rows(2),
+    }
+    out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    dataset_rows = [
+        {"query": r["query"], "label": r["label"], "answer": "x"}
+        for r in _rows(3)
+    ]
+    monkeypatch.setattr(ef, "_resolve_dataset_rows", lambda args: (dataset_rows, "halueval"))
+
+    import io
+
+    stderr = io.StringIO()
+    monkeypatch.setattr("sys.stderr", stderr)
+
+    evaluated: list[str] = []
+    monkeypatch.setattr(ef, "Pipeline", lambda *a, **k: _FakePipe(evaluated))
+    monkeypatch.setattr(
+        sys, "argv",
+        ["evaluate_full", "--data", "unused", "--out", str(out), "--resume"],
+    )
+
+    with pytest.raises(_StopRun):
+        ef.main()
+
+    assert evaluated == ["question-0"], (
+        f"the stale checkpoint must not be reused, got {evaluated}"
+    )
+    assert "no detector fingerprint" in stderr.getvalue()
+
+

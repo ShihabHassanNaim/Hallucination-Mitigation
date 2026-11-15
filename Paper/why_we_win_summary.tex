@@ -21,13 +21,13 @@ sentence accuracy, latency, and calibration.
 \hline
 \textbf{Dimension} & \textbf{Best Comparable} & \textbf{Ours} & \textbf{Verdict} & \textbf{Justification} \\
 \hline
-Mitigation $\Delta$         & +0.60 (Dale COMET-QE) & \textbf{+0.67 to +0.75} & \textbf{Win} & Rewrite, not rerank \\
-Claim-level F1               & 0.71 (TU Wien Vectara) & \textbf{0.76} & \textbf{Win} & Per-claim NLI \\
-Hallucination Reduction Rate & 0.55 (Dale 2023) & \textbf{0.67--0.75} & \textbf{Win} & Detect + regen + gate \\
-Verification Success Rate    & 0.81 (Halu-NLP) & \textbf{0.85+} & \textbf{Win} & Atomic granularity \\
-Detection ROC-AUC            & 0.987 (Dale ALTI+, MT) & 0.789 & At par & SHROOM-winner level on QA \\
-Sentence accuracy            & 0.847 (Halu-NLP) & 0.722 & At par & Within winner range \\
-P@R90                        & 0.703 (Dale LaBSE) & 0.652 & At par & Close to top \\
+Mitigation $\Delta$         & +0.60 (Dale COMET-QE) & \textbf{-0.035 [-0.067, -0.006] (n=18 regenerated) — not positive} & Loss & Rewrite, not rerank \\
+Claim-level F1               & 0.71 (TU Wien Vectara) & \textbf{0.653} & Loss & Below the cited comparable \\
+Hallucination Reduction Rate & 0.55 (Dale 2023) & \textbf{0.172} & Loss & Below the implied baseline \\
+Verification Success Rate    & 0.81 (Halu-NLP) & \textbf{0.608} & Loss & Below the cited comparables \\
+Detection ROC-AUC            & 0.987 (Dale ALTI+, MT) & 0.843 & At par & Below Sent-T5 XL (0.85--0.90) \\
+Sentence accuracy            & 0.847 (Halu-NLP) & 0.745 & Loss & Below the SHROOM winner \\
+P@R90                        & 0.703 (Dale LaBSE) & 0.658 & At par & Close to top \\
 Per-claim provenance         & None & \textbf{Yes} & \textbf{Win} & Unique in literature \\
 Latency (GPU)                & 0.22 s (LLM-Check) & 0.5--1.5 s & Loss & Richer output \\
 Memory (GB)                  & 1.0 (Conformal-RAG) & 4.0 & Loss & Richer intermediate state \\
@@ -36,9 +36,11 @@ Modular backend              & None (all hard-code) & \textbf{Llama / Qwen / Ope
 \hline
 \end{tabular}
 \caption{Verdict matrix. \textbf{Win} = categorical best in the comparison.
-At par = within 10\% of best. Loss = strictly worse. We win on six
-deployment-relevant dimensions and tie on five; we lose only on dimensions
-that are research-paper staples but not deployment criteria.}
+At par = within 10\% of best. Loss = strictly worse. Our measured wins are
+per-claim provenance, the pluggable backend, and the scale of the
+evaluation --- structural properties rather than score advantages; we are
+behind on mitigation $\Delta$, claim-level F1, HRR, VSR, sentence accuracy,
+and Spearman $\rho$}
 \label{tab:verdict}
 \end{table}
 
@@ -70,11 +72,12 @@ method.}
 \label{tab:mit-delta}
 \end{table}
 
-\textbf{Why we win.} Only two systems actively mitigate: Dale 2023 (N-best
-rerank through MC-dropout) and ours. Dale reranks generated candidates; we
-rewrite the answer in place using only verified evidence. Ours is
-\textbf{deterministic} (no MC-dropout) and \textbf{faster} than Dale while
-achieving a larger $\Delta$.
+\textbf{Why we do not win here.} Only two systems actively mitigate: Dale
+2023 (N-best rerank through MC-dropout) and ours. Dale reranks generated
+candidates; we rewrite the answer in place using only verified evidence. Ours
+is \textbf{deterministic} (no MC-dropout) and \textbf{faster} than Dale, but
+on the measured rows the rewrite did not improve similarity to the gold
+answer, so the $\Delta$ is negative and reported as an open result.
 
 % -----------------------------------------------------------------------------
 \subsection{Claim-Level F1 --- Our Structural Win}
@@ -87,7 +90,7 @@ achieving a larger $\Delta$.
 \hline
 \textbf{Method} & \textbf{P / R / F1} & \textbf{Granularity} \\
 \hline
-\textbf{Ours (Step 8 + Step 9)} & \textbf{0.78 / 0.74 / 0.76} & Atomic claims \\
+\textbf{Ours (Step 8 + Step 9)} & \textbf{0.415 / 0.659 / 0.653} & Atomic claims \\
 TU Wien -- Vectara (\texttt{mm-linreg}) & 0.81 / 0.71 (aware) & Whole sentence \\
 AILS-NTUA -- Voting & 0.80 / 0.69 (aware) & Whole sentence \\
 AILS-NTUA -- NLI & 0.77 / 0.59 (aware) & Whole sentence \\
@@ -95,13 +98,14 @@ INSIDE -- EigenScore & 0.80 (SQuAD) & Whole sentence \\
 LLM-Check -- Attention & 0.72 (FAVA) & Whole sentence \\
 \hline
 \end{tabular}
-\caption{Claim-level F1. Ours wins because it scores each atomic claim
-independently; every other system reduces the answer to a single
-sentence-level score.}
+\caption{Claim-level F1. Our F1 is below the cited sentence-level
+comparables; the contribution claimed here is granularity --- every atomic
+claim is scored independently, where every other system reduces the answer to
+a single sentence-level score.}
 \label{tab:claim-f1-2}
 \end{table}
 
-\textbf{Why we win.} Per-claim NLI catches intra-sentence contradictions that
+\textbf{Why this still matters.} Per-claim NLI catches intra-sentence contradictions that
 sentence-level classifiers miss. Example: \textit{``Paris is the capital of
 France, which has 12 million residents''} --- the capital claim is
 supported but the resident claim is contradicted. Sentence-level systems
@@ -118,7 +122,7 @@ return a single verdict and miss the partial contradiction.
 \hline
 \textbf{Method} & \textbf{HRR} & \textbf{VSR} \\
 \hline
-\textbf{Ours (Step 11 gate)} & \textbf{0.67--0.75} & \textbf{0.85+} \\
+\textbf{Ours (Step 11 gate)} & \textbf{0.172} & \textbf{0.608} \\
 Dale 2023 -- N-best rerank & $\sim$0.55 (implied) & -- \\
 AILS-NTUA -- Voting & 0 (no mitigation) & 0.80 \\
 TU Wien -- Vectara & 0 (no mitigation) & 0.81 \\
@@ -127,10 +131,9 @@ INSIDE / LLM-Check & 0 (no mitigation) & -- \\
 Conformal-RAG & high rejection, no rewrite & -- \\
 \hline
 \end{tabular}
-\caption{Hallucination Reduction Rate and Verification Success Rate. We win
-on HRR because regeneration removes the hallucinated content rather than
-just reranking; we win on VSR because per-claim granularity catches
-intra-sentence contradictions.}
+\caption{Hallucination Reduction Rate and Verification Success Rate. Both
+measured values are below the cited comparables, so they are reported as
+measured rather than claimed as wins.}
 \label{tab:hrr-vsr}
 \end{table}
 
@@ -148,24 +151,25 @@ intra-sentence contradictions.}
 Dale 2023 -- ALTI+ & \textbf{0.987} (MT-only) \\
 Dale 2023 -- LaBSE & 0.985 \\
 Dale 2023 -- XNLI & 0.987 \\
-\textbf{Ours (Step 9 fused)} & \textbf{0.789} \\
+\textbf{Ours (Step 9 fused)} & \textbf{0.843} \\
 Conformal-RAG (judge) & 0.94 \\
 IRIT-BL -- Sent-T5 XL & 0.85--0.90 \\
 INSIDE -- EigenScore & 0.80--0.82 \\
 LLM-Check -- Attention & 0.72 \\
 \hline
 \end{tabular}
-\caption{Detection ROC-AUC. We are below Dale 2023 only because Dale
-operates on a single-language-pair translation dataset where the
-fully-detached hallucination class is easier to separate. We outperform
-every SHROOM system.}
+\caption{Detection ROC-AUC. We are below Dale 2023 because Dale operates
+on a single-language-pair translation dataset where the fully-detached
+hallucination class is easier to separate; we are also below IRIT-BL's
+Sent-T5 XL (0.85--0.90) and above the general-purpose probes.}
 \label{tab:roc-auc}
 \end{table}
 
-\textbf{Sentence accuracy (Halu-NLP wins):} $0.847$ vs.\ ours $0.80$--$0.86$.
-\textbf{Spearman $\rho$ (Halu-NLP wins):} $0.770$ vs.\ ours $0.65$--$0.72$.
-\textbf{P@R90 (Dale LaBSE wins):} $0.703$ vs.\ ours $0.55$--$0.70$. All three
-differences are within the noise band on multi-domain QA evaluation.
+\textbf{Sentence accuracy (Halu-NLP wins):} $0.847$ vs.\ ours $0.745$.
+\textbf{Spearman $\rho$ (Halu-NLP wins):} $0.770$ vs.\ ours $0.594$.
+\textbf{P@R90 (Dale LaBSE wins):} $0.703$ vs.\ ours $0.658$. All three
+comparisons are made across different test sets and are not directly
+comparable.
 
 % -----------------------------------------------------------------------------
 \subsection{Latency and Calibration --- Known Limitations}
@@ -200,7 +204,7 @@ The pipeline is the \textbf{only system in the comparison} that satisfies
 all three simultaneously:
 
 \begin{enumerate}
-    \item \textbf{Active mitigation with positive $\Delta$.}
+    \item \textbf{Active mitigation.}
           Produces a rewritten answer, not just a verdict.
     \item \textbf{Atomic claim verification.}
           Catches intra-sentence contradictions.
@@ -230,22 +234,28 @@ three.
 
     \item \textbf{Different from Dale 2023?} Dale scores N-best candidates
           from a fixed generator with MC-dropout. We rewrite the answer in
-          place using only verified evidence. Dale is $+0.56$ (LaBSE); we
-          are $+0.71$. Dale needs a white-box MT model; ours is
-          backend-pluggable.
+          place using only verified evidence. Dale reports $+0.49$ to $+0.60$
+          on machine translation; our measured $\Delta$ is $-0.035$ on the
+          length-matched HaluEval split, so we do not claim to lead here. Dale
+          needs a white-box MT model; ours is backend-pluggable.
 
     \item \textbf{Different from Conformal-RAG?} Conformal-RAG rejects via
           1--$\alpha$ coverage but does not rewrite. We rewrite + abstain.
           Conformal-RAG is unable to handle RLHF-aligned hallucinations at
-          95\% coverage (Sinha 2025 reports 100\% FPR on HaluEval); we
-          achieve 85\% VSR via per-claim NLI.
+          95\% coverage (Sinha 2025 reports 100\% FPR on HaluEval). Our VSR
+          is 0.608, so we do not claim a rate advantage either; the difference
+          is capability (rewrite vs.\ reject).
 
     \item \textbf{Limitation.} No formal conformal coverage guarantee yet
           (future work). Single QA domain; MT/DM/PG expansion is future
           work. Synthetic evaluation set is small (7 queries); HaluEval /
           RAGTruth are the canonical benchmarks.
 
-    \item \textbf{Strongest result.} The mitigation $\Delta$ of $+0.67$ to
-          $+0.75$ over the no-mitigation baseline. It is the largest single
-          improvement in the entire cited literature.
+    \item \textbf{Strongest result.} Detection ROC-AUC of $0.843$ (95\% CI
+          $[0.823, 0.865]$) on the length-matched HaluEval split --- above the
+          general-purpose probes (FAVA 0.72, EigenScore 0.80--0.82) but below
+          Sent-T5 XL (0.85--0.90) and the MT specialist Dale 2023 (0.987). The
+          mitigation $\Delta$ is \emph{not} a win: it is $-0.035$ (CI
+          $[-0.067, -0.006]$) on the rows where step~10 regenerated, so it is
+          reported as an open result.
 \end{enumerate}

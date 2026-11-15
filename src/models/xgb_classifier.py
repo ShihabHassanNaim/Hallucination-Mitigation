@@ -3,9 +3,16 @@
 Feature vector: [cosine, claim_count, intrinsic_overlap, answer_length].
 
 Training data priority:
-  1. ``data/detector_train.jsonl`` — real labelled features mined from
-     HaluEval / TruthfulQA via ``scripts/generate_detector_data.py``.
-  2. Synthetic random fallback (only if the real data file is missing).
+  1. ``data/detector_train_clean.jsonl`` — real labelled features mined from
+     HaluEval by ``scripts/generate_detector_data_v4.py``. Both classes are
+     length-matched and the queries are disjoint from the evaluation splits,
+     so neither ``answer_length`` nor ``intrinsic_overlap`` can act as a
+     label shortcut.
+  2. ``data/detector_train.jsonl`` — the older training file. It is
+     length-confounded (faithful answers median 3 words, hallucinated
+     median 9) and contains a duplicated gold row; it is used only when
+     the clean file is absent.
+  3. Synthetic random fallback (only if neither real file is present).
 
 The real-data path is what lifts the detector out of the random baseline
 (ROC-AUC ~0.5) and into the publishable range (0.75+).
@@ -18,6 +25,7 @@ from pathlib import Path
 import numpy as np
 
 
+_CLEAN_DATA_PATH = Path("data/detector_train_clean.jsonl")
 _REAL_DATA_PATH = Path("data/detector_train.jsonl")
 
 
@@ -52,26 +60,29 @@ class XGBClassifier:
     def _real_data(self) -> tuple[np.ndarray, np.ndarray] | None:
         """Load real labelled training rows from disk.
 
-        Returns ``None`` if the file is missing or empty so the caller
-        can fall back to synthetic data.
+        Prefers the clean, length-matched training file; falls back to the
+        older length-confounded one. Returns ``None`` if neither is
+        available so the caller can fall back to synthetic data.
         """
-        if not _REAL_DATA_PATH.exists():
-            return None
-        try:
-            rows = [
-                json.loads(line)
-                for line in _REAL_DATA_PATH.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-        except Exception:  # noqa: BLE001
-            return None
-        if not rows:
-            return None
-        X = np.array([r["features"] for r in rows], dtype=np.float32)
-        y = np.array([int(r["label"]) for r in rows], dtype=np.int32)
-        if X.ndim != 2 or X.shape[0] < 16:
-            return None
-        return X, y
+        for path in (_CLEAN_DATA_PATH, _REAL_DATA_PATH):
+            if not path.exists():
+                continue
+            try:
+                rows = [
+                    json.loads(line)
+                    for line in path.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+            except Exception:  # noqa: BLE001
+                continue
+            if not rows:
+                continue
+            X = np.array([r["features"] for r in rows], dtype=np.float32)
+            y = np.array([int(r["label"]) for r in rows], dtype=np.int32)
+            if X.ndim != 2 or X.shape[0] < 16:
+                continue
+            return X, y
+        return None
 
     def _synthetic_data(self) -> tuple[np.ndarray, np.ndarray]:
         """Deterministic fallback used only when no real data is on disk."""

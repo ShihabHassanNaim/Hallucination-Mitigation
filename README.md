@@ -299,6 +299,14 @@ measurement, `data/mitigation_results.json`, produced by
 whatever they held, so run the mitigation evaluation before regenerating
 the table if the Δ is to be reported as measured.
 
+The win/tie/loss verdict next to each prose number is *derived*, not
+written by hand: each verdict compares the measured value against the
+cited comparable, and the mitigation-Δ verdict follows the sign of the
+measured Δ. The tally that summarises the matrix is recomputed from its
+rows, so it cannot drift away from them. A row that measures below the
+comparable therefore says so, and a projection that used to read as a
+win flips to a loss as soon as the measurement contradicts it.
+
 Once both `data/metrics_halueval.json` and `data/metrics_truthfulqa.json`
 exist, the Flask demo page (`/`) shows a dataset-pill selector on the
 **Accuracy** and **Evaluation** panels, and a side-by-side **Cross-dataset

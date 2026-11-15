@@ -6,16 +6,16 @@ Architecture,Verification,NLI per claim (mDeBERTa-xnli),NLI on full sentence,Cos
 Architecture,Mitigation,Evidence regen + PASS/REGEN/ABSTAIN gate,N-best MC-dropout rerank,None,None,None,None,None,None,None,None,Risk-controlled reject
 Architecture,Calibration,Temperature scaling + Platt,None,None,Linear regression,None,Threshold,None,None,None,None,Conformal (1-alpha)
 Architecture,Access Required,API or local HF,White-box (ALTI) / Black-box,Black-box,Mixed (Vectara + activations),Black-box,Black-box,Black-box,White-box,White-box or surrogate,Black-box,White-box KV-cache,Black-box
-Detection,ROC-AUC,"0.802 [0.778, 0.829]",0.987 (fully detached),-,-,-,0.85-0.90 (Sent-T5 XL),-,0.80-0.82 (EigenScore),0.72 (FAVA),-,-,0.94 (judge)
-Detection,AUPR,"0.813 [0.789, 0.839]",-,-,-,-,-,-,-,0.80 (SelfCheck),-,0.84-0.85 (with DMP),-
-Detection,P at R=90,"0.652 [0.606, 0.679]",0.674,-,-,-,-,-,-,-,-,-,-
-Detection,Sentence Accuracy,"0.722 [0.698, 0.747]",-,0.7440 (ensemble),0.817 (mm-linreg),0.847 (Halu-NLP),0.782 (Sent-T5 XL),0.799 (Voting),-,-,-,-,-
-Detection,Spearman rho,"0.524 [0.482, 0.570]",-,0.5285 (T5 + syn),0.737 (mm-linreg),0.770 (Halu-NLP),0.636 (Sent-T5 XL),0.693 (Voting),-,TPR at FPR,-,-,-
+Detection,ROC-AUC,"0.843 [0.823, 0.865]",0.987 (fully detached),-,-,-,0.85-0.90 (Sent-T5 XL),-,0.80-0.82 (EigenScore),0.72 (FAVA),-,-,0.94 (judge)
+Detection,AUPR,"0.853 [0.833, 0.874]",-,-,-,-,-,-,-,0.80 (SelfCheck),-,0.84-0.85 (with DMP),-
+Detection,P at R=90,"0.658 [0.634, 0.695]",0.674,-,-,-,-,-,-,-,-,-,-
+Detection,Sentence Accuracy,"0.745 [0.720, 0.771]",-,0.7440 (ensemble),0.817 (mm-linreg),0.847 (Halu-NLP),0.782 (Sent-T5 XL),0.799 (Voting),-,-,-,-,-
+Detection,Spearman rho,"0.594 [0.560, 0.633]",-,0.5285 (T5 + syn),0.737 (mm-linreg),0.770 (Halu-NLP),0.636 (Sent-T5 XL),0.693 (Voting),-,TPR at FPR,-,-,-
 Claim Level,F1,0.653,-,-,-,-,-,0.69 (Voting),-,-,-,-,-
 Claim Level,P/R,0.415 / 0.659,-,-,-,-,-,0.80 / 0.69,-,-,-,-,-
-Mitigation,Pre-mitigation Score,-0.63 (COMET),-0.63,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a
-Mitigation,Post-mitigation Score,+0.04 to +0.12 (BERTScore F1),-0.07 (LaBSE) / -0.14 (ALTI) / -0.12 (XNLI) / -0.03 (COMET-QE),n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a
-Mitigation,Delta,+0.67 to +0.75 (HIGHEST),+0.56 / +0.49 / +0.51 / +0.60,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a
+Mitigation,Pre-mitigation Score,0.863 (BERTScore F1),-0.63,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a
+Mitigation,Post-mitigation Score,0.828 (BERTScore F1),-0.07 (LaBSE) / -0.14 (ALTI) / -0.12 (XNLI) / -0.03 (COMET-QE),n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a
+Mitigation,Delta,"-0.035 [-0.067, -0.006] (n=18 regenerated) — not positive",+0.56 / +0.49 / +0.51 / +0.60,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a
 Efficiency,Per-query Latency (GPU),0.5-1.5 s,>60 s (MC-dropout),-,91s train / 45s test,Multi-model,n/r,143.6s / 1k queries,97.6 s,0.22 s,K=6 perturbations,627 s (with DMP),12 ms (CRG) / 1800 ms (judge)
 Efficiency,GPU Peak,4 GB,n/r,Low,Low,Multi-model,Low,1 T4,10 GB,6 GB,Low,29 GB,1 GB
 Efficiency,Cost per 1k queries,$0.10 (HF local) - $0.80 (OpenRouter),-,-,-,-,-,-,-,-,-,-,$0.10 (CRG) / $15.00 (judge)

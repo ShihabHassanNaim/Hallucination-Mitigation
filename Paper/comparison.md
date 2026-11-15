@@ -44,7 +44,7 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 
 | Method | ROC-AUC | AUPR | P@R90 | Setting | Dataset |
 |---|---|---|---|---|---|
-| **Ours (RAG fused score, Step 9)** | **0.802** | **0.813** | **0.652** | Black-box + retrieval | HaluEval QA (length-matched) |
+| **Ours (RAG fused score, Step 9)** | **0.843** | **0.853** | **0.658** | Black-box + retrieval | HaluEval QA (length-matched) |
 | Dale 2023 — ALTI+ | 0.987 (fully detached) | – | 0.674 | White-box | Guerreiro MT |
 | Dale 2023 — LaBSE | 0.985 | – | 0.703 | Black-box | Guerreiro MT |
 | Dale 2023 — XNLI | 0.987 | – | 0.604 | Black-box | Guerreiro MT |
@@ -72,7 +72,7 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 
 | Method | Mitigation output | Pre-mitigation score | Post-mitigation score | Δ |
 |---|---|---|---|---|
-| **Ours (Step 10 regen + Step 11 gate)** | Evidence-constrained rewrite + ABSTAIN | –0.63 (COMET, no rerank) | **0.04 to 0.12** (BERTScore F1) | +0.67–0.75 |
+| **Ours (Step 10 regen + Step 11 gate)** | Evidence-constrained rewrite + ABSTAIN | 0.863 | 0.828 | -0.035 [-0.067, -0.006] (n=18 regenerated) — not positive |
 | Dale 2023 — LaBSE rerank | MC-dropout N-best → LaBSE rerank | –0.63 | –0.07 | +0.56 |
 | Dale 2023 — ALTI rerank | MC-dropout N-best → ALTI rerank | –0.63 | –0.14 | +0.49 |
 | Dale 2023 — XNLI rerank | MC-dropout N-best → XNLI rerank | –0.63 | –0.12 | +0.51 |
@@ -83,7 +83,7 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 | AutoHall | None (detection only) | – | – | 0 |
 | Conformal-RAG | Risk-controlled reject | (varies) | (judge-on-accept) | – |
 
-**Observation.** The pipeline is the only system that produces a **rewritten answer** rather than just a label. The Δ over the no-mitigation baseline (+0.67 to +0.75) is the largest of any system in the comparison, primarily because (i) Step 10 only edits contradicted claims while preserving supported claims, and (ii) Step 11 will ABSTAIN when evidence is insufficient.
+**Observation.** The pipeline is the only system that produces a **rewritten answer** rather than just a label. Measured on the rows where step 10 actually regenerated (n=18 of 60), the Δ over the no-mitigation baseline is **−0.035 BERTScore F1** (95% CI [−0.067, −0.006]) — i.e. regeneration did not improve similarity to the gold answer on this sample. The rewrite step is therefore not yet a demonstrated win over the no-mitigation baseline, and the Δ is reported here as measured rather than as the projected figure an earlier draft carried.
 
 ---
 
@@ -161,17 +161,18 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 
 ## 8. Headline Performance vs. SOTA (Summary Table)
 
-| Category | Best Comparable Score | Ours (Projected on HaluEval) | Verdict |
+| Category | Best Comparable Score | Ours (measured, HaluEval length-matched) | Verdict |
 |---|---|---|---|
-| **Detection ROC-AUC** | 0.987 (Dale 2023 ALTI+) | **0.789** | Competitive; lower than white-box MT specialist, higher than every SHROOM system |
-| **Sentence accuracy** | 0.847 (Halu-NLP, SHROOM) | **0.722** | At SHROOM winner level |
-| **Spearman ρ** | 0.770 (Halu-NLP) | **0.524** | Slightly below top; offset by per-claim granularity |
-| **Mitigation Δ over baseline** | +0.60 (Dale 2023 COMET-QE rerank) | **+0.67 to +0.75** | Highest single gain in the comparison |
-| **Claim-level F1** | 0.71 (TU Wien Vectara) | **0.653** | Higher |
+| **Detection ROC-AUC** | 0.987 (Dale 2023 ALTI+) | **0.843** | Competitive; below the white-box MT specialist and slightly below Sent-T5 XL (0.85–0.90), above the general-purpose probes (EigenScore 0.80–0.82, FAVA 0.72) |
+| **Sentence accuracy** | 0.847 (Halu-NLP, SHROOM) | **0.745** | Below the SHROOM winner |
+| **Spearman ρ** | 0.770 (Halu-NLP) | **0.594** | Slightly below top; offset by per-claim granularity |
+| **HRR** | 0.55 (Dale 2023, implied) | **0.172** | Filled from the measured value |
+| **Mitigation Δ over baseline** | +0.60 (Dale 2023 COMET-QE rerank) | **-0.035 [-0.067, -0.006] (n=18 regenerated) — not positive** | Measured on regenerated rows only; not an improvement over the no-mitigation baseline |
+| **Claim-level F1** | 0.71 (TU Wien Vectara) | **0.653** | Below the cited comparable |
 | **Per-query latency (GPU)** | 0.22 s (LLM-Check) | **0.5–1.5 s** | Slower than LLM-Check, faster than every sampling baseline |
 | **Cost / 1k queries** | $0.10 (HF local) | **$0.10–$0.80** | Comparable |
 
-**Overall verdict.** The pipeline sits in the same accuracy band as the SHROOM winners on detection, beats every cited paper on mitigation Δ, and is competitive with the fastest single-pass detectors on latency. Its distinctive contribution is **per-claim, evidence-anchored, citation-grade verification with active regeneration** — a combination not present in any of the ten cited papers.
+**Overall verdict.** The pipeline sits in the same accuracy band as the SHROOM winners on detection, is competitive with the fastest single-pass detectors on latency, and is the only system in the comparison that combines per-claim verification with an active regeneration step — a combination not present in any of the ten cited papers. On mitigation Δ the measured value is not positive, so this dimension is reported as an open result rather than a win; the rewrite step needs to be shown to improve on the no-mitigation baseline before it can be claimed as an advantage.
 
 ---
 
