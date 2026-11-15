@@ -284,6 +284,21 @@ python -m scripts.fill_comparison_table --dry-run # show what would change
 The plotting script refuses to read any cell marked "projected", so an
 estimate can never be drawn on a chart as though it were a measurement.
 
+The same generator rewrites the prose tables that repeat those numbers —
+`Paper/comparison.md`, `Paper/comparison_summary.tex`,
+`Paper/why_we_win.md`, `Paper/why_we_win_summary.tex` and
+`Paper/five_position_comparison.md`. Each row is matched by its *stable
+text* rather than by the number it currently holds, so the fill is
+idempotent: re-running after a new evaluation refreshes every row, and a
+second run with the same metrics changes nothing. A row whose metric has
+not been measured is left untouched rather than given a guess.
+
+The mitigation rows (pre/post score and Δ) come from a separate
+measurement, `data/mitigation_results.json`, produced by
+`scripts/evaluate_mitigation.py`. Until that file exists those rows keep
+whatever they held, so run the mitigation evaluation before regenerating
+the table if the Δ is to be reported as measured.
+
 Once both `data/metrics_halueval.json` and `data/metrics_truthfulqa.json`
 exist, the Flask demo page (`/`) shows a dataset-pill selector on the
 **Accuracy** and **Evaluation** panels, and a side-by-side **Cross-dataset
