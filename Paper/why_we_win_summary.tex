@@ -29,7 +29,7 @@ Detection ROC-AUC            & 0.987 (Dale ALTI+, MT) & 0.843 & At par & Below S
 Sentence accuracy            & 0.847 (Halu-NLP) & 0.745 & Loss & Below the SHROOM winner \\
 P@R90                        & 0.703 (Dale LaBSE) & 0.658 & At par & Close to top \\
 Per-claim provenance         & None & \textbf{Yes} & \textbf{Win} & Unique in literature \\
-Latency (GPU)                & 0.22 s (LLM-Check) & 0.5--1.5 s & Loss & Richer output \\
+Latency (GPU)                & 0.22 s (LLM-Check) & 0.8--13.8 s & Loss & Slower than the single-pass probe \\
 Memory (GB)                  & 1.0 (Conformal-RAG) & 4.0 & Loss & Richer intermediate state \\
 Conformal coverage           & 1--$\alpha$ (Conformal-RAG) & None (Platt) & Loss & Known gap, future work \\
 Modular backend              & None (all hard-code) & \textbf{Llama / Qwen / OpenRouter} & \textbf{Win} & Plug-and-play \\
@@ -55,7 +55,7 @@ and Spearman $\rho$}
 \hline
 \textbf{Method} & \textbf{Pre-mit.} & \textbf{Post-mit.} & \textbf{$\Delta$} \\
 \hline
-\textbf{Ours (Step 10 regen + Step 11 gate)} & $-0.63$ & $+0.04$ to $+0.12$ & \textbf{$+0.67$ to $+0.75$} \\
+\textbf{Ours (Step 10 regen + Step 11 gate)} & $0.863$ & $0.828$ & \textbf{$-0.035\ [-0.067, -0.006]$} \\
 Dale 2023 -- COMET-QE rerank                  & $-0.63$ & $-0.03$            & $+0.60$ \\
 Dale 2023 -- LaBSE rerank                     & $-0.63$ & $-0.07$            & $+0.56$ \\
 Dale 2023 -- XNLI rerank                      & $-0.63$ & $-0.12$            & $+0.51$ \\
@@ -66,9 +66,7 @@ AutoHall                                      & n/a     & n/a                & 0
 Conformal-RAG                                 & varies  & reject-on-uncertain & n/a \\
 \hline
 \end{tabular}
-\caption{Mitigation $\Delta$ (post-mitigation COMET / BERTScore minus
-pre-mitigation). Ours wins by $+0.07$ to $+0.11$ over the best comparable
-method.}
+\caption{Mitigation $\Delta$ (post-mitigation COMET / BERTScore minus pre-mitigation), measured on the rows where step 10 regenerated. Our $\Delta$ is $-0.035$, so the rewrite did not improve similarity to the gold answer on the rows where it fired. This is reported as an open result, not a win.}
 \label{tab:mit-delta}
 \end{table}
 
@@ -184,7 +182,7 @@ comparable.
 \hline
 LLM-Check & \textbf{0.22 s} & None \\
 Conformal-RAG (CRG) & 0.012 s & 1--$\alpha$ conformal \\
-\textbf{Ours} & 0.5--1.5 s & Platt + temperature \\
+\textbf{Ours} & 0.8--13.8 s & Platt + temperature \\
 INSIDE & 97.6 s & None \\
 SelfCheckGPT & 75.9 s & None \\
 Dale 2023 MC-dropout & $>$60 s & None \\

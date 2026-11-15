@@ -369,6 +369,22 @@ def _aggregate_from_rows(slug: str, per_query: list[dict], seed: int = 0) -> dic
         ]
         if vals:
             aggregate[key] = statistics.fmean(vals)
+
+    # Per-query wall-clock latency, summed from the per-step timings of the
+    # same rows. The paper reports this figure, so it has to come from the
+    # run that produced the other numbers rather than from a separate
+    # timing estimate. Rows without timings are skipped rather than counted
+    # as zero.
+    latencies = [
+        sum(steps.values())
+        for steps in (r.get("step_times_ms") or {} for r in per_query)
+        if steps
+    ]
+    if latencies:
+        aggregate["latency_mean_s"] = statistics.fmean(latencies) / 1000.0
+        aggregate["latency_median_s"] = statistics.median(latencies) / 1000.0
+        aggregate["latency_min_s"] = min(latencies) / 1000.0
+        aggregate["latency_max_s"] = max(latencies) / 1000.0
     return aggregate
 
 

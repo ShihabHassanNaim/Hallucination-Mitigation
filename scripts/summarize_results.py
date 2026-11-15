@@ -161,6 +161,24 @@ def main() -> None:
             lines.append(f"| {name} | {_fmt(val)} | {_ci_text(agg, key)} |")
         lines.append("")
 
+        # The latency is a measured range, not a point estimate with an
+        # interval, so it is reported separately: the mean, the median and
+        # the full range of the run that produced the other numbers.
+        if agg.get("latency_mean_s") is not None:
+            lines.append("| Latency | Value |")
+            lines.append("|---|---|")
+            lines.append(
+                f"| Per-query latency (mean) | {agg['latency_mean_s']:.2f} s |"
+            )
+            lines.append(
+                f"| Per-query latency (median) | {agg['latency_median_s']:.2f} s |"
+            )
+            lines.append(
+                f"| Per-query latency (range) | {agg['latency_min_s']:.2f}"
+                f"–{agg['latency_max_s']:.2f} s |"
+            )
+            lines.append("")
+
         retrieval_rows = [
             (key, name) for key, name in RETRIEVAL if agg.get(key) is not None
         ]

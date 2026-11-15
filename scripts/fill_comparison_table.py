@@ -54,6 +54,13 @@ CLAIM_ROWS = {
     "P/R": ("claim_precision", "claim_recall"),
 }
 
+# Rows whose value is a measured range rather than a point estimate. The
+# latency is the min-max range of the run that produced the other numbers,
+# so it is filled from the same aggregate rather than estimated separately.
+RANGE_ROWS = {
+    "Per-query Latency (GPU)": ("latency_min_s", "latency_max_s"),
+}
+
 # Metric row label in the CSV -> aggregate key for the mitigation-side
 # metrics. These are measured by the same evaluation run as the detection
 # rows, so they are filled from the same aggregate.
@@ -325,6 +332,35 @@ def _delta_positive(lookup) -> bool:
     return str(text).strip().startswith("+")
 
 
+def _latency_band(lookup) -> str:
+    """Render the measured per-query latency band.
+
+    The band is the measured min-max range of the run that produced the
+    other numbers, so it cannot drift from the evaluation. A run without
+    per-step timings has no latency to report, so an empty string is
+    returned and the row is left alone.
+    """
+    try:
+        lo = lookup("latency_min_s")
+        hi = lookup("latency_max_s")
+    except KeyError:
+        return ""
+    if lo is None or hi is None:
+        return ""
+    return f"{float(lo):.1f}-{float(hi):.1f} s"
+
+
+def _latency_mean(lookup) -> float:
+    """Return the measured mean per-query latency, or 0.0 when unknown."""
+    try:
+        value = lookup("latency_mean_s")
+    except KeyError:
+        return 0.0
+    if value is None:
+        return 0.0
+    return float(value)
+
+
 def _above(lookup, key: str, threshold: float) -> bool:
     """True when the measured value beats the cited comparable.
 
@@ -408,6 +444,13 @@ def build_replacements(agg: dict) -> dict[str, str]:
             continue
         out[label] = _fmt(agg[key], agg.get(ci_key))
 
+    for label, (lo_key, hi_key) in RANGE_ROWS.items():
+        if lo_key not in agg or hi_key not in agg:
+            continue
+        out[label] = (
+            f"{float(agg[lo_key]):.1f}-{float(agg[hi_key]):.1f} s"
+        )
+
     return out
 
 
@@ -486,6 +529,34 @@ def _fill_comparison_md(
             ("detection_roc_auc",),
         ),
         (
+            "latency observation",
+            r"\*\*Observation\.\*\* The pipeline is in the same latency tier "
+            r"as LLM-Check[^.]*\.[^\n]*\n",
+            lambda v, m: (
+                "**Observation.** The pipeline is not in the same latency tier as "
+                "LLM-Check: measured on the length-matched HaluEval split, a "
+                f"query takes {_latency_band(v)} end to end (mean "
+                f"{_latency_mean(v):.2f} s), because it runs a generator call and "
+                "a full claim-level verification pass. It is faster than the "
+                "sampling-based methods (INSIDE, AutoHall, SelfCheckGPT, Decoding "
+                "Memories) and the MC-dropout rerankers (Dale 2023), but slower "
+                "than the single-pass probes.\n"
+            ),
+            ("latency_min_s", "latency_max_s", "latency_mean_s"),
+        ),
+        (
+            "efficiency row",
+            r"\| \*\*Ours \(RAG, single-pass\)\*\* \| \*\*[^|]*\*\* \(CPU\) / "
+            r"\*\*[^|]*\*\* \(GPU\) \| [^|]* \| [^|]* \| [^|]* \|",
+            lambda v, m: (
+                "| **Ours (RAG, single-pass)** | **2-5 s** (CPU) / "
+                f"**{_latency_band(v)}** (GPU) | ~4 GB | "
+                "~$0.10 (HF local) / ~$0.80 (OpenRouter) | "
+                "One generator call; deterministic re-runs |"
+            ),
+            ("latency_min_s", "latency_max_s"),
+        ),
+        (
             "summary: sentence accuracy",
             r"\| \*\*Sentence accuracy\*\* \| 0\.847 \(Halu-NLP, SHROOM\) \| "
             r"\*\*[^*]+\*\* \|",
@@ -539,6 +610,19 @@ def _fill_comparison_md(
             ("detection_roc_auc",),
         ),
         (
+            "summary: latency",
+            r"\| \*\*Per-query latency \(GPU\)\*\* \| 0\.22 s \(LLM-Check\) \| "
+            r"\*\*[^*]+\*\* \| [^|]* \|",
+            lambda v, m: (
+                "| **Per-query latency (GPU)** | 0.22 s (LLM-Check) | "
+                f"**{_latency_band(v)}** | "
+                "Slower than LLM-Check; measured on the length-matched "
+                "HaluEval split"
+                + " |"
+            ),
+            ("latency_min_s", "latency_max_s"),
+        ),
+        (
             "summary: HRR",
             r"\| \*\*HRR\*\* \| 0\.55 \(Dale 2023, implied\) \| \*\*[^*]+\*\* \|",
             lambda v, m: (
@@ -563,6 +647,7 @@ def _fill_comparison_md(
         "detection_roc_auc", "detection_aupr", "precision_at_recall_90",
         "claim_precision", "claim_recall", "claim_f1", "detection_accuracy",
         "spearman_rho", "hallucination_reduction_rate",
+        "latency_min_s", "latency_max_s", "latency_mean_s",
     )}
     values.update(_mitigation_prose_values())
     text, replacements = _apply_specs(text, row_specs, values, dry_run=dry_run)
@@ -604,6 +689,45 @@ def _fill_comparison_tex(
                 f"{v('precision_at_recall_90')} & Black-box + retrieval \\\\"
             ),
             ("detection_roc_auc", "detection_aupr", "precision_at_recall_90"),
+        ),
+        (
+            "latency observation",
+            r"The pipeline sits in the same latency tier as LLM-Check"
+            r"(?:[^\n]|\n(?!\n))*?\n\n",
+            lambda v, m: (
+                "The pipeline is not in the same latency tier as LLM-Check: "
+                "measured on the length-matched HaluEval split, a query takes "
+                + _latency_band(v).replace("-", "--")
+                + " end to end (mean "
+                + f"{_latency_mean(v):.2f}"
+                + " s), because it runs a generator call and a full claim-level "
+                "verification pass. It is faster than the sampling-based methods "
+                "(INSIDE, AutoHall, SelfCheckGPT, Decoding Memories) and the "
+                "MC-dropout rerankers (Dale 2023), but slower than the "
+                "single-pass probes.\n\n"
+            ),
+            ("latency_min_s", "latency_max_s", "latency_mean_s"),
+        ),
+        (
+            "architecture latency row",
+            r"\\textbf\{Ours \(RAG, single-pass\)\} & \\textbf\{[^}]*\} & "
+            r"\\textbf\{4 GB\} \\\\",
+            lambda v, m: (
+                r"\textbf{Ours (RAG, single-pass)} & \textbf{"
+                + _latency_band(v).replace("-", "--") + " (GPU)} & "
+                r"\textbf{4 GB} \\"
+            ),
+            ("latency_min_s", "latency_max_s"),
+        ),
+        (
+            "summary: latency",
+            r"Latency \(GPU\) & 0\.22 s \(LLM-Check\) & [^&]* & [^&]* \\\\",
+            lambda v, m: (
+                r"Latency (GPU) & 0.22 s (LLM-Check) & "
+                + _latency_band(v).replace("-", "--")
+                + r" & Slower than LLM-Check, much richer output \\"
+            ),
+            ("latency_min_s", "latency_max_s"),
         ),
         (
             "claim row",
@@ -685,6 +809,7 @@ def _fill_comparison_tex(
         "detection_roc_auc", "detection_aupr", "precision_at_recall_90",
         "claim_precision", "claim_recall", "claim_f1", "detection_accuracy",
         "spearman_rho", "hallucination_reduction_rate",
+        "latency_min_s", "latency_max_s", "latency_mean_s",
     )}
     values.update(_mitigation_prose_values())
     text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
@@ -786,6 +911,17 @@ def _fill_why_we_win_md(
             ("precision_at_recall_90",),
         ),
         (
+            "row 11: latency",
+            r"\| 11 \| \*\*Per-query latency \(GPU\)\*\* \| LLM-Check \| "
+            r"0\.22 s \| [^|]* \| ✗ \| [^|]* \|",
+            lambda v, m: (
+                "| 11 | **Per-query latency (GPU)** | LLM-Check | 0.22 s | "
+                f"{_latency_band(v)} | ✗ | Slower than the single-pass probe; "
+                "much richer output |"
+            ),
+            ("latency_min_s", "latency_max_s"),
+        ),
+        (
             "row 10: Spearman rho",
             r"\| 10 \| \*\*Spearman ρ\*\* \| Halu-NLP \| 0\.770 \| "
             r"\*\*[^*]+\*\* \|",
@@ -794,6 +930,14 @@ def _fill_why_we_win_md(
                 f"**{v('spearman_rho')}** |"
             ),
             ("spearman_rho",),
+        ),
+        (
+            "latency table row",
+            r"\| \*\*Ours\*\* \| 0\.5.1\.5 s \|",
+            lambda v, m: (
+                f"| **Ours** | {_latency_band(v)} |"
+            ),
+            ("latency_min_s", "latency_max_s"),
         ),
         (
             "detection table row",
@@ -930,6 +1074,7 @@ def _fill_why_we_win_md(
         "claim_precision", "claim_recall", "claim_f1", "detection_accuracy",
         "spearman_rho", "hallucination_reduction_rate",
         "verification_success_rate",
+        "latency_min_s", "latency_max_s", "latency_mean_s",
     )}
     values.update(_mitigation_prose_values())
     text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
@@ -1034,6 +1179,7 @@ def _fill_five_position_md(
         "claim_precision", "claim_recall", "claim_f1", "detection_accuracy",
         "spearman_rho", "hallucination_reduction_rate",
         "verification_success_rate", "claim_correction_rate",
+        "latency_min_s", "latency_max_s", "latency_mean_s",
     )}
     values.update(_mitigation_prose_values())
     text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
@@ -1083,6 +1229,32 @@ _MITIGATION_PROSE = {
             ),
         ),
     ],
+    "why_we_win_summary.tex": [
+        (
+            "mitigation table row",
+            r"\\textbf\{Ours \(Step 10 regen \+ Step 11 gate\)\} & [^&]* & "
+            r"[^&]* & [^&]* \\\\",
+            lambda m: (
+                r"\textbf{Ours (Step 10 regen + Step 11 gate)} & "
+                + f"${m['pre_tex']}$ & ${m['post_tex']}$ & "
+                + r"\textbf{$"
+                + f"{m['delta_tex']}"
+                + r"$} \\"
+            ),
+        ),
+        (
+            "mitigation caption",
+            r"\\caption\{Mitigation \$\\Delta\$ \(post-mitigation COMET / "
+            r"BERTScore minus\s*pre-mitigation\)\. [^}]*?method\.\}",
+            lambda m: (
+                r"\caption{Mitigation $\Delta$ (post-mitigation COMET / "
+                r"BERTScore minus pre-mitigation), measured on the rows where "
+                r"step 10 regenerated. "
+                + m["caption_sentence"]
+                + r"}"
+            ),
+        ),
+    ],
 }
 
 
@@ -1115,10 +1287,36 @@ def _fill_mitigation_prose(
         delta_text += f" (n={n} regenerated)"
     if delta <= 0:
         delta_text += " — not positive"
+    # The LaTeX table shows the same three numbers in math mode, matching
+    # the convention used by the Markdown tables: the absolute scores for
+    # pre and post, and a signed delta with its confidence interval.
+    pre_tex = f"{pre:.3f}" if pre is not None else "n/a"
+    post_tex = f"{post:.3f}" if post is not None else "n/a"
+    if ci:
+        delta_tex = f"{delta:+.3f}\\ [{ci[0]:+.3f}, {ci[1]:+.3f}]"
+    else:
+        delta_tex = f"{delta:+.3f}"
+
+    if delta > 0:
+        caption_sentence = (
+            f"Our $\\Delta$ is ${delta:+.3f}$, ahead of the best comparable "
+            f"method."
+        )
+    else:
+        caption_sentence = (
+            f"Our $\\Delta$ is ${delta:+.3f}$, so the rewrite did not improve "
+            f"similarity to the gold answer on the rows where it fired. This "
+            f"is reported as an open result, not a win."
+        )
+
     m = {
         "pre": f"{pre:.3f}" if pre is not None else "n/a",
         "post": f"{post:.3f}" if post is not None else "n/a",
         "delta": delta_text,
+        "pre_tex": pre_tex,
+        "post_tex": post_tex,
+        "delta_tex": delta_tex,
+        "caption_sentence": caption_sentence,
     }
 
     out: list[tuple[str, str, str]] = []
@@ -1238,6 +1436,15 @@ def _fill_why_we_win_tex(
             ("claim_precision", "claim_recall", "claim_f1"),
         ),
         (
+            "latency table row",
+            r"\\textbf\{Ours\} & [^&]* & Platt \+ temperature \\\\",
+            lambda v, m: (
+                r"\textbf{Ours} & " + _latency_band(v).replace("-", "--")
+                + r" & Platt + temperature \\"
+            ),
+            ("latency_min_s", "latency_max_s"),
+        ),
+        (
             "VSR table row",
             r"\\textbf\{Ours\} & \\textbf\{[^}]*\} \\\\",
             lambda v, m: (
@@ -1295,6 +1502,17 @@ def _fill_why_we_win_tex(
             ("hallucination_reduction_rate",),
         ),
         (
+            "summary: latency verdict",
+            r"Latency \(GPU\)\s+& 0\.22 s \(LLM-Check\) & [^&]* & "
+            r"[^&]* & [^&]* \\\\",
+            lambda v, m: (
+                r"Latency (GPU)                & 0.22 s (LLM-Check) & "
+                + _latency_band(v).replace("-", "--")
+                + r" & Loss & Slower than the single-pass probe \\"
+            ),
+            ("latency_min_s", "latency_max_s"),
+        ),
+        (
             "summary: VSR verdict",
             r"Verification Success Rate    & 0\.81 \(Halu-NLP\) & "
             r"\\textbf\{[^}]*\} & [^&]* & [^&]* \\\\",
@@ -1318,9 +1536,13 @@ def _fill_why_we_win_tex(
         "claim_precision", "claim_recall", "claim_f1", "detection_accuracy",
         "spearman_rho", "hallucination_reduction_rate",
         "verification_success_rate",
+        "latency_min_s", "latency_max_s", "latency_mean_s",
     )}
     values.update(_mitigation_prose_values())
     text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
+
+    text, mit_changes = _fill_mitigation_prose(text, path, dry_run=dry_run)
+    replacements.extend(mit_changes)
 
     if replacements and not dry_run:
         path.write_text(text, encoding="utf-8")

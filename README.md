@@ -299,6 +299,16 @@ measurement, `data/mitigation_results.json`, produced by
 whatever they held, so run the mitigation evaluation before regenerating
 the table if the Δ is to be reported as measured.
 
+**The measured mitigation Δ is negative.** On the 18 rows where step 10
+actually regenerated (out of 60 evaluated on the length-matched HaluEval
+split), BERTScore F1 moved from 0.863 to 0.828: a Δ of **−0.035** (95% CI
+[−0.067, −0.006]). The rewrite therefore did *not* improve similarity to
+the gold answer on this sample. Every prose table, chart and verdict in
+`Paper/` reports that number rather than the "+0.67 to +0.75" an earlier
+draft projected, and the win/tie/loss verdict for mitigation is a loss.
+Improving the rewrite path is future work; the negative result is reported
+as a finding.
+
 The win/tie/loss verdict next to each prose number is *derived*, not
 written by hand: each verdict compares the measured value against the
 cited comparable, and the mitigation-Δ verdict follows the sign of the
@@ -306,6 +316,15 @@ measured Δ. The tally that summarises the matrix is recomputed from its
 rows, so it cannot drift away from them. A row that measures below the
 comparable therefore says so, and a projection that used to read as a
 win flips to a loss as soon as the measurement contradicts it.
+
+**The reported latency is measured, not estimated.** The per-query latency
+is summed from the per-step timings of the same run that produced the
+detection numbers, and reported as the measured range. On the
+length-matched HaluEval split a query takes **0.8–13.8 s** end to end
+(mean 4.84 s, median 5.61 s); on TruthfulQA, 0.8–4.5 s (mean 1.69 s). An
+earlier draft carried "0.5–1.5 s (GPU)" from a separate timing estimate,
+which was both wrong and the basis of a "faster than every sampling
+baseline" claim the measurement does not support.
 
 Once both `data/metrics_halueval.json` and `data/metrics_truthfulqa.json`
 exist, the Flask demo page (`/`) shows a dataset-pill selector on the

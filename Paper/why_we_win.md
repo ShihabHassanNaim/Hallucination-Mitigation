@@ -21,7 +21,7 @@ This matrix shows, for each evaluation dimension, **the best comparable score** 
 | 8 | **Sentence accuracy** | Halu-NLP (SHROOM winner) | 0.847 | **0.745** | ✗ | Below the SHROOM winner |
 | 9 | **P@R90** | Dale 2023 — LaBSE | 0.703 | **0.658** | ≈ | Slightly below MT-specialist |
 | 10 | **Spearman ρ** | Halu-NLP | 0.770 | **0.594** | ✗ | Below top; offset by per-claim granularity |
-| 11 | **Per-query latency (GPU)** | LLM-Check | 0.22 s | 0.5–1.5 s | ✗ | Slower than single-pass; much richer output |
+| 11 | **Per-query latency (GPU)** | LLM-Check | 0.22 s | 0.8-13.8 s | ✗ | Slower than the single-pass probe; much richer output |
 | 12 | **GPU peak memory** | Conformal-RAG (CRG) | 1 GB | 4 GB | ✗ | Higher memory; richer intermediate state |
 | 13 | **Cost per 1k queries** | Conformal-RAG (CRG) | $0.10 | **$0.10–$0.80** | ≈ | Local HF free; OpenRouter tunable |
 | 14 | **Modular backend** | None | — | **Llama / Qwen / OpenRouter** | ✓ | All white-box systems hard-code generator |
@@ -137,7 +137,7 @@ This is the **most important metric** for an end-to-end RAG system. It measures 
 |---|---|
 | LLM-Check | **0.22 s** |
 | Conformal-RAG (CRG) | 0.012 s |
-| **Ours** | 0.5–1.5 s |
+| **Ours** | 0.8-13.8 s |
 | LLM-Check — Hidden | 2.7 s |
 | AILS-NTUA (Voting) | 143.6 s / 1k queries |
 | INSIDE | 97.6 s |

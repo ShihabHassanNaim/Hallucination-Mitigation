@@ -36076,7 +36076,11 @@
     "claim_precision": 0.4149166666666667,
     "claim_recall": 0.6592,
     "claim_f1": 0.6529333333333333,
-    "claim_support_rate": 0.5616666666666666
+    "claim_support_rate": 0.5616666666666666,
+    "latency_mean_s": 4.840990951000001,
+    "latency_median_s": 5.6107309999999995,
+    "latency_min_s": 0.836862,
+    "latency_max_s": 13.832049
   },
   "n_failed": 0
 }

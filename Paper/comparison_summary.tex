@@ -140,7 +140,7 @@ reported as an open result rather than a win.
 \hline
 \textbf{Method} & \textbf{Latency / query} & \textbf{GPU peak} \\
 \hline
-\textbf{Ours (RAG, single-pass)} & \textbf{0.5--1.5 s (GPU)} & \textbf{4 GB} \\
+\textbf{Ours (RAG, single-pass)} & \textbf{0.8--13.8 s (GPU)} & \textbf{4 GB} \\
 LLM-Check & 0.22 s & 6 GB \\
 Conformal-RAG (CRG) & 0.012 s & 1 GB \\
 Conformal-RAG (judge) & 1.8 s & -- \\
@@ -156,10 +156,7 @@ Dale 2023 -- MC-dropout rerank & $>$ 60 s & n/r \\
 \label{tab:efficiency}
 \end{table}
 
-The pipeline sits in the same latency tier as LLM-Check (sub-second on GPU)
-because it never samples multiple generations. It is faster than every
-sampling-based method (INSIDE, AutoHall, SelfCheckGPT, Decoding Memories) and
-every MC-dropout reranker (Dale 2023).
+The pipeline is not in the same latency tier as LLM-Check: measured on the length-matched HaluEval split, a query takes 0.8--13.8 s end to end (mean 4.84 s), because it runs a generator call and a full claim-level verification pass. It is faster than the sampling-based methods (INSIDE, AutoHall, SelfCheckGPT, Decoding Memories) and the MC-dropout rerankers (Dale 2023), but slower than the single-pass probes.
 
 % -----------------------------------------------------------------------------
 \subsection{Headline Comparison Summary}
@@ -182,7 +179,7 @@ CCR & 0.55 (Dale, implied) & 0.616 & Above the implied baseline \\
 Mitigation $\Delta$ & +0.60 (Dale COMET-QE) & \textbf{-0.035 [-0.067, -0.006]} (n=18 regenerated) & Not positive \\
 Claim-level F1 & 0.71 (TU Wien Vectara) & \textbf{0.653} & Below the cited comparable \\
 End-to-end accuracy & -- & 0.553 & Measured \\
-Latency (GPU) & 0.22 s (LLM-Check) & 0.5--1.5 s & Slightly slower, much richer output \\
+Latency (GPU) & 0.22 s (LLM-Check) & 0.8--13.8 s & Slower than LLM-Check, much richer output \\
 Cost / 1k queries & \$0.10 (HF local) & \$0.10--\$0.80 & Comparable \\
 \hline
 \end{tabular}
