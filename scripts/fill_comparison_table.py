@@ -341,6 +341,25 @@ def _mitigation_delta_text(mit: dict) -> str | None:
     return text
 
 
+def _mitigation_outcome(delta: float, ci: list[float] | None) -> str:
+    """The words that state what the measured delta shows.
+
+    The wording follows the sign of the delta and the position of the
+    interval, so a sentence cannot claim an improvement the measurement
+    does not show. A delta whose interval covers zero is described as
+    not separable from no effect, not as a measured failure: the
+    measurement does not distinguish it from either.
+    """
+    if _delta_is_a_win(delta, ci):
+        return "the rewrite improved similarity to the gold answer"
+    if ci and ci[1] < 0:
+        return "the rewrite did not improve similarity to the gold answer"
+    return (
+        "the rewrite is not distinguishable from no effect on similarity "
+        "to the gold answer"
+    )
+
+
 def _mitigation_prose_values(path: Path | None = None) -> dict:
     """The values a prose row needs to quote the measured mitigation delta.
 
@@ -445,10 +464,35 @@ def _mitigation_prose_values(path: Path | None = None) -> dict:
         )
         readme_verdict = "is a loss."
 
+    # A one-sentence statement of the result, for prose that has to name
+    # the number and the verdict together.
+    outcome = _mitigation_outcome(delta, ci)
+    sentence = (
+        f"The measured mitigation \u0394 is {delta:+.3f} BERTScore F1"
+        + (f" (95% CI [{ci[0]:+.3f}, {ci[1]:+.3f}])" if ci else "")
+        + (f", measured on the {n_regen} rows where step 10 regenerated"
+           if n_regen else "")
+        + f", so {outcome}."
+    )
+
+    # The LaTeX-safe variant of the delta cell. The Markdown form ends
+    # with an em dash, which pdflatex cannot encode in the default input
+    # encoding, so the LaTeX rows spell the verdict out in words with
+    # ASCII punctuation.
+    delta_tex_prose = f"{delta:+.3f}"
+    if ci:
+        delta_tex_prose += f" [{ci[0]:+.3f}, {ci[1]:+.3f}]"
+    if n_regen:
+        delta_tex_prose += f" (n={n_regen} regenerated)"
+    if not _delta_is_a_win(delta, ci):
+        delta_tex_prose += ", not positive"
+
     return {"__mitigation_delta__": delta_text, "delta": delta_text,
             "verdict": verdict, "mitigation_prose_sentence": prose,
             "readme_delta_lead": lead, "readme_delta_body": body,
-            "readme_verdict": readme_verdict}
+            "readme_verdict": readme_verdict,
+            "mitigation_sentence": sentence,
+            "delta_tex_prose": delta_tex_prose}
 
 
 def _delta_positive(lookup) -> bool:
@@ -1042,12 +1086,14 @@ def _fill_comparison_tex(
         (
             "summary: mitigation delta",
             r"Mitigation \$\\Delta\$ & \+0\.60 \(Dale COMET-QE\) & "
-            r"\\textbf\{[^}]*\} & \\textbf\{[^}]*\} \\\\",
+            r"\\textbf\{[^}]*\} & [^&]* \\\\",
             lambda v, m: (
                 r"Mitigation $\Delta$ & +0.60 (Dale COMET-QE) & "
-                r"\textbf{" + f"{v('delta')}" + r"} & Measured \\"
+                r"\textbf{" + f"{v('delta_tex_prose')}" + r"} & "
+                + ("\textbf{Win}" if _delta_positive(v) else "Not positive")
+                + r" \\"
             ),
-            ("delta",),
+            ("delta_tex_prose",),
         ),
     ]
 
@@ -1522,6 +1568,30 @@ _MITIGATION_PROSE = {
                 f"{m['pre']} | {m['post']} | {m['delta']} |"
             ),
         ),
+        (
+            "prose: different from Dale",
+            r"on machine translation; our measured \u0394 is .*? so we do not "
+            r"claim to lead on mitigation \u0394\.",
+            lambda m: (
+                "on machine translation; our measured \u0394 is "
+                + m["delta_number"]
+                + " on the length-matched HaluEval split, so we do not "
+                "claim to lead on mitigation \u0394."
+            ),
+        ),
+        (
+            "prose: strongest result",
+            r"The mitigation \u0394 is \*not\* a win: measured on the rows "
+            r"where step 10 regenerated, it is .*?, so it is reported as an "
+            r"open result\.",
+            lambda m: (
+                "The mitigation \u0394 is *not* a win: measured on the rows "
+                "where step 10 regenerated, it is "
+                + m["delta_number"]
+                + (" (CI " + m["delta_ci"] + ")" if m["delta_ci"] else "")
+                + ", so it is reported as an open result."
+            ),
+        ),
     ],
     "comparison.md": [
         (
@@ -1533,6 +1603,27 @@ _MITIGATION_PROSE = {
                 f"rewrite + ABSTAIN | {m['pre']} | {m['post']} | {m['delta']} |"
             ),
         ),
+        (
+            "prose: observation",
+            r"Measured on the rows where step 10 actually regenerated "
+            r"\(n=\d+ of \d+\), the \u0394 over the no-mitigation baseline is "
+            r"\*\*[^*]+\*\* \(95% CI \[[^\]]*\]\) — i\.e\..*?reported here as "
+            r"measured rather than as the projected figure an earlier draft "
+            r"carried\.",
+            lambda m: (
+                "Measured on the rows where step 10 actually regenerated "
+                f"(n={m['n_regenerated']} of {m['n_rows']}), the \u0394 over the "
+                "no-mitigation baseline is **"
+                + m["delta_number"]
+                + " BERTScore F1** (95% CI "
+                + m["delta_ci"]
+                + f") — i.e. {m['outcome']} on this sample. The rewrite step "
+                "is therefore not yet a demonstrated win over the "
+                "no-mitigation baseline, and the \u0394 is reported here as "
+                "measured rather than as the projected figure an earlier "
+                "draft carried."
+            ),
+        ),
     ],
     "five_position_comparison.md": [
         (
@@ -1542,6 +1633,50 @@ _MITIGATION_PROSE = {
             lambda m: (
                 "| **Ours (Step 10 regen + Step 11 gate)** | "
                 f"{m['pre']} | {m['post']} | {m['delta']} |"
+            ),
+        ),
+        (
+            "heading: position 2",
+            r"## Position 2 — Mitigation \u0394 \(Measured: .*? vs\. \+0\.60 Dale\)",
+            lambda m: (
+                "## Position 2 — Mitigation \u0394 (Measured: "
+                + m["delta_number"]
+                + " vs. +0.60 Dale)"
+            ),
+        ),
+        (
+            "prose: verdict",
+            r"On the length-matched HaluEval split, the mitigation \u0394 over "
+            r"the no-mitigation baseline is \*\*[^*]+\*\* \(95% CI "
+            r"\[[^\]]*\], measured on the \d+ of \d+ rows where step 10 "
+            r"actually regenerated\)\..*?rather than asserted as a win\.",
+            lambda m: (
+                "On the length-matched HaluEval split, the mitigation \u0394 "
+                "over the no-mitigation baseline is **"
+                + m["delta_number"]
+                + " BERTScore F1** (95% CI "
+                + m["delta_ci"]
+                + f", measured on the {m['n_regenerated']} of {m['n_rows']} "
+                "rows where step 10 actually regenerated). Dale 2023 reports "
+                "+0.49 to +0.60 on machine translation, so on the one "
+                "published mitigation \u0394 we do not lead. The step that "
+                "rewrites contradicted claims is implemented and exercised, "
+                f"but on this sample {m['outcome']}; that is an open result, "
+                "and it is reported here rather than asserted as a win."
+            ),
+        ),
+        (
+            "prose: paragraph 2",
+            r"the mitigation \u0394 over the no-mitigation baseline is .*?, "
+            r"measured on the \d+ of \d+ rows where step 10 actually "
+            r"regenerated\.",
+            lambda m: (
+                "the mitigation \u0394 over the no-mitigation baseline is "
+                + m["delta_number"]
+                + " BERTScore F1 (95% CI "
+                + m["delta_ci"]
+                + f"), measured on the {m['n_regenerated']} of {m['n_rows']} "
+                "rows where step 10 actually regenerated."
             ),
         ),
     ],
@@ -1635,6 +1770,13 @@ def _fill_mitigation_prose(
             f"is reported as an open result, not a win."
         )
 
+    # The bare pieces a prose sentence needs: the signed number, the
+    # interval on its own, the number of regenerated rows, and the words
+    # that state the outcome.
+    outcome = _mitigation_outcome(delta, ci)
+    delta_number = f"{delta:+.3f}"
+    delta_ci = f"[{ci[0]:+.3f}, {ci[1]:+.3f}]" if ci else ""
+
     m = {
         "pre": f"{pre:.3f}" if pre is not None else "n/a",
         "post": f"{post:.3f}" if post is not None else "n/a",
@@ -1643,6 +1785,11 @@ def _fill_mitigation_prose(
         "post_tex": post_tex,
         "delta_tex": delta_tex,
         "caption_sentence": caption_sentence,
+        "delta_number": delta_number,
+        "delta_ci": delta_ci,
+        "n_regenerated": n,
+        "n_rows": mitigation.get("n_rows"),
+        "outcome": outcome,
     }
 
     out: list[tuple[str, str, str]] = []
@@ -1735,12 +1882,14 @@ def _fill_why_we_win_tex(
         (
             "summary: mitigation delta",
             r"Mitigation \$\\Delta\$( +) & \+0\.60 \(Dale COMET-QE\) & "
-            r"\\textbf\{[^}]*\} & \\textbf\{[^}]*\} &",
+            r"\\textbf\{[^}]*\} & [^&]* & [^&]* \\\\",
             lambda v, m: (
                 r"Mitigation $\Delta$         & +0.60 (Dale COMET-QE) & "
-                r"\textbf{" + f"{v('delta')}" + r"} & Measured &"
+                r"\textbf{" + f"{v('delta_tex_prose')}" + r"} & "
+                + ("\textbf{Win}" if _delta_positive(v) else "Loss")
+                + r" & Rewrite, not rerank \\"
             ),
-            ("delta",),
+            ("delta_tex_prose",),
         ),
         (
             "detection table row",

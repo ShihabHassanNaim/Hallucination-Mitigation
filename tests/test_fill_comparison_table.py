@@ -990,6 +990,10 @@ def test_why_we_win_tally_is_refreshed(tmp_path):
 _PAPER_FILES = (
     Path("Paper/comparison.md"),
     Path("Paper/comparison_summary.tex"),
+    Path("Paper/why_we_win.md"),
+    Path("Paper/why_we_win_summary.tex"),
+    Path("Paper/five_position_comparison.md"),
+    Path("README.md"),
 )
 
 
@@ -1056,4 +1060,178 @@ def test_the_paper_does_not_claim_aupr_or_ccr_are_wins():
         for phrase in banned:
             assert phrase not in low, (
                 f"{path} still asserts that AUPR and CCR are wins"
+            )
+
+
+def _write_mitigation(path: Path, delta: float, ci, n_regen: int = 16,
+                      n_rows: int = 500) -> Path:
+    """Write a mitigation measurement and return its path."""
+    path.write_text(
+        json.dumps({
+            "summary": {
+                "n_rows": n_rows,
+                "n_regenerated": n_regen,
+                "regenerated_rows": {
+                    "n": n_regen,
+                    "pre_bertscore": 0.842,
+                    "post_bertscore": 0.835,
+                    "delta_bertscore": delta,
+                    "delta_bertscore_ci95": ci,
+                },
+            }
+        }),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_the_why_we_win_qa_prose_tracks_the_measurement(tmp_path, monkeypatch):
+    """The two Q&A paragraphs that quote the delta must not drift.
+
+    They were hand-written, so a new evaluation left them holding the
+    previous run's delta while the table beside them was refreshed.
+    """
+    import scripts.fill_comparison_table as fill
+
+    paper = tmp_path / "why_we_win.md"
+    paper.write_text(
+        "2. **\"How is your work different from Dale 2023?\"** — Dale reports "
+        "+0.49 to +0.60 on machine translation; our measured \u0394 is -0.035 "
+        "on the length-matched HaluEval split, so we do not claim to lead on "
+        "mitigation \u0394.\n\n"
+        "5. **\"What's the strongest result?\"** — Detection ROC-AUC of "
+        "**0.843**. The mitigation \u0394 is *not* a win: measured on the rows "
+        "where step 10 regenerated, it is -0.035 (CI [-0.067, -0.006]), so it "
+        "is reported as an open result.\n",
+        encoding="utf-8",
+    )
+    mit = _write_mitigation(tmp_path / "mit.json", -0.007, [-0.022, 0.007])
+    monkeypatch.setattr(fill, "MITIGATION_PATH", mit)
+
+    fill._fill_why_we_win_md(paper, {}, dry_run=False)
+
+    out = paper.read_text(encoding="utf-8")
+    assert "-0.035" not in out, "the stale delta survived the fill"
+    assert "-0.007" in out
+    assert "[-0.022, +0.007]" in out
+
+
+def test_the_comparison_observation_tracks_the_measurement(tmp_path, monkeypatch):
+    """The observation paragraph in comparison.md quotes the delta, the
+    interval and the number of regenerated rows."""
+    import scripts.fill_comparison_table as fill
+
+    paper = tmp_path / "comparison.md"
+    paper.write_text(
+        "**Observation.** The pipeline is the only system that produces a "
+        "**rewritten answer** rather than just a label. Measured on the rows "
+        "where step 10 actually regenerated (n=18 of 60), the \u0394 over the "
+        "no-mitigation baseline is **-0.035 BERTScore F1** (95% CI [-0.067, "
+        "-0.006]) \u2014 i.e. regeneration did not improve similarity to the "
+        "gold answer on this sample. The rewrite step is therefore not yet a "
+        "demonstrated win over the no-mitigation baseline, and the \u0394 is "
+        "reported here as measured rather than as the projected figure an "
+        "earlier draft carried.\n",
+        encoding="utf-8",
+    )
+    mit = _write_mitigation(tmp_path / "mit.json", -0.007, [-0.022, 0.007])
+    monkeypatch.setattr(fill, "MITIGATION_PATH", mit)
+
+    fill._fill_comparison_md(paper, {}, dry_run=False)
+
+    out = paper.read_text(encoding="utf-8")
+    assert "-0.035" not in out, "the stale delta survived the fill"
+    assert "-0.007" in out
+    assert "n=16 of 500" in out, (
+        f"the regenerated-row count was not refreshed: {out!r}"
+    )
+
+
+def test_the_five_position_heading_and_prose_track_the_measurement(
+    tmp_path, monkeypatch,
+):
+    """The Position 2 heading and its two prose blocks quote the delta."""
+    import scripts.fill_comparison_table as fill
+
+    paper = tmp_path / "five_position_comparison.md"
+    paper.write_text(
+        "## Position 2 \u2014 Mitigation \u0394 (Measured: -0.035 vs. +0.60 Dale)\n\n"
+        "**NOT A WIN \u2014 reported as measured.** On the length-matched "
+        "HaluEval split, the mitigation \u0394 over the no-mitigation baseline "
+        "is **-0.035 BERTScore F1** (95% CI [-0.067, -0.006], measured on the "
+        "18 of 60 rows where step 10 actually regenerated). Dale 2023 reports "
+        "+0.49 to +0.60 on machine translation, so on the one published "
+        "mitigation \u0394 we do not lead. The step that rewrites "
+        "contradicted claims is implemented and exercised, but on this sample "
+        "it did not improve similarity to the gold answer; that is an open "
+        "result, and it is reported here rather than asserted as a win.\n\n"
+        "> **Paragraph 2 \u2014 Position 2 (\u0394 reported as measured).** "
+        "*Our pipeline implements evidence-grounded regeneration and measures "
+        "its effect: on the length-matched HaluEval split, the mitigation "
+        "\u0394 over the no-mitigation baseline is -0.035 BERTScore F1 (95% CI "
+        "[-0.067, -0.006]), measured on the 18 of 60 rows where step 10 "
+        "actually regenerated.*\n",
+        encoding="utf-8",
+    )
+    mit = _write_mitigation(tmp_path / "mit.json", -0.007, [-0.022, 0.007])
+    monkeypatch.setattr(fill, "MITIGATION_PATH", mit)
+
+    fill._fill_five_position_md(paper, {}, dry_run=False)
+
+    out = paper.read_text(encoding="utf-8")
+    assert "-0.035" not in out, "the stale delta survived the fill"
+    assert "-0.007" in out
+    assert "16 of 500" in out
+
+
+def test_the_prose_says_the_result_is_not_separable_when_the_interval_covers_zero(
+    tmp_path, monkeypatch,
+):
+    """A delta whose interval covers zero must not be described as a
+    measured failure either: the measurement does not separate it from
+    no effect at all."""
+    import scripts.fill_comparison_table as fill
+
+    paper = tmp_path / "five_position_comparison.md"
+    paper.write_text(
+        "## Position 2 \u2014 Mitigation \u0394 (Measured: -0.035 vs. +0.60 Dale)\n\n"
+        "**NOT A WIN \u2014 reported as measured.** On the length-matched "
+        "HaluEval split, the mitigation \u0394 over the no-mitigation baseline "
+        "is **-0.035 BERTScore F1** (95% CI [-0.067, -0.006], measured on the "
+        "18 of 60 rows where step 10 actually regenerated). Dale 2023 reports "
+        "+0.49 to +0.60 on machine translation, so on the one published "
+        "mitigation \u0394 we do not lead. The step that rewrites "
+        "contradicted claims is implemented and exercised, but on this sample "
+        "it did not improve similarity to the gold answer; that is an open "
+        "result, and it is reported here rather than asserted as a win.\n",
+        encoding="utf-8",
+    )
+    mit = _write_mitigation(tmp_path / "mit.json", -0.007, [-0.022, 0.007])
+    monkeypatch.setattr(fill, "MITIGATION_PATH", mit)
+
+    fill._fill_five_position_md(paper, {}, dry_run=False)
+
+    out = paper.read_text(encoding="utf-8")
+    assert "not distinguishable from no effect" in out, (
+        f"an interval covering zero was described as a measured failure: {out!r}"
+    )
+    assert "it did not improve similarity" not in out, (
+        f"an interval covering zero was described as a measured failure: {out!r}"
+    )
+
+
+def test_no_paper_file_holds_a_stale_mitigation_delta():
+    """No generated file may still carry the previous run's delta.
+
+    The tokens below are the ones the 500-row run replaced. If any of
+    them appears in a generated file, a surface was missed.
+    """
+    stale = ("-0.035", "[-0.067, -0.006]", "n=18 regenerated", "18 of 60")
+    for path in _PAPER_FILES:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for token in stale:
+            assert token not in text, (
+                f"{path} still holds the stale mitigation figure {token!r}"
             )

@@ -11,7 +11,7 @@ This matrix shows, for each evaluation dimension, **the best comparable score** 
 
 | # | Evaluation Dimension | Best Comparable (Paper) | Best Comparable Score | Our Score | Winner | Justification |
 |---|---|---|---|---|---|---|
-| 1 | **Mitigation Δ (post-mitigation lift)** | Dale 2023 — COMET-QE rerank | +0.60 | **-0.035 [-0.067, -0.006] (n=18 regenerated) — not positive** | ✗ | Measured on the rows step 10 regenerated; the rewrite does not improve on the no-mitigation baseline yet |
+| 1 | **Mitigation Δ (post-mitigation lift)** | Dale 2023 — COMET-QE rerank | +0.60 | **-0.007 [-0.022, +0.007] (n=16 regenerated) — not positive** | ✗ | Measured on the rows step 10 regenerated; the rewrite does not improve on the no-mitigation baseline yet |
 | 2 | **Claim-level F1** | TU Wien 2024 — Vectara | 0.71 | **0.653** | ✗ | Below the cited comparable |
 | 3 | **Hallucination Reduction Rate (HRR)** | Dale 2023 (N-best rerank) | ~0.55 (implied) | **0.172** | ✗ | Below the implied baseline |
 | 4 | **Verification Success Rate (VSR)** | AILS-NTUA (Voting) | 0.80 (acc) | **0.608** | ✗ | Below the cited comparables |
@@ -50,7 +50,7 @@ This is the **most important metric** for an end-to-end RAG system. It measures 
 
 | Method | Pre-mit | Post-mit | Δ |
 |---|---|---|---|
-| **Ours (Step 10 regen + Step 11 gate)** | 0.863 | 0.828 | -0.035 [-0.067, -0.006] (n=18 regenerated) — not positive |
+| **Ours (Step 10 regen + Step 11 gate)** | 0.842 | 0.835 | -0.007 [-0.022, +0.007] (n=16 regenerated) — not positive |
 | Dale 2023 — COMET-QE rerank | −0.63 | −0.03 | +0.60 |
 | Dale 2023 — LaBSE rerank | −0.63 | −0.07 | +0.56 |
 | Dale 2023 — XNLI rerank | −0.63 | −0.12 | +0.51 |
@@ -176,7 +176,7 @@ Dale 2023 has (1) but not (2) or (3). Conformal-RAG has calibration but not (1) 
 ```
 Metric                    Best-Cited   Ours    Gap
 ─────────────────────────────────────────────────────────────
-Mitigation Δ              +0.60        -0.035  -0.635  ✗ Behind
+Mitigation Δ              +0.60        -0.007  -0.607  ✗ Behind
 Claim F1                  0.71         0.653   -0.057  ✗ Behind
 HRR                       0.55         0.172   -0.378  ✗ Behind
 VSR                       0.81         0.608   -0.202  ✗ Behind
@@ -228,13 +228,13 @@ These three plots — (a) ROC curve, (b) reliability diagram, (c) per-step laten
 
 1. **"How is your work different from SHROOM?"** — Every SHROOM system is a black-box classifier on a single output. Our pipeline is end-to-end: it **generates**, **retrieves**, **verifies**, **regenerates**, and **calibrates**. The SHROOM leaderboard tracks accuracy; we track accuracy + Δ + mitigation lift.
 
-2. **"How is your work different from Dale 2023?"** — Dale scores N-best candidates from a fixed generator with MC-dropout. We rewrite the answer in place using only verified evidence. Dale reports +0.49 to +0.60 on machine translation; our measured Δ is −0.035 on the length-matched HaluEval split, so we do not claim to lead on mitigation Δ. Dale needs a white-box MT model; ours is backend-pluggable.
+2. **"How is your work different from Dale 2023?"** — Dale scores N-best candidates from a fixed generator with MC-dropout. We rewrite the answer in place using only verified evidence. Dale reports +0.49 to +0.60 on machine translation; our measured Δ is -0.007 on the length-matched HaluEval split, so we do not claim to lead on mitigation Δ. Dale needs a white-box MT model; ours is backend-pluggable.
 
 3. **"How is your work different from Conformal-RAG?"** — Conformal-RAG rejects via 1−α coverage but does not rewrite. We rewrite + abstain. Conformal-RAG is unable to handle RLHF-aligned hallucinations at 95% coverage (Sinha 2025 reports 100% FPR on HaluEval); our VSR is 0.608, so the difference is capability (rewrite vs. reject), not a rate advantage.
 
 4. **"What's the limitation?"** — (a) No formal conformal coverage guarantee yet (future work). (b) Single QA domain; MT/DM/PG expansion is future work. (c) Synthetic evaluation set is small (7 queries); HaluEval/RAGTruth are the canonical benchmarks.
 
-5. **"What's the strongest result?"** — Detection ROC-AUC of **0.843** on the length-matched HaluEval split (95% CI [0.823, 0.865]). That places the pipeline above the general-purpose probes (FAVA 0.72, EigenScore 0.80–0.82) but slightly below Sent-T5 XL (0.85–0.90), and below the machine-translation specialist Dale 2023 (0.987) and the Conformal-RAG judge (0.94). The mitigation Δ is *not* a win: measured on the rows where step 10 regenerated, it is −0.035 (CI [−0.067, −0.006]), so it is reported as an open result. The pipeline's defensible advantages are structural — per-claim provenance, a pluggable backend, and evaluation at 1000 rows per benchmark rather than a handful of synthetic queries.
+5. **"What's the strongest result?"** — Detection ROC-AUC of **0.843** on the length-matched HaluEval split (95% CI [0.823, 0.865]). That places the pipeline above the general-purpose probes (FAVA 0.72, EigenScore 0.80–0.82) but slightly below Sent-T5 XL (0.85–0.90), and below the machine-translation specialist Dale 2023 (0.987) and the Conformal-RAG judge (0.94). The mitigation Δ is *not* a win: measured on the rows where step 10 regenerated, it is -0.007 (CI [-0.022, +0.007]), so it is reported as an open result. The pipeline's defensible advantages are structural — per-claim provenance, a pluggable backend, and evaluation at 1000 rows per benchmark rather than a handful of synthetic queries.
 
 ---
 

@@ -21,7 +21,7 @@ sentence accuracy, latency, and calibration.
 \hline
 \textbf{Dimension} & \textbf{Best Comparable} & \textbf{Ours} & \textbf{Verdict} & \textbf{Justification} \\
 \hline
-Mitigation $\Delta$         & +0.60 (Dale COMET-QE) & \textbf{-0.035 [-0.067, -0.006] (n=18 regenerated, not positive)} & Loss & Rewrite, not rerank \\
+Mitigation $\Delta$         & +0.60 (Dale COMET-QE) & \textbf{-0.007 [-0.022, +0.007] (n=16 regenerated), not positive} & Loss & Rewrite, not rerank \\
 Claim-level F1               & 0.71 (TU Wien Vectara) & \textbf{0.653} & Loss & Below the cited comparable \\
 Hallucination Reduction Rate & 0.55 (Dale 2023) & \textbf{0.172} & Loss & Below the implied baseline \\
 Verification Success Rate    & 0.81 (Halu-NLP) & \textbf{0.608} & Loss & Below the cited comparables \\
@@ -55,7 +55,7 @@ and Spearman $\rho$}
 \hline
 \textbf{Method} & \textbf{Pre-mit.} & \textbf{Post-mit.} & \textbf{$\Delta$} \\
 \hline
-\textbf{Ours (Step 10 regen + Step 11 gate)} & $0.863$ & $0.828$ & \textbf{$-0.035\ [-0.067, -0.006]$} \\
+\textbf{Ours (Step 10 regen + Step 11 gate)} & $0.842$ & $0.835$ & \textbf{$-0.007\ [-0.022, +0.007]$} \\
 Dale 2023 -- COMET-QE rerank                  & $-0.63$ & $-0.03$            & $+0.60$ \\
 Dale 2023 -- LaBSE rerank                     & $-0.63$ & $-0.07$            & $+0.56$ \\
 Dale 2023 -- XNLI rerank                      & $-0.63$ & $-0.12$            & $+0.51$ \\
@@ -66,7 +66,7 @@ AutoHall                                      & n/a     & n/a                & 0
 Conformal-RAG                                 & varies  & reject-on-uncertain & n/a \\
 \hline
 \end{tabular}
-\caption{Mitigation $\Delta$ (post-mitigation COMET / BERTScore minus pre-mitigation), measured on the rows where step 10 regenerated. Our $\Delta$ is $-0.035$, so the rewrite did not improve similarity to the gold answer on the rows where it fired. This is reported as an open result, not a win.}
+\caption{Mitigation $\Delta$ (post-mitigation COMET / BERTScore minus pre-mitigation), measured on the rows where step 10 regenerated. Our $\Delta$ is $-0.007$ with a 95% CI that covers zero, so the measurement does not show that the rewrite improved similarity to the gold answer on the rows where it fired. This is reported as an open result, not a win.}
 \label{tab:mit-delta}
 \end{table}
 
@@ -233,8 +233,7 @@ three.
     \item \textbf{Different from Dale 2023?} Dale scores N-best candidates
           from a fixed generator with MC-dropout. We rewrite the answer in
           place using only verified evidence. Dale reports $+0.49$ to $+0.60$
-          on machine translation; our measured $\Delta$ is $-0.035$ on the
-          length-matched HaluEval split, so we do not claim to lead here. Dale
+          on machine translation; our measured $\Delta$ is $-0.007$ on the length-matched HaluEval split, so we do not claim to lead here. Dale
           needs a white-box MT model; ours is backend-pluggable.
 
     \item \textbf{Different from Conformal-RAG?} Conformal-RAG rejects via
@@ -253,7 +252,5 @@ three.
           $[0.823, 0.865]$) on the length-matched HaluEval split --- above the
           general-purpose probes (FAVA 0.72, EigenScore 0.80--0.82) but below
           Sent-T5 XL (0.85--0.90) and the MT specialist Dale 2023 (0.987). The
-          mitigation $\Delta$ is \emph{not} a win: it is $-0.035$ (CI
-          $[-0.067, -0.006]$) on the rows where step~10 regenerated, so it is
-          reported as an open result.
+          mitigation $\Delta$ is \emph{not} a win: it is $-0.007$ (CI $[-0.022, +0.007]$) on the rows where step~10 regenerated, so it is reported as an open result.
 \end{enumerate}

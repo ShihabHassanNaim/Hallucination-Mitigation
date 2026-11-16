@@ -72,7 +72,7 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 
 | Method | Mitigation output | Pre-mitigation score | Post-mitigation score | Δ |
 |---|---|---|---|---|
-| **Ours (Step 10 regen + Step 11 gate)** | Evidence-constrained rewrite + ABSTAIN | 0.863 | 0.828 | -0.035 [-0.067, -0.006] (n=18 regenerated) — not positive |
+| **Ours (Step 10 regen + Step 11 gate)** | Evidence-constrained rewrite + ABSTAIN | 0.842 | 0.835 | -0.007 [-0.022, +0.007] (n=16 regenerated) — not positive |
 | Dale 2023 — LaBSE rerank | MC-dropout N-best → LaBSE rerank | –0.63 | –0.07 | +0.56 |
 | Dale 2023 — ALTI rerank | MC-dropout N-best → ALTI rerank | –0.63 | –0.14 | +0.49 |
 | Dale 2023 — XNLI rerank | MC-dropout N-best → XNLI rerank | –0.63 | –0.12 | +0.51 |
@@ -83,7 +83,7 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 | AutoHall | None (detection only) | – | – | 0 |
 | Conformal-RAG | Risk-controlled reject | (varies) | (judge-on-accept) | – |
 
-**Observation.** The pipeline is the only system that produces a **rewritten answer** rather than just a label. Measured on the rows where step 10 actually regenerated (n=18 of 60), the Δ over the no-mitigation baseline is **−0.035 BERTScore F1** (95% CI [−0.067, −0.006]) — i.e. regeneration did not improve similarity to the gold answer on this sample. The rewrite step is therefore not yet a demonstrated win over the no-mitigation baseline, and the Δ is reported here as measured rather than as the projected figure an earlier draft carried.
+**Observation.** The pipeline is the only system that produces a **rewritten answer** rather than just a label. Measured on the rows where step 10 actually regenerated (n=16 of 500), the Δ over the no-mitigation baseline is **-0.007 BERTScore F1** (95% CI [-0.022, +0.007]) — i.e. the rewrite is not distinguishable from no effect on similarity to the gold answer on this sample. The rewrite step is therefore not yet a demonstrated win over the no-mitigation baseline, and the Δ is reported here as measured rather than as the projected figure an earlier draft carried.
 
 ---
 
@@ -170,7 +170,7 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 | **HRR** | 0.55 (Dale 2023, implied) | **0.172** | Below the implied baseline |
 | **VSR** | 0.81 (Halu-NLP) | **0.608** | Below the cited comparables |
 | **CCR** | none published (Dale 2023's 0.55 is implied from another metric, not a published CCR) | **0.616** | No published comparable, so this is not a win |
-| **Mitigation Δ over baseline** | +0.60 (Dale 2023 COMET-QE rerank) | **-0.035 [-0.067, -0.006] (n=18 regenerated) — not positive** | Measured on regenerated rows only; not an improvement over the no-mitigation baseline |
+| **Mitigation Δ over baseline** | +0.60 (Dale 2023 COMET-QE rerank) | **-0.007 [-0.022, +0.007] (n=16 regenerated) — not positive** | Measured on regenerated rows only; not an improvement over the no-mitigation baseline |
 | **Claim-level F1** | 0.71 (TU Wien Vectara) | **0.653** | Below the cited comparable |
 | **End-to-end accuracy** | — | **0.553** | Measured |
 | **Per-query latency (GPU)** | 0.22 s (LLM-Check) | **0.8-13.8 s** | Slower than LLM-Check; measured on the length-matched HaluEval split, detection path only (the answer is supplied, so generation is skipped) |

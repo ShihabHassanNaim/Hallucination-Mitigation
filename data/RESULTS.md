@@ -74,7 +74,9 @@ Claim recall and F1 are measured on the faithful rows only: on a hallucinated ro
 |---|---|
 | Per-query latency (mean) | 1.69 s |
 | Per-query latency (median) | 1.43 s |
-| Per-query latency (range) | 0.78–4.51 s |
+| Per-query latency (range) | 0.8–4.5 s |
+
+Latency is the **detection path**: the benchmark supplies the answer, so step 2 skips generation and the timing covers query understanding, hybrid retrieval, reranking and claim-level verification. A run that generated its own answer would add the generator's latency on top.
 
 | Retrieval Metric | Value |
 |---|---|
@@ -134,19 +136,28 @@ Claim recall and F1 are measured on the faithful rows only: on a hallucinated ro
 
 ## Mitigation Delta (rewrite vs. no-mitigation baseline)
 
-Measured by `scripts/evaluate_mitigation.py` on the length-matched HaluEval split. Only the rows where step 10 actually regenerated are used for the delta; the rows it left alone are unchanged by construction.
+Measured by `scripts/evaluate_mitigation.py` on the first 500 rows of the length-matched HaluEval split (of 1000 rows in the file). Only the rows where step 10 actually regenerated are used for the delta; the rows it left alone are unchanged by construction.
 
 | Quantity | Value |
 |---|---|
-| Rows evaluated | 60 |
-| Rows regenerated (step 10 fired) | 18 |
-| Rows left unchanged | 42 |
-| Pre-mitigation BERTScore F1 (regenerated rows) | 0.8632 |
-| Post-mitigation BERTScore F1 (regenerated rows) | 0.8279 |
-| **Delta BERTScore F1** | **-0.0354 [-0.0668, -0.0061]** |
-| Delta ROUGE-L | -0.1033 |
+| Rows in the evaluation file | 1000 |
+| Rows evaluated | 500 |
+| Unique queries | 250 |
+| Rows regenerated (step 10 fired) | 16 |
+| Unique queries among the regenerated rows | 8 |
+| Rows left unchanged | 484 |
+| Rows flagged but guarded (answer left intact) | 86 |
+| Pre-mitigation BERTScore F1 (regenerated rows) | 0.8417 |
+| Post-mitigation BERTScore F1 (regenerated rows) | 0.8348 |
+| **Delta BERTScore F1** | **-0.0069 [-0.0217, +0.0069]** |
+| Delta ROUGE-L | +0.0152 |
+| Delta BERTScore F1 (paired permutation p) | 0.4043 |
 
-**This delta is not positive.** The 95% CI excludes zero on the negative side, so the rewrite did not improve similarity to the gold answer on the rows where it fired. Dale 2023 reports +0.49 to +0.60 on machine translation, so the pipeline does not lead on this dimension. The rewrite path is implemented and exercised; improving it is future work.
+**This delta is not distinguishable from zero.** The 95% CI covers zero, so the measurement does not show that the rewrite improved similarity to the gold answer on the rows where it fired, and it does not show that it hurt either. Dale 2023 reports +0.49 to +0.60 on machine translation, so the pipeline does not lead on this dimension. The rewrite path is implemented and exercised; improving it is future work.
+
+The interval rests on 8 unique queries among the 16 regenerated rows, so it is wide. A null result here means the rewrite is not separable from no effect *at this sample size*; it is not proof that the rewrite does nothing.
+
+Statistics are computed over unique queries rather than rows: the evaluation file pairs a faithful answer with a hallucinated one for the same question, so the two rows of a query share an answer and are not independent. The CI is a percentile bootstrap over queries and the p-value is a paired permutation test that sign-flips each query's delta.
 
 ## Cross-Dataset Summary
 

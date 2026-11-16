@@ -174,8 +174,22 @@ def main() -> None:
                 f"| Per-query latency (median) | {agg['latency_median_s']:.2f} s |"
             )
             lines.append(
-                f"| Per-query latency (range) | {agg['latency_min_s']:.2f}"
-                f"–{agg['latency_max_s']:.2f} s |"
+                f"| Per-query latency (range) | {agg['latency_min_s']:.1f}"
+                f"–{agg['latency_max_s']:.1f} s |"
+            )
+            lines.append("")
+            # The latency band is the detection path only. The benchmark
+            # supplies the answer, so step 2 never calls the generator and
+            # the timing covers query understanding, hybrid retrieval,
+            # reranking and the claim-level verification pass. Without this
+            # note the band reads as the cost of the full RAG pipeline,
+            # which it is not.
+            lines.append(
+                "Latency is the **detection path**: the benchmark supplies "
+                "the answer, so step 2 skips generation and the timing "
+                "covers query understanding, hybrid retrieval, reranking "
+                "and claim-level verification. A run that generated its own "
+                "answer would add the generator's latency on top."
             )
             lines.append("")
 
@@ -242,7 +256,11 @@ def main() -> None:
             "the rows it left alone are unchanged by construction."
         )
         lines.append("")
-        n_unique = regen.get("n_unique_queries") or summary.get("n_unique_queries")
+        # The unique-query count for the whole evaluation, not for the
+        # regenerated subset. The subset's own count is reported on its
+        # own row, because it is the number the interval rests on.
+        n_unique = summary.get("n_unique_queries")
+        n_unique_regen = regen.get("n_unique_queries")
         guarded = summary.get("n_guarded")
 
         lines.append("| Quantity | Value |")
@@ -255,6 +273,10 @@ def main() -> None:
         lines.append(
             f"| Rows regenerated (step 10 fired) | {summary.get('n_regenerated')} |"
         )
+        if n_unique_regen is not None:
+            lines.append(
+                f"| Unique queries among the regenerated rows | {n_unique_regen} |"
+            )
         if kept is not None:
             lines.append(f"| Rows left unchanged | {kept} |")
         if guarded is not None:
@@ -313,6 +335,19 @@ def main() -> None:
                 "work."
             )
         lines.append("")
+
+        # The interval rests on the unique queries among the regenerated
+        # rows, which is a small number. A reader has to see it, or the
+        # interval looks more precise than the evidence supports.
+        if n_unique_regen is not None and n_unique_regen < 30:
+            lines.append(
+                f"The interval rests on {n_unique_regen} unique queries among "
+                f"the {summary.get('n_regenerated')} regenerated rows, so it "
+                "is wide. A null result here means the rewrite is not "
+                "separable from no effect *at this sample size*; it is not "
+                "proof that the rewrite does nothing."
+            )
+            lines.append("")
         lines.append(
             "Statistics are computed over unique queries rather than rows: the "
             "evaluation file pairs a faithful answer with a hallucinated one "

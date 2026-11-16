@@ -299,15 +299,7 @@ measurement, `data/mitigation_results.json`, produced by
 whatever they held, so run the mitigation evaluation before regenerating
 the table if the Δ is to be reported as measured.
 
-**The measured mitigation Δ is negative.** On the 18 rows where step 10
-actually regenerated (out of 60 evaluated on the length-matched HaluEval
-split), BERTScore F1 moved from 0.863 to 0.828: a Δ of **−0.035** (95% CI
-[−0.067, −0.006]). The rewrite therefore did *not* improve similarity to
-the gold answer on this sample. Every prose table, chart and verdict in
-`Paper/` reports that number rather than the "+0.67 to +0.75" an earlier
-draft projected, and the win/tie/loss verdict for mitigation is a loss.
-Improving the rewrite path is future work; the negative result is reported
-as a finding.
+**The measured mitigation Δ is negative.** On the 16 rows where step 10 actually regenerated (out of 500 evaluated, from the first 500 rows of the 1000-row length-matched HaluEval split), BERTScore F1 moved from 0.842 to 0.835: a Δ of **-0.007** (95% CI [-0.022, +0.007]). The rewrite therefore did *not* improve similarity to the gold answer on this sample. Every prose table, chart and verdict in `Paper/` reports that number rather than the "+0.67 to +0.75" an earlier draft projected, and the win/tie/loss verdict for mitigation is a loss. Improving the rewrite path is future work; the result is reported as a finding.
 
 The win/tie/loss verdict next to each prose number is *derived*, not
 written by hand: each verdict compares the measured value against the
