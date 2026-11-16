@@ -1,0 +1,20 @@
+{
+  "full_pipeline": {
+    "detection_accuracy": 0.73,
+    "detection_precision": 0.73,
+    "detection_recall": 0.73,
+    "detection_f1": 0.7299999999999999,
+    "detection_roc_auc": 0.82275,
+    "hallucination_reduction_rate": 0.3,
+    "n_queries": 200
+  },
+  "without_step03_detector": {
+    "detection_accuracy": 0.625,
+    "detection_precision": 0.6190476190476191,
+    "detection_recall": 0.65,
+    "detection_f1": 0.6341463414634146,
+    "detection_roc_auc": 0.6428,
+    "hallucination_reduction_rate": 0.4,
+    "n_queries": 200
+  }
+}

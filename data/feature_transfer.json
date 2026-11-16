@@ -1,0 +1,66 @@
+{
+  "train_feature_report": {
+    "cosine_auc": 0.8911,
+    "claim_count_auc": 0.4974,
+    "overlap_auc": 0.89,
+    "answer_length_auc": 0.8227,
+    "overlap_length_pearson": 0.6697,
+    "answer_length_median_label0": 3.0,
+    "answer_length_median_label1": 9.0,
+    "overlap_median_label0": 0.0,
+    "overlap_median_label1": 0.34545454545454546,
+    "n": 794
+  },
+  "splits": {
+    "halueval": {
+      "cosine_auc": 0.8088,
+      "claim_count_auc": 0.4839,
+      "overlap_auc": 0.7715,
+      "answer_length_auc": 0.4945,
+      "overlap_length_pearson": 0.4207,
+      "answer_length_median_label0": 9.0,
+      "answer_length_median_label1": 9.0,
+      "overlap_median_label0": 0.14285714285714285,
+      "overlap_median_label1": 0.3333333333333333,
+      "n": 1000
+    },
+    "truthfulqa": {
+      "cosine_auc": 0.6331,
+      "claim_count_auc": 0.5,
+      "overlap_auc": 0.6044,
+      "answer_length_auc": 0.4376,
+      "overlap_length_pearson": 0.3911,
+      "answer_length_median_label0": 10.0,
+      "answer_length_median_label1": 9.0,
+      "overlap_median_label0": 0.4,
+      "overlap_median_label1": 0.5,
+      "n": 1000
+    }
+  },
+  "experiments": {
+    "all_features": {
+      "halueval": 0.8024,
+      "truthfulqa": 0.6028
+    },
+    "no_answer_length": {
+      "halueval": 0.7774,
+      "truthfulqa": 0.615
+    },
+    "cosine_and_overlap_only": {
+      "halueval": 0.7829,
+      "truthfulqa": 0.613
+    },
+    "train_rows_length_matched": {
+      "n": 397,
+      "n_queries": 198
+    },
+    "trained_on_length_matched": {
+      "halueval": 0.8154,
+      "truthfulqa": 0.6251
+    },
+    "length_matched_and_no_answer_length": {
+      "halueval": 0.7823,
+      "truthfulqa": 0.623
+    }
+  }
+}
