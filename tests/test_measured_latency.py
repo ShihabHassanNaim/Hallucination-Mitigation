@@ -111,8 +111,20 @@ def test_why_we_win_tex_latency_row_is_rewritten(tmp_path):
     assert "0.8--13.8 s" in out
 
 
-def test_why_we_win_tex_mitigation_row_uses_the_measured_delta(tmp_path):
-    """The mitigation row reports the measured delta, not the projection."""
+def test_why_we_win_tex_mitigation_row_uses_the_measured_delta(tmp_path, monkeypatch):
+    """The mitigation row reports the measured delta, not the projection.
+
+    The measurement is injected rather than read from
+    ``data/mitigation_results.json``: that file is rewritten by the
+    mitigation evaluation, and while a run is in progress it holds only a
+    partial set of rows. A test that read it would silently assert a
+    different number depending on whether an evaluation was running.
+    """
+    monkeypatch.setattr(
+        "scripts.fill_comparison_table.MITIGATION_PATH",
+        _mitigation_fixture(tmp_path),
+    )
+
     tex = tmp_path / "why_we_win_summary.tex"
     tex.write_text(
         "\\textbf{Ours (Step 10 regen + Step 11 gate)} & $-0.63$ & "
@@ -127,3 +139,30 @@ def test_why_we_win_tex_mitigation_row_uses_the_measured_delta(tmp_path):
     assert "-0.035" in out
     # The row must still end with a proper LaTeX row terminator.
     assert out.rstrip().endswith(chr(92) * 2)
+
+
+def _mitigation_fixture(tmp_path, delta: float = -0.035, ci=None):
+    """Write a mitigation measurement with a known delta and return its path."""
+    import json
+    from pathlib import Path
+
+    path = Path(tmp_path) / "mitigation.json"
+    path.write_text(
+        json.dumps({
+            "summary": {
+                "n_rows": 60,
+                "n_regenerated": 18,
+                "n_kept": 42,
+                "regenerated_rows": {
+                    "n": 18,
+                    "pre_bertscore": 0.8632,
+                    "post_bertscore": 0.8279,
+                    "delta_bertscore": delta,
+                    "delta_bertscore_ci95": ci,
+                },
+                "kept_rows": {"n": 42, "delta_bertscore": 0.0},
+            }
+        }),
+        encoding="utf-8",
+    )
+    return path

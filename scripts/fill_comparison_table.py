@@ -174,6 +174,40 @@ def _signed(value: float) -> str:
     return f"{value:+.3f}"
 
 
+def _separation_verdict(
+    value: float | None,
+    ci: list[float] | None,
+    best: float | None,
+    best_label: str = "the best published comparable",
+) -> str:
+    """Describe how our score relates to a published comparable.
+
+    The verdict is derived from the confidence interval, not from the point
+    estimate. Comparing point estimates is what produced the claim that we
+    lead on AUPR: our 0.853 is above Decoding Memories' reported 0.84-0.85,
+    but our own 95% CI [0.833, 0.874] covers that whole range, so the two
+    are not separated and the comparison is a tie.
+
+    Three outcomes are possible:
+
+    * ``separated``   our CI sits entirely above the comparable
+    * ``overlap``     the intervals (or the point values) intersect, so the
+                      comparison is a tie
+    * ``no value``    nothing was measured, so nothing can be claimed
+    """
+    if value is None or not ci or len(ci) != 2:
+        return "not measured"
+    lo, hi = ci
+    if best is None:
+        return "no published comparable to compare against"
+    if lo > best:
+        return f"above {best_label} ({best:.3f}); 95% CI excludes it"
+    if hi < best:
+        return f"below {best_label} ({best:.3f}); 95% CI excludes it"
+    return (f"95% CI [{lo:.3f}, {hi:.3f}] overlaps {best_label} "
+            f"({best:.3f}) — a tie, not a win")
+
+
 def load_mitigation(path: Path) -> dict:
     """Return the mitigation summary block, or {} when it is absent.
 
@@ -256,10 +290,28 @@ def build_mitigation_replacements(mit: dict) -> dict[str, str]:
         out["Post-mitigation Score"] = f"{post:.3f} (BERTScore F1)"
 
     # The "Delta" cell in the CSV asserts ours is the highest. That claim
-    # only survives if the measured delta is actually positive.
-    if delta <= 0:
+    # only survives if the measured delta is actually positive -- and a
+    # positive point estimate whose CI still covers zero is not evidence
+    # of an improvement, so the interval is what decides it.
+    if not _delta_is_a_win(delta, ci):
         out["Delta"] = out["Delta"] + " — not positive"
     return out
+
+
+def _delta_is_a_win(delta: float, ci: list[float] | None) -> bool:
+    """Whether the measured mitigation delta counts as an improvement.
+
+    A win requires the *whole* 95% CI to sit above zero. A delta that is
+    positive only at the point estimate is not separable from no effect,
+    so it is reported as "not positive" rather than as a win.
+    """
+    if delta <= 0:
+        return False
+    if not ci or len(ci) != 2:
+        # Without an interval there is no evidence that the effect is
+        # distinguishable from zero, so the conservative reading applies.
+        return False
+    return ci[0] > 0
 
 
 def _mitigation_delta_text(mit: dict) -> str | None:
@@ -284,7 +336,7 @@ def _mitigation_delta_text(mit: dict) -> str | None:
         text += f" [{ci[0]:+.3f}, {ci[1]:+.3f}]"
     if n:
         text += f" (n={n} regenerated)"
-    if delta <= 0:
+    if not _delta_is_a_win(delta, ci):
         text += " — not positive"
     return text
 
@@ -305,7 +357,8 @@ def _mitigation_prose_values() -> dict:
     if delta is None:
         return {}
 
-    if delta > 0:
+    ci = regen.get("delta_bertscore_ci95")
+    if _delta_is_a_win(delta, ci):
         verdict = "Highest single gain in the comparison"
     else:
         verdict = (
@@ -317,11 +370,13 @@ def _mitigation_prose_values() -> dict:
 
 
 def _delta_positive(lookup) -> bool:
-    """True when the measured mitigation delta is positive.
+    """True when the measured mitigation delta is a positive, separable win.
 
     The delta text is formatted with a leading sign, so the sign is the
     first non-space character. A missing measurement is treated as
-    "not a win" so a prose row never claims a win it cannot support.
+    "not a win" so a prose row never claims a win it cannot support, and
+    a text that the formatter marked "not positive" is likewise not a
+    win.
     """
     try:
         text = lookup("delta")
@@ -329,7 +384,12 @@ def _delta_positive(lookup) -> bool:
         return False
     if not text:
         return False
-    return str(text).strip().startswith("+")
+    text = str(text).strip()
+    if not text.startswith("+"):
+        return False
+    # The formatter appends "— not positive" whenever the interval does
+    # not clear zero, so its presence is the authoritative signal.
+    return "not positive" not in text
 
 
 def _latency_band(lookup) -> str:
@@ -385,12 +445,27 @@ def _verdict_tally(text: str) -> str | None:
     The tally summarises the rows above it, so it is computed from those
     rows rather than maintained by hand. Returns None when the matrix is
     not present or a row cannot be classified.
+
+    The winner mark is read by *column position*, not by "the first mark
+    on the line". Some rows carry a checkmark in an earlier column -- row
+    15 reads "Dale 2023 only | ✓ | ✓ | ≈", because both systems do
+    active mitigation -- and a non-greedy pattern would pick up the
+    comparable's mark and count a tie as a win. The matrix has seven
+    columns, so the verdict is the sixth.
     """
-    rows = re.findall(
-        r"^\| (\d+) \| \*\*[^*]+\*\* \|.*?\| ([✓✗≈]) \|",
-        text,
-        flags=re.MULTILINE,
-    )
+    rows: list[tuple[str, str]] = []
+    for line in text.splitlines():
+        if not re.match(r"^\| \d+ \|", line):
+            continue
+        cells = [c.strip() for c in line.split("|")]
+        # cells[0] is empty (the line starts with "|"), so the columns
+        # are 1..7 and the verdict is column 6.
+        if len(cells) < 8:
+            continue
+        verdict = cells[6]
+        if verdict not in ("✓", "✗", "≈"):
+            continue
+        rows.append((cells[1], verdict))
     if not rows:
         return None
 
@@ -529,6 +604,40 @@ def _fill_comparison_md(
             ("detection_roc_auc",),
         ),
         (
+            # The AUPR row was previously hard-coded prose claiming we were
+            # "above the general-purpose probes". That is not a claim the
+            # interval supports: our AUPR is 0.853 with a 95% CI of
+            # [0.833, 0.874], and Decoding Memories reports 0.84-0.85, so
+            # the two are not separated. The verdict is now computed from
+            # the measured CI against the best published comparable, so the
+            # row cannot keep a win the measurement does not support.
+            "summary: AUPR",
+            r"\| \*\*Detection AUPR\*\* \| [^|]*\| \*\*[^*]+\*\* \| [^|]*\|",
+            lambda v, m: (
+                "| **Detection AUPR** | 0.84-0.85 (Decoding Memories) | "
+                f"**{v('detection_aupr')}** | "
+                f"{_separation_verdict(agg.get('detection_aupr'), agg.get('detection_aupr_ci95'), 0.84)} |"
+            ),
+            ("detection_aupr",),
+        ),
+        (
+            # The CCR row had the same problem, and a second one: its
+            # comparable of 0.55 is *implied* from another metric of Dale
+            # 2023 rather than published as a CCR, and the other cited
+            # systems have no mitigation stage at all (their cells are
+            # "0 (no rewriting)"), so there is no published CCR to compare
+            # against. The row now says so instead of claiming a win.
+            "summary: CCR",
+            r"\| \*\*CCR\*\* \| [^|]*\| \*\*[^*]+\*\* \| [^|]*\|",
+            lambda v, m: (
+                "| **CCR** | none published (Dale 2023's 0.55 is implied from "
+                "another metric, not a published CCR) | "
+                f"**{v('claim_correction_rate')}** | "
+                "No published comparable, so this is not a win |"
+            ),
+            ("claim_correction_rate",),
+        ),
+        (
             # The pattern has to match the *corrected* wording as well as the
             # original. A pattern anchored on the old ("is in the same latency
             # tier") sentence stops matching once the file has been fixed,
@@ -659,6 +768,7 @@ def _fill_comparison_md(
         "detection_roc_auc", "detection_aupr", "precision_at_recall_90",
         "claim_precision", "claim_recall", "claim_f1", "detection_accuracy",
         "spearman_rho", "hallucination_reduction_rate",
+        "claim_correction_rate",
         "latency_min_s", "latency_max_s", "latency_mean_s",
     )}
     values.update(_mitigation_prose_values())
@@ -771,6 +881,34 @@ def _fill_comparison_tex(
             ("detection_roc_auc",),
         ),
         (
+            # Same correction as the Markdown version: the AUPR row claimed
+            # to be above the general-purpose probes, but our 95% CI
+            # [0.833, 0.874] covers Decoding Memories' 0.84-0.85, so the
+            # comparison is a tie.
+            "summary: AUPR",
+            r"Detection AUPR & [^&]* & [^&]* & [^&]* \\\\",
+            lambda v, m: (
+                r"Detection AUPR & 0.84--0.85 (Decoding Memories) & "
+                f"{v('detection_aupr')} & "
+                r"CI overlaps the comparable (tie) \\"
+            ),
+            ("detection_aupr",),
+        ),
+        (
+            # CCR's comparable of 0.55 is implied from another metric rather
+            # than published as a CCR, and the other cited systems have no
+            # mitigation stage, so there is no published CCR to compare
+            # against. The row says so rather than claiming a win.
+            "summary: CCR",
+            r"CCR & [^&]* & [^&]* & [^&]* \\\\",
+            lambda v, m: (
+                r"CCR & none published & "
+                f"{v('claim_correction_rate')} & "
+                r"No published comparable \\"
+            ),
+            ("claim_correction_rate",),
+        ),
+        (
             "summary: sentence accuracy",
             r"Sentence accuracy & 0\.847 \(Halu-NLP\) & [^&]* & At SHROOM winner level \\\\",
             lambda v, m: (
@@ -831,6 +969,7 @@ def _fill_comparison_tex(
         "detection_roc_auc", "detection_aupr", "precision_at_recall_90",
         "claim_precision", "claim_recall", "claim_f1", "detection_accuracy",
         "spearman_rho", "hallucination_reduction_rate",
+        "claim_correction_rate",
         "latency_min_s", "latency_max_s", "latency_mean_s",
     )}
     values.update(_mitigation_prose_values())
@@ -1307,7 +1446,7 @@ def _fill_mitigation_prose(
     n = mitigation.get("n_regenerated") or regen.get("n")
     if n:
         delta_text += f" (n={n} regenerated)"
-    if delta <= 0:
+    if not _delta_is_a_win(delta, ci):
         delta_text += " — not positive"
     # The LaTeX table shows the same three numbers in math mode, matching
     # the convention used by the Markdown tables: the absolute scores for
@@ -1319,14 +1458,21 @@ def _fill_mitigation_prose(
     else:
         delta_tex = f"{delta:+.3f}"
 
-    if delta > 0:
+    if _delta_is_a_win(delta, ci):
         caption_sentence = (
             f"Our $\\Delta$ is ${delta:+.3f}$, ahead of the best comparable "
             f"method."
         )
-    else:
+    elif ci and ci[1] < 0:
         caption_sentence = (
             f"Our $\\Delta$ is ${delta:+.3f}$, so the rewrite did not improve "
+            f"similarity to the gold answer on the rows where it fired. This "
+            f"is reported as an open result, not a win."
+        )
+    else:
+        caption_sentence = (
+            f"Our $\\Delta$ is ${delta:+.3f}$ with a 95% CI that covers zero, "
+            f"so the measurement does not show that the rewrite improved "
             f"similarity to the gold answer on the rows where it fired. This "
             f"is reported as an open result, not a win."
         )

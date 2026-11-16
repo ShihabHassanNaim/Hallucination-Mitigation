@@ -381,6 +381,63 @@ def test_a_negative_delta_is_not_presented_as_a_win():
     assert "not positive" in out["Delta"]
 
 
+def test_a_positive_delta_whose_interval_covers_zero_is_not_a_win():
+    """A positive point estimate is not evidence of an improvement.
+
+    The point estimate can land above zero by chance. Only an interval
+    that sits entirely above zero separates the rewrite from no effect, so
+    a delta whose CI covers zero must not keep the "highest" claim.
+    """
+    mit = {
+        "n_regenerated": 20,
+        "regenerated_rows": {
+            "n": 20,
+            "pre_bertscore": 0.60,
+            "post_bertscore": 0.62,
+            "delta_bertscore": 0.02,
+            "delta_bertscore_ci95": [-0.01, 0.05],
+        },
+    }
+    out = build_mitigation_replacements(mit)
+    assert out["Delta"].startswith("+0.020")
+    assert "not positive" in out["Delta"], (
+        f"a CI covering zero was presented as a win: {out['Delta']!r}"
+    )
+
+
+def test_a_positive_delta_with_an_interval_above_zero_is_a_win():
+    """The counterpart: a CI that clears zero *is* a win."""
+    mit = {
+        "n_regenerated": 20,
+        "regenerated_rows": {
+            "n": 20,
+            "pre_bertscore": 0.60,
+            "post_bertscore": 0.66,
+            "delta_bertscore": 0.06,
+            "delta_bertscore_ci95": [0.02, 0.10],
+        },
+    }
+    out = build_mitigation_replacements(mit)
+    assert out["Delta"].startswith("+0.060")
+    assert "not positive" not in out["Delta"]
+
+
+def test_a_positive_delta_without_an_interval_is_not_a_win():
+    """Without an interval there is no evidence of an effect, so the
+    conservative reading applies."""
+    mit = {
+        "n_regenerated": 20,
+        "regenerated_rows": {
+            "n": 20,
+            "pre_bertscore": 0.60,
+            "post_bertscore": 0.66,
+            "delta_bertscore": 0.06,
+        },
+    }
+    out = build_mitigation_replacements(mit)
+    assert "not positive" in out["Delta"]
+
+
 def test_fill_rewrites_the_mitigation_cells(tmp_path, monkeypatch):
     csv_path = tmp_path / "comparison_table.csv"
     with csv_path.open("w", encoding="utf-8", newline="") as f:
@@ -762,3 +819,79 @@ def test_why_we_win_tally_is_refreshed(tmp_path):
     out = md.read_text(encoding="utf-8")
     assert "| **\u2713 Win** | 0 |  |" in out
     assert "| **\u2717 Loss** | 2 | 2, 3 |" in out
+
+
+# ---------------------------------------------------------------------------
+# The AUPR and CCR rows must not claim a win the interval does not support.
+# ---------------------------------------------------------------------------
+
+_PAPER_FILES = (
+    Path("Paper/comparison.md"),
+    Path("Paper/comparison_summary.tex"),
+)
+
+
+def test_the_aupr_row_reports_the_interval_overlap():
+    """AUPR is a tie, not a win.
+
+    Our AUPR is 0.853 against Decoding Memories' reported 0.84-0.85, but
+    our own 95% CI is [0.833, 0.874], which covers that whole range. The
+    row used to say "Above the general-purpose probes", which reads as a
+    lead over the field.
+    """
+    md = Path("Paper/comparison.md")
+    if not md.exists():
+        pytest.skip("comparison.md not present")
+    text = md.read_text(encoding="utf-8")
+    row = next((l for l in text.splitlines()
+                if l.startswith("| **Detection AUPR** |")), None)
+    assert row is not None, "the AUPR row is missing from comparison.md"
+    low = row.lower()
+    assert "tie" in low or "overlap" in low, (
+        f"the AUPR row does not report the interval overlap: {row}"
+    )
+    for overclaim in ("above the general-purpose probes",
+                      "above the best", "leads the field"):
+        assert overclaim not in low, (
+            f"the AUPR row still claims a lead: {row}"
+        )
+
+
+def test_the_ccr_row_says_there_is_no_published_comparable():
+    """CCR's 0.55 baseline is implied, not published.
+
+    The other cited systems have no mitigation stage at all, so their
+    cells are "0 (no rewriting)". Comparing our measured CCR against a
+    baseline nobody published is not a comparison, and the row must say so
+    rather than claim to be above it.
+    """
+    md = Path("Paper/comparison.md")
+    if not md.exists():
+        pytest.skip("comparison.md not present")
+    text = md.read_text(encoding="utf-8")
+    row = next((l for l in text.splitlines() if l.startswith("| **CCR** |")),
+               None)
+    assert row is not None, "the CCR row is missing from comparison.md"
+    low = row.lower()
+    assert "no published comparable" in low or "none published" in low, (
+        f"the CCR row does not say that no comparable is published: {row}"
+    )
+    assert "above the implied baseline" not in low, (
+        f"the CCR row still claims to be above an implied baseline: {row}"
+    )
+
+
+def test_the_paper_does_not_claim_aupr_or_ccr_are_wins():
+    """No file may state that AUPR or CCR is a win."""
+    banned = (
+        "aupr and ccr are the two metrics where we are ahead",
+        "aupr and ccr are the two metrics where we are ahead",
+    )
+    for path in _PAPER_FILES:
+        if not path.exists():
+            continue
+        low = path.read_text(encoding="utf-8").lower()
+        for phrase in banned:
+            assert phrase not in low, (
+                f"{path} still asserts that AUPR and CCR are wins"
+            )

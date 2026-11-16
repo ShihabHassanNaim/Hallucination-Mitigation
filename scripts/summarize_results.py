@@ -234,14 +234,23 @@ def main() -> None:
             "construction."
         )
         lines.append("")
+        n_unique = regen.get("n_unique_queries") or summary.get("n_unique_queries")
+        guarded = summary.get("n_guarded")
+
         lines.append("| Quantity | Value |")
         lines.append("|---|---|")
         lines.append(f"| Rows evaluated | {summary.get('n_rows')} |")
+        if n_unique is not None:
+            lines.append(f"| Unique queries | {n_unique} |")
         lines.append(
             f"| Rows regenerated (step 10 fired) | {summary.get('n_regenerated')} |"
         )
         if kept is not None:
             lines.append(f"| Rows left unchanged | {kept} |")
+        if guarded is not None:
+            lines.append(
+                f"| Rows flagged but guarded (answer left intact) | {guarded} |"
+            )
         lines.append(
             "| Pre-mitigation BERTScore F1 (regenerated rows) | "
             f"{regen.get('pre_bertscore'):.4f} |"
@@ -256,14 +265,24 @@ def main() -> None:
         )
         if rouge is not None:
             lines.append(f"| Delta ROUGE-L | {rouge:+.4f} |")
+        p_bs = regen.get("delta_bertscore_p")
+        if p_bs is not None:
+            lines.append(
+                f"| Delta BERTScore F1 (paired permutation p) | {p_bs:.4f} |"
+            )
         lines.append("")
 
-        if delta > 0:
+        # The verdict follows the *interval*, not the point estimate. A
+        # positive mean whose CI still covers zero is not evidence of an
+        # improvement, and saying so would be an overclaim of exactly the
+        # kind the CI-separation rule exists to prevent.
+        if ci and ci[0] > 0:
             lines.append(
-                "The delta is positive: the rewrite improved similarity to the "
-                "gold answer on the rows where it fired."
+                "The delta is positive and its 95% CI excludes zero, so the "
+                "rewrite improved similarity to the gold answer on the rows "
+                "where it fired."
             )
-        else:
+        elif ci and ci[1] < 0:
             lines.append(
                 "**This delta is not positive.** The 95% CI excludes zero on "
                 "the negative side, so the rewrite did not improve similarity "
@@ -272,6 +291,26 @@ def main() -> None:
                 "pipeline does not lead on this dimension. The rewrite path "
                 "is implemented and exercised; improving it is future work."
             )
+        else:
+            lines.append(
+                "**This delta is not distinguishable from zero.** The 95% CI "
+                "covers zero, so the measurement does not show that the "
+                "rewrite improved similarity to the gold answer on the rows "
+                "where it fired, and it does not show that it hurt either. "
+                "Dale 2023 reports +0.49 to +0.60 on machine translation, so "
+                "the pipeline does not lead on this dimension. The rewrite "
+                "path is implemented and exercised; improving it is future "
+                "work."
+            )
+        lines.append("")
+        lines.append(
+            "Statistics are computed over unique queries rather than rows: the "
+            "evaluation file pairs a faithful answer with a hallucinated one "
+            "for the same question, so the two rows of a query share an answer "
+            "and are not independent. The CI is a percentile bootstrap over "
+            "queries and the p-value is a paired permutation test that "
+            "sign-flips each query's delta."
+        )
         lines.append("")
 
     lines.append("## Cross-Dataset Summary")
