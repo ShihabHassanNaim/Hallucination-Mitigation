@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -539,6 +540,64 @@ def test_the_readme_mitigation_paragraph_tracks_the_measurement(tmp_path, monkey
     # The projected figure must never come back.
     assert "0.67 to +0.75" not in out.split("rather than the")[-1].split(".")[0] \
         or "an earlier" in out
+
+
+def test_the_mitigation_flag_is_honoured_by_the_prose(tmp_path, monkeypatch):
+    """``--mitigation`` must select the measurement the prose reports.
+
+    The prose read the module-level path instead of the one the command
+    line was given, so the table and the sentence beside it could report
+    two different measurements. A test that passed a temporary file caught
+    nothing because it only checked the table.
+    """
+    paper = tmp_path / "Paper"
+    paper.mkdir()
+    for name in ("comparison.md", "comparison_summary.tex",
+                 "five_position_comparison.md", "why_we_win.md",
+                 "why_we_win_summary.tex"):
+        shutil.copy(Path("Paper") / name, paper / name)
+    shutil.copy("Paper/comparison_table.csv", paper / "comparison_table.csv")
+    readme = tmp_path / "README.md"
+    shutil.copy("README.md", readme)
+
+    mit = tmp_path / "mit.json"
+    mit.write_text(
+        json.dumps({
+            "summary": {
+                "n_rows": 1000,
+                "n_regenerated": 214,
+                "regenerated_rows": {
+                    "n": 214,
+                    "pre_bertscore": 0.812,
+                    "post_bertscore": 0.819,
+                    "delta_bertscore": 0.007,
+                    "delta_bertscore_ci95": [-0.009, 0.023],
+                },
+                "kept_rows": {"n": 786, "delta_bertscore": 0.0},
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    rc = fill_main([
+        "--csv", str(paper / "comparison_table.csv"),
+        "--metrics", "data/metrics_halueval.json",
+        "--paper-dir", str(paper),
+        "--mitigation", str(mit),
+        "--readme", str(readme),
+    ])
+    assert rc == 0
+
+    text = readme.read_text(encoding="utf-8")
+    assert "+0.007" in text, (
+        "the README did not report the measurement the flag selected"
+    )
+    assert "214 rows" in text
+
+    fp = (paper / "five_position_comparison.md").read_text(encoding="utf-8")
+    assert "+0.007" in fp, (
+        "the five-position prose did not report the selected measurement"
+    )
 
 
 def test_fill_rewrites_the_mitigation_cells(tmp_path, monkeypatch):

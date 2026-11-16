@@ -341,13 +341,19 @@ def _mitigation_delta_text(mit: dict) -> str | None:
     return text
 
 
-def _mitigation_prose_values() -> dict:
+def _mitigation_prose_values(path: Path | None = None) -> dict:
     """The values a prose row needs to quote the measured mitigation delta.
 
     The verdict cell is derived from the sign of the measured delta so a
     row cannot keep claiming a win once the measurement contradicts it.
+
+    ``path`` selects which measurement to read. It defaults to the
+    module-level constant, but the callers pass the path the command line
+    was given: an earlier version read the constant here, so ``--mitigation``
+    was silently ignored by the prose and the prose reported a different
+    measurement than the table beside it.
     """
-    mit = load_mitigation(MITIGATION_PATH)
+    mit = load_mitigation(path if path is not None else MITIGATION_PATH)
     delta_text = _mitigation_delta_text(mit)
     if delta_text is None:
         return {}
@@ -600,7 +606,8 @@ def _safe(text: str) -> str:
 
 
 def _fill_comparison_md(
-    path: Path, agg: dict, dry_run: bool = False
+    path: Path, agg: dict, dry_run: bool = False,
+    mitigation_path: Path | None = None,
 ) -> list[tuple[str, str, str]]:
     """Replace the projected "Ours" rows in ``Paper/comparison.md``.
 
@@ -832,10 +839,12 @@ def _fill_comparison_md(
         "claim_correction_rate",
         "latency_min_s", "latency_max_s", "latency_mean_s",
     )}
-    values.update(_mitigation_prose_values())
+    values.update(_mitigation_prose_values(mitigation_path))
     text, replacements = _apply_specs(text, row_specs, values, dry_run=dry_run)
 
-    text, mit_changes = _fill_mitigation_prose(text, path, dry_run=dry_run)
+    text, mit_changes = _fill_mitigation_prose(
+        text, path, dry_run=dry_run, mitigation_path=mitigation_path
+    )
     replacements.extend(mit_changes)
 
     if replacements and not dry_run:
@@ -844,7 +853,8 @@ def _fill_comparison_md(
 
 
 def _fill_comparison_tex(
-    path: Path, agg: dict, dry_run: bool = False
+    path: Path, agg: dict, dry_run: bool = False,
+    mitigation_path: Path | None = None,
 ) -> list[tuple[str, str, str]]:
     """Replace the projected "Ours" rows in ``Paper/comparison_summary.tex``.
 
@@ -1033,7 +1043,7 @@ def _fill_comparison_tex(
         "claim_correction_rate",
         "latency_min_s", "latency_max_s", "latency_mean_s",
     )}
-    values.update(_mitigation_prose_values())
+    values.update(_mitigation_prose_values(mitigation_path))
     text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
 
     # The caption still says the numbers are projected.
@@ -1059,7 +1069,8 @@ def _fill_comparison_tex(
 
 
 def _fill_why_we_win_md(
-    path: Path, agg: dict, dry_run: bool = False
+    path: Path, agg: dict, dry_run: bool = False,
+    mitigation_path: Path | None = None,
 ) -> list[tuple[str, str, str]]:
     """Replace the projected rows in ``Paper/why_we_win.md``."""
     if not path.exists():
@@ -1298,7 +1309,7 @@ def _fill_why_we_win_md(
         "verification_success_rate",
         "latency_min_s", "latency_max_s", "latency_mean_s",
     )}
-    values.update(_mitigation_prose_values())
+    values.update(_mitigation_prose_values(mitigation_path))
     text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
 
     # The tally summarises the rows above it, so it is recomputed from
@@ -1317,7 +1328,9 @@ def _fill_why_we_win_md(
                 ("verdict tally", pattern, f"{count} block(s)")
             )
 
-    text, mit_changes = _fill_mitigation_prose(text, path, dry_run=dry_run)
+    text, mit_changes = _fill_mitigation_prose(
+        text, path, dry_run=dry_run, mitigation_path=mitigation_path
+    )
     replacements.extend(mit_changes)
 
     if replacements and not dry_run:
@@ -1326,7 +1339,8 @@ def _fill_why_we_win_md(
 
 
 def _fill_five_position_md(
-    path: Path, agg: dict, dry_run: bool = False
+    path: Path, agg: dict, dry_run: bool = False,
+    mitigation_path: Path | None = None,
 ) -> list[tuple[str, str, str]]:
     """Replace the projected rows in ``Paper/five_position_comparison.md``.
 
@@ -1416,10 +1430,12 @@ def _fill_five_position_md(
         "verification_success_rate", "claim_correction_rate",
         "latency_min_s", "latency_max_s", "latency_mean_s",
     )}
-    values.update(_mitigation_prose_values())
+    values.update(_mitigation_prose_values(mitigation_path))
     text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
 
-    text, mit_changes = _fill_mitigation_prose(text, path, dry_run=dry_run)
+    text, mit_changes = _fill_mitigation_prose(
+        text, path, dry_run=dry_run, mitigation_path=mitigation_path
+    )
     replacements.extend(mit_changes)
 
     if replacements and not dry_run:
@@ -1428,7 +1444,8 @@ def _fill_five_position_md(
 
 
 def _fill_readme_md(
-    path: Path, agg: dict, dry_run: bool = False
+    path: Path, agg: dict, dry_run: bool = False,
+    mitigation_path: Path | None = None,
 ) -> list[tuple[str, str, str]]:
     """Keep the README's mitigation paragraph in sync with the measurement.
 
@@ -1441,7 +1458,7 @@ def _fill_readme_md(
         return []
 
     text = path.read_text(encoding="utf-8")
-    values = _mitigation_prose_values()
+    values = _mitigation_prose_values(mitigation_path)
     if not values:
         return []
 
@@ -1543,7 +1560,8 @@ _MITIGATION_PROSE = {
 
 
 def _fill_mitigation_prose(
-    text: str, path: Path, dry_run: bool = False
+    text: str, path: Path, dry_run: bool = False,
+    mitigation_path: Path | None = None,
 ) -> tuple[str, list[tuple[str, str, str]]]:
     """Replace the mitigation rows of the prose tables with measured values.
 
@@ -1551,7 +1569,9 @@ def _fill_mitigation_prose(
     be returned because this helper rewrites rows that live *outside* the
     spec lists of the calling function.
     """
-    mitigation = load_mitigation(MITIGATION_PATH)
+    mitigation = load_mitigation(
+        mitigation_path if mitigation_path is not None else MITIGATION_PATH
+    )
     if not mitigation:
         return text, []
     regen = mitigation.get("regenerated_rows") or {}
@@ -1624,7 +1644,8 @@ def _fill_mitigation_prose(
 
 
 def _fill_why_we_win_tex(
-    path: Path, agg: dict, dry_run: bool = False
+    path: Path, agg: dict, dry_run: bool = False,
+    mitigation_path: Path | None = None,
 ) -> list[tuple[str, str, str]]:
     """Replace the projected rows in ``Paper/why_we_win_summary.tex``."""
     if not path.exists():
@@ -1829,10 +1850,12 @@ def _fill_why_we_win_tex(
         "verification_success_rate",
         "latency_min_s", "latency_max_s", "latency_mean_s",
     )}
-    values.update(_mitigation_prose_values())
+    values.update(_mitigation_prose_values(mitigation_path))
     text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
 
-    text, mit_changes = _fill_mitigation_prose(text, path, dry_run=dry_run)
+    text, mit_changes = _fill_mitigation_prose(
+        text, path, dry_run=dry_run, mitigation_path=mitigation_path
+    )
     replacements.extend(mit_changes)
 
     if replacements and not dry_run:
@@ -1926,31 +1949,36 @@ def main(argv: list[str] | None = None) -> int:
     # version returned early in that case, which left the prose tables
     # frozen at whatever number they happened to hold.
     md_changes = _fill_comparison_md(
-        args.paper_dir / "comparison.md", agg, dry_run=args.dry_run
+        args.paper_dir / "comparison.md", agg, dry_run=args.dry_run,
+        mitigation_path=args.mitigation,
     )
     for label, old, new in md_changes:
         print(f"  comparison.md {label}: {_safe(old)} -> {_safe(new)}")
 
     tex_changes = _fill_comparison_tex(
-        args.paper_dir / "comparison_summary.tex", agg, dry_run=args.dry_run
+        args.paper_dir / "comparison_summary.tex", agg, dry_run=args.dry_run,
+        mitigation_path=args.mitigation,
     )
     for label, old, new in tex_changes:
         print(f"  comparison_summary.tex {label}: {_safe(old)} -> {_safe(new)}")
 
     ww_md_changes = _fill_why_we_win_md(
-        args.paper_dir / "why_we_win.md", agg, dry_run=args.dry_run
+        args.paper_dir / "why_we_win.md", agg, dry_run=args.dry_run,
+        mitigation_path=args.mitigation,
     )
     for label, old, new in ww_md_changes:
         print(f"  why_we_win.md {label}: {_safe(old)} -> {_safe(new)}")
 
     ww_tex_changes = _fill_why_we_win_tex(
-        args.paper_dir / "why_we_win_summary.tex", agg, dry_run=args.dry_run
+        args.paper_dir / "why_we_win_summary.tex", agg, dry_run=args.dry_run,
+        mitigation_path=args.mitigation,
     )
     for label, old, new in ww_tex_changes:
         print(f"  why_we_win_summary.tex {label}: {_safe(old)} -> {_safe(new)}")
 
     fp_changes = _fill_five_position_md(
-        args.paper_dir / "five_position_comparison.md", agg, dry_run=args.dry_run
+        args.paper_dir / "five_position_comparison.md", agg, dry_run=args.dry_run,
+        mitigation_path=args.mitigation,
     )
     for label, old, new in fp_changes:
         print(f"  five_position_comparison.md {label}: {_safe(old)} -> {_safe(new)}")
@@ -1958,7 +1986,8 @@ def main(argv: list[str] | None = None) -> int:
     # The README lives outside the paper directory, so it is filled from
     # the repository root rather than from --paper-dir.
     readme_changes = _fill_readme_md(
-        args.readme, agg, dry_run=args.dry_run
+        args.readme, agg, dry_run=args.dry_run,
+        mitigation_path=args.mitigation,
     )
     for label, old, new in readme_changes:
         print(f"  {args.readme.name} {label}: {_safe(old)} -> {_safe(new)}")
