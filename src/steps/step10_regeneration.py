@@ -311,6 +311,7 @@ class Step10Regeneration(Step):
         # Find every flagged claim's span in the original answer.
         spans: list[tuple[int, int, str]] = []
         skipped = 0
+        guard_reason = ""
         for c in confident:
             span = _find_span(answer, c.text)
             if span is None:
@@ -320,8 +321,14 @@ class Step10Regeneration(Step):
             if not replacement:
                 # Nothing usable to put in its place. Rather than delete
                 # the claim -- which loses content that may be correct --
-                # leave the answer alone and let the gate abstain.
-                return answer, "ABSTAIN", "no_usable_replacement"
+                # leave this claim alone and rewrite the others. An
+                # earlier version abandoned the whole answer here, which
+                # meant one unusable claim suppressed every good
+                # replacement in the same answer and left the rewrite
+                # firing on only 16 of 500 rows.
+                skipped += 1
+                guard_reason = guard_reason or "no_usable_replacement"
+                continue
             # A replacement that is vastly longer than the claim it
             # replaces is a sign the evidence does not actually answer
             # the question. Substituting a long passage for a short claim
@@ -329,18 +336,23 @@ class Step10Regeneration(Step):
             # correct four-word answer became a two-hundred-word
             # paragraph about an unrelated subject.
             if not self._replacement_is_proportionate(replacement, c.text):
-                return answer, "ABSTAIN", "replacement_not_proportionate"
+                skipped += 1
+                guard_reason = guard_reason or "replacement_not_proportionate"
+                continue
             # Length alone is not enough: a short replacement can still be
             # about a different subject. The replacement has to actually
             # be about the claim it replaces, otherwise the rewrite swaps
             # a wrong answer for a differently wrong answer.
             if not self._replacement_is_relevant(replacement, c.text):
-                return answer, "ABSTAIN", "replacement_not_relevant"
+                skipped += 1
+                guard_reason = guard_reason or "replacement_not_relevant"
+                continue
             spans.append((span[0], span[1], replacement))
 
         if not spans:
-            # Every flagged claim could not be located in the answer.
-            return answer, "ABSTAIN", "claim_not_located"
+            # Every flagged claim could not be located in the answer, or
+            # every replacement was rejected by a guard.
+            return answer, "ABSTAIN", guard_reason or "claim_not_located"
 
         # Splice from the end backwards so the earlier offsets stay valid.
         spans.sort(key=lambda s: s[0])
@@ -362,7 +374,12 @@ class Step10Regeneration(Step):
 
         guard = ""
         if skipped:
-            guard = f"{skipped}_claim(s)_not_located"
+            # The rewrite went ahead, but some flagged claims were left
+            # untouched. Report how many and why, so the mitigation run
+            # can separate a partial rewrite from a full one.
+            guard = f"{skipped}_claim(s)_skipped"
+            if guard_reason:
+                guard = f"{guard}:{guard_reason}"
         return final, "EDITED", guard
 
     @staticmethod

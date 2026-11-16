@@ -138,7 +138,15 @@ def _feature_report(X: np.ndarray, y: np.ndarray) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--train", default="data/detector_train.jsonl")
+    ap.add_argument(
+        "--train",
+        default="data/detector_train_clean.jsonl",
+        help="training file for the detector. This must be the *clean* one: "
+             "the older data/detector_train.jsonl paired short gold spans "
+             "against long generated sentences, so answer_length alone "
+             "separated the classes and every comparison drawn from it was "
+             "confounded.",
+    )
     ap.add_argument("--out", default="data/feature_transfer.json")
     ap.add_argument("--device", default="cpu",
                     help="device for the embedder (default cpu, to avoid "

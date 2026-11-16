@@ -248,3 +248,48 @@ def test_a_correct_answer_is_never_degraded_by_a_false_contradiction(tmp_path):
     assert ctx.final_answer == answer, (
         f"a correct answer was degraded: {ctx.final_answer!r}"
     )
+
+
+def test_one_guarded_claim_does_not_suppress_the_other_rewrites(tmp_path):
+    """A rejected claim must not abandon the whole answer.
+
+    The guards used to `return` immediately, so a single unusable
+    replacement suppressed every good replacement in the same answer.
+    On the 500-row mitigation run that left the rewrite firing on only
+    16 of 500 rows, with 86 more rows aborted entirely even though a
+    second claim in those answers had a usable replacement.
+
+    Now a rejected claim is skipped and the remaining flagged claims are
+    still rewritten. The answer keeps the good replacement and the
+    rejected claim is left as it was.
+    """
+    answer = ("Suffolk County is the location of Lindenhurst. "
+              "Memphis International Airport was built in 1963.")
+    bad = "Memphis International Airport was built in 1963."
+    good = "Suffolk County is the location of Lindenhurst."
+
+    good_ev = Evidence(doc_id="doc-1",
+                        text="Suffolk County is the location of Lindenhurst.", score=0.9)
+    # An unrelated passage: the claim's subject is absent, so the
+    # relevance guard rejects this replacement.
+    bad_ev = Evidence(doc_id="doc-2",
+                      text="A completely unrelated passage about Kumasi.", score=0.1)
+
+    ctx = _ctx(
+        _cfg(tmp_path), answer,
+        [
+            _claim(good, "contradicted", 0.1, [good_ev]),
+            _claim(bad, "contradicted", 0.1, [bad_ev]),
+        ],
+    )
+
+    Step10Regeneration(ctx).run()
+
+    rec = ctx.metadata["step10_regeneration"]
+    assert rec["decision"] == "EDITED", (
+        f"the good replacement was suppressed: {rec}"
+    )
+    assert "Suffolk County" in ctx.final_answer
+    # The rejected claim is left exactly as it was.
+    assert "Memphis International Airport was built in 1963." in ctx.final_answer
+    assert "skipped" in rec.get("guard", "")
