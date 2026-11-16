@@ -365,8 +365,69 @@ def _mitigation_prose_values() -> dict:
             "Measured on regenerated rows only; not an improvement over the "
             "no-mitigation baseline"
         )
+
+    # The sentence that states the mitigation result in prose. It is
+    # generated rather than hand-written so the number in the sentence
+    # cannot drift away from the measurement it describes.
+    n_rows = mit.get("n_rows")
+    n_regen = mit.get("n_regenerated") or regen.get("n")
+    ci_text = ""
+    if ci:
+        ci_text = f" (95% CI [{ci[0]:+.3f}, {ci[1]:+.3f}])"
+    prose = (
+        f"The mitigation \u0394 is {delta:+.3f} BERTScore F1{ci_text} on the "
+    )
+    if n_regen and n_rows:
+        prose += f"{n_regen} of {n_rows} rows where step 10 regenerated"
+    elif n_regen:
+        prose += f"the {n_regen} rows where step 10 regenerated"
+    else:
+        prose += "the rows where step 10 regenerated"
+    prose += ", and the HRR / VSR / CCR rates are below the cited comparables."
+
+    # The README paragraph. It states the sign of the result in its first
+    # sentence, so the lead carries the sign and the body carries the
+    # numbers.
+    if _delta_is_a_win(delta, ci):
+        lead = "positive"
+        body = (
+            f"On the {n_regen} rows where step 10 actually regenerated "
+            f"(out of {n_rows} evaluated on the length-matched HaluEval "
+            f"split), BERTScore F1 moved from {regen.get('pre_bertscore'):.3f} "
+            f"to {regen.get('post_bertscore'):.3f}: a \u0394 of "
+            f"**{delta:+.3f}** (95% CI [{ci[0]:+.3f}, {ci[1]:+.3f}]). The "
+            f"rewrite therefore *did* improve similarity to the gold answer "
+            f"on this sample."
+        ) if ci and n_regen and n_rows else (
+            f"On the {n_regen} rows where step 10 actually regenerated, "
+            f"BERTScore F1 moved from {regen.get('pre_bertscore'):.3f} to "
+            f"{regen.get('post_bertscore'):.3f}: a \u0394 of **{delta:+.3f}**."
+        )
+        readme_verdict = "is a win."
+    else:
+        lead = "negative" if delta <= 0 else "not distinguishable from zero"
+        ci_clause = (
+            f" (95% CI [{ci[0]:+.3f}, {ci[1]:+.3f}])" if ci else ""
+        )
+        body = (
+            f"On the {n_regen} rows where step 10 actually regenerated "
+            f"(out of {n_rows} evaluated on the length-matched HaluEval "
+            f"split), BERTScore F1 moved from {regen.get('pre_bertscore'):.3f} "
+            f"to {regen.get('post_bertscore'):.3f}: a \u0394 of "
+            f"**{delta:+.3f}**{ci_clause}. The rewrite therefore did *not* "
+            f"improve similarity to the gold answer on this sample."
+        ) if n_regen and n_rows else (
+            f"On the {n_regen} rows where step 10 actually regenerated, "
+            f"BERTScore F1 moved from {regen.get('pre_bertscore'):.3f} to "
+            f"{regen.get('post_bertscore'):.3f}: a \u0394 of **{delta:+.3f}**"
+            f"{ci_clause}."
+        )
+        readme_verdict = "is a loss."
+
     return {"__mitigation_delta__": delta_text, "delta": delta_text,
-            "verdict": verdict}
+            "verdict": verdict, "mitigation_prose_sentence": prose,
+            "readme_delta_lead": lead, "readme_delta_body": body,
+            "readme_verdict": readme_verdict}
 
 
 def _delta_positive(lookup) -> bool:
@@ -1333,6 +1394,19 @@ def _fill_five_position_md(
             ),
             ("delta",),
         ),
+        (
+            "position 2 and 5 prose sentence",
+            r"\*Positions 2 and 5 are not wins and are reported as measured\. "
+            r"The mitigation \u0394 is .*? improving it is future work\.",
+            lambda v, m: (
+                "*Positions 2 and 5 are not wins and are reported as measured. "
+                + v("mitigation_prose_sentence")
+                + " The rewrite path is implemented and exercised, but on this "
+                "sample it did not improve similarity to the gold answer; "
+                "improving it is future work."
+            ),
+            ("delta", "mitigation_prose_sentence"),
+        ),
     ]
 
     values = {k: _v(k) for k in (
@@ -1348,6 +1422,55 @@ def _fill_five_position_md(
     text, mit_changes = _fill_mitigation_prose(text, path, dry_run=dry_run)
     replacements.extend(mit_changes)
 
+    if replacements and not dry_run:
+        path.write_text(text, encoding="utf-8")
+    return replacements
+
+
+def _fill_readme_md(
+    path: Path, agg: dict, dry_run: bool = False
+) -> list[tuple[str, str, str]]:
+    """Keep the README's mitigation paragraph in sync with the measurement.
+
+    The paragraph was hand-written, so every new evaluation left it
+    holding the previous run's delta while the tables beside it were
+    refreshed. It is now generated from the same measurement the tables
+    use.
+    """
+    if not path.exists():
+        return []
+
+    text = path.read_text(encoding="utf-8")
+    values = _mitigation_prose_values()
+    if not values:
+        return []
+
+    specs = [
+        (
+            "mitigation paragraph",
+            # The paragraph is wrapped across lines, so the pattern has to
+            # tolerate newlines: `re.subn` is called without the DOTALL
+            # flag, and a `.` that cannot match a newline would stop the
+            # match at the first line break.
+            r"\*\*The measured mitigation \u0394 is [^\n]+\.\*\*[\s\S]*?"
+            r"as a finding\.",
+            lambda v, m: (
+                "**The measured mitigation \u0394 is "
+                + v("readme_delta_lead")
+                + ".** "
+                + v("readme_delta_body")
+                + " Every prose table, chart and verdict in `Paper/` reports "
+                "that number rather than the \"+0.67 to +0.75\" an earlier "
+                "draft projected, and the win/tie/loss verdict for mitigation "
+                + v("readme_verdict")
+                + " Improving the rewrite path is future work; the result is "
+                "reported as a finding."
+            ),
+            ("readme_delta_lead", "readme_delta_body", "readme_verdict"),
+        ),
+    ]
+
+    text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
     if replacements and not dry_run:
         path.write_text(text, encoding="utf-8")
     return replacements
@@ -1735,6 +1858,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--readme",
+        type=Path,
+        default=Path("README.md"),
+        help=(
+            "the repository README. It states the measured mitigation delta "
+            "in prose, and that paragraph is generated so it cannot drift "
+            "away from the measurement."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="print the proposed changes without writing the file",
@@ -1822,9 +1955,18 @@ def main(argv: list[str] | None = None) -> int:
     for label, old, new in fp_changes:
         print(f"  five_position_comparison.md {label}: {_safe(old)} -> {_safe(new)}")
 
+    # The README lives outside the paper directory, so it is filled from
+    # the repository root rather than from --paper-dir.
+    readme_changes = _fill_readme_md(
+        args.readme, agg, dry_run=args.dry_run
+    )
+    for label, old, new in readme_changes:
+        print(f"  {args.readme.name} {label}: {_safe(old)} -> {_safe(new)}")
+
     total_changes = (
         len(changed) + len(md_changes) + len(tex_changes)
         + len(ww_md_changes) + len(ww_tex_changes) + len(fp_changes)
+        + len(readme_changes)
     )
 
     if args.dry_run:

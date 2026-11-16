@@ -438,6 +438,109 @@ def test_a_positive_delta_without_an_interval_is_not_a_win():
     assert "not positive" in out["Delta"]
 
 
+def test_the_five_position_prose_sentence_tracks_the_measurement(tmp_path, monkeypatch):
+    """The sentence that states the mitigation result must not drift away
+    from the number it describes.
+
+    It was hand-written, so a new evaluation left it holding the previous
+    run's delta while the table beside it was refreshed.
+    """
+    import scripts.fill_comparison_table as fill
+
+    paper = tmp_path / "five_position_comparison.md"
+    paper.write_text(
+        "*Positions 2 and 5 are not wins and are reported as measured. "
+        "The mitigation \u0394 is -0.035 BERTScore F1 (95% CI [-0.067, "
+        "-0.006]) on the 18 of 60 rows where step 10 regenerated, and the "
+        "HRR / VSR / CCR rates are below the cited comparables. The rewrite "
+        "path is implemented and exercised, but on this sample it did not "
+        "improve similarity to the gold answer; improving it is future "
+        "work. The defensible claims are the architectural ones \u2014 "
+        "Positions 1, 3 and 4.\n",
+        encoding="utf-8",
+    )
+    mit = tmp_path / "mit.json"
+    mit.write_text(
+        json.dumps({
+            "summary": {
+                "n_rows": 1000,
+                "n_regenerated": 214,
+                "regenerated_rows": {
+                    "n": 214,
+                    "pre_bertscore": 0.80,
+                    "post_bertscore": 0.81,
+                    "delta_bertscore": 0.012,
+                    "delta_bertscore_ci95": [-0.01, 0.034],
+                },
+            }
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(fill, "MITIGATION_PATH", mit)
+
+    fill._fill_five_position_md(paper, {}, dry_run=False)
+
+    out = paper.read_text(encoding="utf-8")
+    assert "-0.035" not in out, "the stale delta survived the fill"
+    assert "+0.012" in out
+    assert "[-0.010, +0.034]" in out
+    assert "214 of 1000 rows" in out
+
+
+def test_the_readme_mitigation_paragraph_tracks_the_measurement(tmp_path, monkeypatch):
+    """The README states the mitigation result in prose, so it must not be
+    hand-written — otherwise a new evaluation leaves it stale.
+
+    The paragraph is wrapped across lines, so the match has to tolerate
+    newlines.
+    """
+    import scripts.fill_comparison_table as fill
+
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "**The measured mitigation \u0394 is negative.** On the 18 rows where "
+        "step 10\nactually regenerated (out of 60 evaluated on the "
+        "length-matched HaluEval\nsplit), BERTScore F1 moved from 0.863 to "
+        "0.828: a \u0394 of **\u22120.035** (95% CI\n[\u22120.067, "
+        "\u22120.006]). The rewrite therefore did *not* improve similarity "
+        "to\nthe gold answer on this sample. Every prose table, chart and "
+        "verdict in\n`Paper/` reports that number rather than the \"+0.67 to "
+        "+0.75\" an earlier\ndraft projected, and the win/tie/loss verdict "
+        "for mitigation is a loss.\nImproving the rewrite path is future "
+        "work; the negative result is reported\nas a finding.\n",
+        encoding="utf-8",
+    )
+    mit = tmp_path / "mit.json"
+    mit.write_text(
+        json.dumps({
+            "summary": {
+                "n_rows": 1000,
+                "n_regenerated": 214,
+                "regenerated_rows": {
+                    "n": 214,
+                    "pre_bertscore": 0.800,
+                    "post_bertscore": 0.812,
+                    "delta_bertscore": 0.012,
+                    "delta_bertscore_ci95": [-0.010, 0.034],
+                },
+            }
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(fill, "MITIGATION_PATH", mit)
+
+    fill._fill_readme_md(readme, {}, dry_run=False)
+
+    out = readme.read_text(encoding="utf-8")
+    assert "\u22120.035" not in out, "the stale delta survived the fill"
+    assert "+0.012" in out
+    assert "[-0.010, +0.034]" in out
+    assert "214 rows" in out
+    # The projected figure must never come back.
+    assert "0.67 to +0.75" not in out.split("rather than the")[-1].split(".")[0] \
+        or "an earlier" in out
+
+
 def test_fill_rewrites_the_mitigation_cells(tmp_path, monkeypatch):
     csv_path = tmp_path / "comparison_table.csv"
     with csv_path.open("w", encoding="utf-8", newline="") as f:
