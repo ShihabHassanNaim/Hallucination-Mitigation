@@ -173,10 +173,12 @@ This is **publication-grade** — a downstream auditor can verify every claim by
 | Dale 2023 — N-best rerank | ~0.55 (implied from Δ, MT only) |
 | AILS-NTUA / DUTh / TU Wien / IRIT-BL | 0 (no rewriting) |
 
-### Why our HRR/VSR/CCR beat the field
+### The structural argument, and why it is not a rate advantage
 
 1. **HRR + CCR.** Only two systems in the comparison actively mitigate: Dale 2023 (N-best rerank via MC-dropout) and ours (evidence-guided regen). Dale reranks; we rewrite. Rewriting preserves supported claims and edits contradicted ones; reranking picks the least-bad candidate but cannot edit content.
 2. **VSR.** Same as Position 3 — atomic claim granularity catches intra-sentence contradictions. Every sentence-level system scores ≤0.81 because partial contradictions get averaged out.
+
+Neither of these is a *measured* advantage. Our HRR (0.172) and VSR (0.608) are both below the cited comparables, and our CCR (0.616) has no published CCR to compare against — Dale 2023's 0.55 is implied from its mitigation Δ rather than published as a CCR, and the other cited systems have no mitigation stage at all. What the rewrite architecture buys is the *capability* to edit a contradicted claim in place, not a better rate on this evaluation.
 
 ### Verdict
 

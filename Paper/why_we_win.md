@@ -34,8 +34,8 @@ This matrix shows, for each evaluation dimension, **the best comparable score** 
 
 | Outcome | Count | Dimensions |
 |---|---|---|
-| **✓ Win** | 4 | 5, 14, 15, 18 |
-| **≈ Tie / At par** | 4 | 6, 7, 9, 13 |
+| **✓ Win** | 3 | 5, 14, 18 |
+| **≈ Tie / At par** | 5 | 6, 7, 9, 13, 15 |
 | **✗ Loss** | 10 | 1, 2, 3, 4, 8, 10, 11, 12, 16, 17 |
 
 **Headline read.** The measured wins are per-claim provenance, the pluggable backend, and the scale of the evaluation — structural properties of the system rather than score advantages. On the score dimensions the pipeline is at parity with the cited comparables on detection (ROC-AUC 0.843 against a SHROOM band of 0.85–0.90 on a different test set) and behind on mitigation Delta, claim-level F1, HRR and VSR. We trail further on single-pass latency, memory, the conformal guarantee, and multi-domain NLG.

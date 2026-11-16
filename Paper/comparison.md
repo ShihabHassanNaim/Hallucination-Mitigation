@@ -164,12 +164,12 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 | Category | Best Comparable Score | Ours (measured, HaluEval length-matched) | Verdict |
 |---|---|---|---|
 | **Detection ROC-AUC** | 0.987 (Dale 2023 ALTI+) | **0.843** | Competitive; below the white-box MT specialist and slightly below Sent-T5 XL (0.85–0.90), above the general-purpose probes (EigenScore 0.80–0.82, FAVA 0.72) |
-| **Detection AUPR** | — | **0.853** | Above the general-purpose probes (FAVA 0.80) |
+| **Detection AUPR** | 0.84-0.85 (Decoding Memories) | **0.853** | 95% CI [0.833, 0.874] overlaps the best published comparable (0.840) — a tie, not a win |
 | **Sentence accuracy** | 0.847 (Halu-NLP, SHROOM) | **0.745** | Below the SHROOM winner |
 | **Spearman ρ** | 0.770 (Halu-NLP) | **0.594** | Slightly below top; offset by per-claim granularity |
 | **HRR** | 0.55 (Dale 2023, implied) | **0.172** | Below the implied baseline |
 | **VSR** | 0.81 (Halu-NLP) | **0.608** | Below the cited comparables |
-| **CCR** | 0.55 (Dale 2023, implied) | **0.616** | Above the implied baseline |
+| **CCR** | none published (Dale 2023's 0.55 is implied from another metric, not a published CCR) | **0.616** | No published comparable, so this is not a win |
 | **Mitigation Δ over baseline** | +0.60 (Dale 2023 COMET-QE rerank) | **-0.035 [-0.067, -0.006] (n=18 regenerated) — not positive** | Measured on regenerated rows only; not an improvement over the no-mitigation baseline |
 | **Claim-level F1** | 0.71 (TU Wien Vectara) | **0.653** | Below the cited comparable |
 | **End-to-end accuracy** | — | **0.553** | Measured |

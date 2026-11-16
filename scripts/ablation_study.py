@@ -70,6 +70,11 @@ def _evaluate(pipe: Pipeline, rows: list[dict]) -> dict:
     scores: list[float] = []
     decisions: list[str] = []
     hrr: list[float] = []
+    # Per-query records, kept so two ablation variants can be compared on
+    # the *same* queries. Without them the only available comparison is
+    # between two independent point estimates, which cannot carry a
+    # significance test; a paired test on identical queries can.
+    per_query: list[dict] = []
 
     for r in rows:
         query = r.get("query") or r.get("question") or ""
@@ -109,6 +114,12 @@ def _evaluate(pipe: Pipeline, rows: list[dict]) -> dict:
         truths.append(gt)
         scores.append(score)
         decisions.append(d["decision"])
+        per_query.append({
+            "query": query,
+            "label": gt,
+            "score": score,
+            "decision": d["decision"],
+        })
         if gt == 0:
             hrr.append(1.0 if d["decision"] in {"REGEN", "ABSTAIN"} else 0.0)
 
@@ -125,6 +136,9 @@ def _evaluate(pipe: Pipeline, rows: list[dict]) -> dict:
         "detection_roc_auc": _roc_auc(truths, scores),
         "hallucination_reduction_rate": statistics.fmean(hrr) if hrr else 0.0,
         "n_queries": len(truths),
+        # Kept so two variants can be compared on identical queries with a
+        # paired test rather than by eyeballing two point estimates.
+        "per_query": per_query,
     }
 
 

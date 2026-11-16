@@ -57,6 +57,28 @@ def _load(path: Path) -> dict:
         return {}
 
 
+def _wrap_label(label: str, width: int = 18) -> str:
+    """Break a long axis label onto two lines.
+
+    Six metric names on one axis collide at the figure's width, and
+    rotating them pushes the caption off the canvas.
+    """
+    words = label.split()
+    if len(label) <= width:
+        return label
+    lines: list[str] = []
+    cur = ""
+    for w in words:
+        if cur and len(cur) + 1 + len(w) > width:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = f"{cur} {w}".strip()
+    if cur:
+        lines.append(cur)
+    return "\n".join(lines[:2])
+
+
 def _style(ax, title: str, xlabel: str = "", ylabel: str = "") -> None:
     ax.set_title(title, fontsize=13, fontweight="bold", pad=12)
     if xlabel:
@@ -86,11 +108,27 @@ def plot_win_dimensions() -> None:
     text = VERDICT_PATH.read_text(encoding="utf-8")
 
     # Rows look like: | 7 | **Detection ROC-AUC** | Dale 2023 ... | ≈ | ... |
-    row_re = re.compile(
-        r"^\|\s*(\d+)\s*\|\s*\*\*([^*]+)\*\*\s*\|.*?\|\s*([✓✗≈])\s*\|",
-        flags=re.MULTILINE,
-    )
-    rows = [(int(n), name.strip(), v) for n, name, v in row_re.findall(text)]
+    #
+    # The verdict is read by column position rather than by "the first
+    # mark on the line". Some rows carry a mark in an earlier column --
+    # row 15 reads "Dale 2023 only | ✓ | ✓ | ≈", because both systems do
+    # active mitigation -- and a non-greedy pattern would pick up the
+    # comparable's mark and count that tie as a win. The matrix has seven
+    # columns, so the verdict is the sixth.
+    rows: list[tuple[int, str, str]] = []
+    for line in text.splitlines():
+        if not re.match(r"^\|\s*\d+\s*\|", line):
+            continue
+        cells = [c.strip() for c in line.split("|")]
+        # cells[0] is empty (the line starts with "|"), so the columns
+        # are 1..7 and the verdict is column 6.
+        if len(cells) < 8:
+            continue
+        verdict = cells[6]
+        if verdict not in ("✓", "✗", "≈"):
+            continue
+        name = cells[2].strip().strip("*")
+        rows.append((int(cells[1]), name, verdict))
     if not rows:
         print("  [skip] 9 win_dimensions")
         return
@@ -301,9 +339,27 @@ def plot_score_wins() -> None:
                      if h.lower().startswith("ours")), -1)
     other_idx = [i for i in range(2, len(header)) if i != ours_idx]
 
+    # A cell only counts as a comparable score when it is a number that the
+    # cited work actually published. Three kinds of cell have to be
+    # rejected, because treating them as scores is what made this chart
+    # claim wins that the confidence intervals do not support:
+    #
+    #   "projected"          a projection, not a measurement
+    #   "0 (no rewriting)"   a filler meaning "this system has no
+    #                        mitigation stage", not a score of zero
+    #   "0.55 (implied ...)" a baseline derived from another metric of the
+    #                        same paper rather than a published score
+    #
+    # The last two are placeholders in the generated CSV, so the chart
+    # cannot tell them apart from a real score by looking at the number
+    # alone.
+    IMPLED = ("implied", "projected", "no rewriting", "no mitigation",
+              "not reported", "n/a")
+
     def num(v):
         text = str(v or "")
-        if "projected" in text.lower():
+        low = text.lower()
+        if any(tag in low for tag in IMPLED):
             return None
         m = re.search(r"[-+]?\d+(?:\.\d+)?", text)
         return float(m.group(0)) if m else None
@@ -329,14 +385,38 @@ def plot_score_wins() -> None:
             continue
         others = [num(row[i]) for i in other_idx if i < len(row)]
         others = [x for x in others if x is not None and 0 <= x <= 1]
-        if not others:
-            continue
-        best = max(others)
         value = agg[key]
         ci = agg.get(ci_key) or []
+        if not others:
+            # No published comparable survives the filter. The metric is
+            # still worth showing -- dropping it silently would hide a
+            # dimension the reader expects -- but it has nothing to be
+            # separated from, so it can never be a win.
+            metrics.append({
+                "label": label, "value": value, "best": None,
+                "ci": ci, "win": False, "overlap": False,
+                "no_comparable": True,
+            })
+            continue
+        best = max(others)
+        # A win requires the two to be *separated*, not merely for our
+        # point estimate to be higher. Comparing point estimates against a
+        # published value whose interval we do not have is how a chart ends
+        # up claiming a win that the confidence interval contradicts: our
+        # AUPR is 0.853 against Decoding Memories' 0.84-0.85, but our own
+        # 95% CI [0.833, 0.874] covers that whole range.
+        #
+        # So the rule is: our lower CI bound must sit strictly above the
+        # comparable. With no interval available there is no separation to
+        # demonstrate, so it is not a win.
+        ci_low = ci[0] if len(ci) == 2 else None
+        win = bool(ci_low is not None and ci_low > best)
         metrics.append({
             "label": label, "value": value, "best": best,
-            "ci": ci, "win": value > best,
+            "ci": ci, "win": win,
+            # Kept for the caption and for the log line, so the chart can
+            # say *why* a metric is not a win rather than just dropping it.
+            "overlap": (not win and ci_low is not None and ci_low <= best),
         })
 
     if not metrics:
@@ -354,7 +434,8 @@ def plot_score_wins() -> None:
         color = WIN if m["win"] else GREY
         ax.bar(x - width / 2, m["value"], width, color=color,
                edgecolor="white", linewidth=1.2)
-        ax.bar(x + width / 2, m["best"], width, color="#cbd5e1",
+        # A metric with no published comparable has nothing to sit beside.
+        ax.bar(x + width / 2, m["best"] or 0, width, color="#cbd5e1",
                edgecolor="white", linewidth=1.2)
 
         ci = m["ci"] if len(m["ci"]) == 2 else None
@@ -373,40 +454,110 @@ def plot_score_wins() -> None:
         ax.text(x - width / 2, our_top + 0.025, f"{m['value']:.3f}",
                 ha="center", va="bottom", fontsize=8.5, fontweight="bold",
                 color=color if m["win"] else "#475569")
-        ax.text(x + width / 2, m["best"] + 0.025, f"{m['best']:.3f}",
-                ha="center", va="bottom", fontsize=8.5, color="#475569")
+        if m["best"] is not None:
+            ax.text(x + width / 2, m["best"] + 0.025, f"{m['best']:.3f}",
+                    ha="center", va="bottom", fontsize=8.5, color="#475569")
+        else:
+            # Say why the space is empty rather than leaving a bare gap.
+            # It is centred on the empty slot, but a metric with no
+            # comparable has nothing in the right-hand bar, so the label
+            # is nudged right to sit in that gap and stays clear of the
+            # bars on either side.
+            ax.text(x + width / 2 + 0.06, 0.30, "no published\ncomparable",
+                    ha="left", va="bottom", fontsize=7.5, color="#94a3b8",
+                    linespacing=1.3, zorder=5)
 
         if m["win"]:
-            ax.text(x, max(our_top, m["best"]) + 0.115, "✓",
+            ax.text(x, max(our_top, m["best"] or 0) + 0.115, "✓",
                     ha="center", va="bottom", fontsize=13, fontweight="bold",
                     color=WIN)
 
     ax.set_xticks(xs)
-    ax.set_xticklabels([m["label"] for m in metrics], fontsize=9)
+    # The metric names are long enough to collide with each other at this
+    # width, so they are wrapped onto two lines rather than rotated --
+    # rotated labels are harder to read and push the caption further down.
+    ax.set_xticklabels([_wrap_label(m["label"]) for m in metrics], fontsize=8.5)
     ax.set_ylim(0, 1.24)
     ax.axhline(0.5, color="#dc2626", linestyle="--", linewidth=1.3,
                label="Random baseline (0.50)")
-    _style(ax, "Where Our Score Beats the Best Published Comparable",
+    _style(ax, "Our Scores Against the Best Published Comparable",
            ylabel="Score (higher is better)")
     from matplotlib.patches import Patch
     handles = [
-        Patch(facecolor=WIN, label="Ours — above the best comparable"),
-        Patch(facecolor=GREY, label="Ours — at or below the comparable"),
+        Patch(facecolor=WIN, label="Ours — separated from the comparable"),
+        Patch(facecolor=GREY, label="Ours — not separated (CI overlaps)"),
         Patch(facecolor="#cbd5e1", label="Best published comparable"),
     ]
     ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.11),
               ncol=3, fontsize=9, framealpha=0.95)
-    ax.text(
-        0.5, -0.22,
-        "Black bars are the 95% bootstrap CI on our value. AUPR and CCR are "
-        "the two metrics where we are ahead; the rest are shown so the "
-        "comparison is not cherry-picked.",
-        transform=ax.transAxes, ha="center", va="top",
-        fontsize=8.5, color="#475569",
+    # The caption has to state the rule the marks were computed with, and
+    # has to name which metrics fall short of it. The previous version
+    # asserted "AUPR and CCR are the two metrics where we are ahead",
+    # which was true of the point estimates and false of the intervals:
+    # our AUPR CI [0.833, 0.874] covers Decoding Memories' 0.84-0.85, and
+    # the CCR baseline of 0.55 is implied from another metric rather than
+    # published.
+    wins = [m["label"] for m in metrics if m["win"]]
+    overlaps = [m["label"] for m in metrics if m.get("overlap")]
+    no_comp = [m["label"] for m in metrics if m.get("no_comparable")]
+
+    # Short names keep the caption inside the figure. The full metric
+    # names are already on the axis, so the caption only has to say which
+    # ones and why.
+    def _short(names: list[str]) -> str:
+        out = []
+        for n in names:
+            s = n.replace("Claim Correction Rate (CCR)", "CCR")
+            s = s.replace("Verification Success Rate (VSR)", "VSR")
+            s = s.replace("Sentence Accuracy", "Sentence Acc.")
+            out.append(s)
+        return ", ".join(out)
+
+    if wins:
+        win_txt = "Separated on: " + _short(wins) + "."
+    else:
+        win_txt = "No metric is separated from its comparable."
+    if overlaps:
+        win_txt += ("\nOn " + _short(overlaps) + " the 95% CI overlaps the "
+                    "published value, so these are ties rather than wins.")
+    if no_comp:
+        win_txt += ("\n" + _short(no_comp) + " has no published comparable "
+                    "to test against.")
+
+    # The caption is wrapped by hand rather than by matplotlib: a single
+    # long line in a text artist is not wrapped, and with
+    # bbox_inches="tight" it stretches the saved figure to several times
+    # the intended width.
+    caption = (
+        "Black bars are the 95% bootstrap CI on our value. A metric counts "
+        "as a win only when our interval sits entirely above\n"
+        "the published comparable. " + win_txt + "\n"
+        "Every metric is shown so the comparison is not cherry-picked."
     )
-    fig.tight_layout()
+    ax.text(
+        0.5, -0.20, caption,
+        transform=ax.transAxes, ha="center", va="top",
+        fontsize=8.5, color="#475569", linespacing=1.5,
+    )
+    # The caption and the legend both sit below the axes, so tight_layout
+    # cannot size the figure for them. The layout is set explicitly
+    # instead, and the figure is saved with the extra canvas the
+    # annotations need.
+    fig.subplots_adjust(bottom=0.34, left=0.08, right=0.98, top=0.92)
     fig.savefig(OUT_DIR / "score_wins.png", dpi=160, bbox_inches="tight")
     plt.close(fig)
+    # Log every decision so the chart's verdicts can be checked against the
+    # intervals without opening the PNG.
+    for m in metrics:
+        ci_txt = (f"[{m['ci'][0]:.3f}, {m['ci'][1]:.3f}]" if len(m["ci"]) == 2
+                  else "no CI")
+        if m["best"] is None:
+            print(f"       {m['label']}: ours={m['value']:.3f} {ci_txt} "
+                  f"vs no published comparable -> not comparable")
+        else:
+            print(f"       {m['label']}: ours={m['value']:.3f} {ci_txt} "
+                  f"vs best={m['best']:.3f} -> "
+                  f"{'WIN' if m['win'] else 'not separated'}")
     print("  [ok] 11 score_wins.png")
 
 
