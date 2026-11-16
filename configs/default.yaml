@@ -69,8 +69,18 @@ step09_fusion_weights:
   detector:   0.15               # step-3 XGBoost hallucination probability (inverted)
 
 step10_regeneration:
-  mode: "evidence"               # stub | evidence | regenerate
+  # "claim_edit" rewrites only the claims the verifier flagged and leaves
+  # every other span of the answer byte-identical. "evidence" rebuilds the
+  # answer from the supported claims alone, which discards the original
+  # phrasing and substitutes a retrieved passage when no claim is
+  # supported -- that behaviour made the measured mitigation delta
+  # negative.
+  mode: "claim_edit"             # stub | evidence | claim_edit | regenerate
   max_attempts: 2
+  # Minimum contradiction strength required before a claim is rewritten.
+  # 0.0 rewrites every contradicted claim; higher values are more
+  # conservative and rewrite only the claims the verifier was sure about.
+  min_contradiction_confidence: 0.5
 
 step11_final_gate:
   pass_threshold: 0.70
