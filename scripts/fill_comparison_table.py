@@ -389,17 +389,33 @@ def _mitigation_prose_values(path: Path | None = None) -> dict:
         prose += f"the {n_regen} rows where step 10 regenerated"
     else:
         prose += "the rows where step 10 regenerated"
+    n_in_file = mit.get("n_rows_in_file")
+    if n_in_file and n_rows and n_in_file != n_rows:
+        prose += (
+            f" (the first {n_rows} rows of the {n_in_file}-row split)"
+        )
     prose += ", and the HRR / VSR / CCR rates are below the cited comparables."
 
     # The README paragraph. It states the sign of the result in its first
     # sentence, so the lead carries the sign and the body carries the
     # numbers.
+    n_in_file = mit.get("n_rows_in_file")
+    if n_in_file and n_rows and n_in_file != n_rows:
+        scope = (
+            f"(out of {n_rows} evaluated, from the first {n_rows} rows of the "
+            f"{n_in_file}-row length-matched HaluEval split)"
+        )
+    else:
+        scope = (
+            "(out of {n_rows} evaluated on the length-matched HaluEval split)"
+        )
+    scope = scope.format(n_rows=n_rows, n_in_file=n_in_file)
+
     if _delta_is_a_win(delta, ci):
         lead = "positive"
         body = (
             f"On the {n_regen} rows where step 10 actually regenerated "
-            f"(out of {n_rows} evaluated on the length-matched HaluEval "
-            f"split), BERTScore F1 moved from {regen.get('pre_bertscore'):.3f} "
+            f"{scope}, BERTScore F1 moved from {regen.get('pre_bertscore'):.3f} "
             f"to {regen.get('post_bertscore'):.3f}: a \u0394 of "
             f"**{delta:+.3f}** (95% CI [{ci[0]:+.3f}, {ci[1]:+.3f}]). The "
             f"rewrite therefore *did* improve similarity to the gold answer "
@@ -417,8 +433,7 @@ def _mitigation_prose_values(path: Path | None = None) -> dict:
         )
         body = (
             f"On the {n_regen} rows where step 10 actually regenerated "
-            f"(out of {n_rows} evaluated on the length-matched HaluEval "
-            f"split), BERTScore F1 moved from {regen.get('pre_bertscore'):.3f} "
+            f"{scope}, BERTScore F1 moved from {regen.get('pre_bertscore'):.3f} "
             f"to {regen.get('post_bertscore'):.3f}: a \u0394 of "
             f"**{delta:+.3f}**{ci_clause}. The rewrite therefore did *not* "
             f"improve similarity to the gold answer on this sample."

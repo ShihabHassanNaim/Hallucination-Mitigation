@@ -227,11 +227,19 @@ def main() -> None:
 
         lines.append("## Mitigation Delta (rewrite vs. no-mitigation baseline)")
         lines.append("")
+        n_in_file = summary.get("n_rows_in_file")
+        n_eval = summary.get("n_rows")
+        if n_in_file and n_eval and n_in_file != n_eval:
+            scope = (
+                f"the first {n_eval} rows of the length-matched HaluEval "
+                f"split (of {n_in_file} rows in the file)"
+            )
+        else:
+            scope = "the length-matched HaluEval split"
         lines.append(
-            "Measured by `scripts/evaluate_mitigation.py` on the length-matched "
-            "HaluEval split. Only the rows where step 10 actually regenerated "
-            "are used for the delta; the rows it left alone are unchanged by "
-            "construction."
+            f"Measured by `scripts/evaluate_mitigation.py` on {scope}. Only the "
+            "rows where step 10 actually regenerated are used for the delta; "
+            "the rows it left alone are unchanged by construction."
         )
         lines.append("")
         n_unique = regen.get("n_unique_queries") or summary.get("n_unique_queries")
@@ -239,7 +247,9 @@ def main() -> None:
 
         lines.append("| Quantity | Value |")
         lines.append("|---|---|")
-        lines.append(f"| Rows evaluated | {summary.get('n_rows')} |")
+        if n_in_file and n_eval and n_in_file != n_eval:
+            lines.append(f"| Rows in the evaluation file | {n_in_file} |")
+        lines.append(f"| Rows evaluated | {n_eval} |")
         if n_unique is not None:
             lines.append(f"| Unique queries | {n_unique} |")
         lines.append(

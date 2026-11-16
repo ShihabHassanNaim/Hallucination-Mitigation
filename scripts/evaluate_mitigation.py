@@ -262,6 +262,11 @@ def main() -> int:
 
     summary = {
         "dataset": args.data,
+        # The number of rows the file holds and the number actually
+        # evaluated. They differ when --limit is used, and a reader who
+        # only sees "n_rows" could otherwise assume the whole split was
+        # measured.
+        "n_rows_in_file": len(rows),
         "n_rows": len(per_row),
         "n_unique_queries": len({r["query"] for r in per_row}),
         "n_regenerated": len(regen_rows),

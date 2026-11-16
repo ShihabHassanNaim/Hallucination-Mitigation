@@ -126,3 +126,28 @@ def test_the_mitigation_section_is_absent_without_a_measurement(tmp_path, monkey
     with a made-up number."""
     text = _generate(tmp_path, monkeypatch, tmp_path / "missing.json")
     assert "## Mitigation Delta" not in text
+
+
+def test_a_partial_run_states_its_sample_size(tmp_path, monkeypatch):
+    """A run over a prefix of the split must say so.
+
+    The mitigation evaluation can be run over fewer rows than the file
+    holds. A reader who only sees "Rows evaluated: 500" could assume the
+    whole 1000-row split was measured.
+    """
+    mit = _mitigation_file(
+        tmp_path,
+        {
+            "n": 107,
+            "pre_bertscore": 0.86,
+            "post_bertscore": 0.83,
+            "delta_bertscore": -0.035,
+            "delta_bertscore_ci95": [-0.067, -0.006],
+        },
+        n_rows=500,
+        n_rows_in_file=1000,
+    )
+    text = _generate(tmp_path, monkeypatch, mit)
+    assert "| Rows in the evaluation file | 1000 |" in text
+    assert "| Rows evaluated | 500 |" in text
+    assert "the first 500 rows" in text
