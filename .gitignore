@@ -10,9 +10,17 @@ venv/
 
 # Project artefacts
 data/index/
+data/index_ragtruth/
 data/preds.jsonl
 data/metrics.json
 *.log
+
+# Datasets and reference papers that are fetched or downloaded rather
+# than authored here. The build scripts under scripts/ regenerate the
+# JSONL splits from them, and the committed JSONL is what the
+# evaluation actually reads.
+data/ragtruth_test.parquet
+*.pdf
 
 # IDE
 .vscode/
