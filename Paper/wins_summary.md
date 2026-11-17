@@ -34,7 +34,7 @@ very well, but it is not really detecting hallucination at all.
 
 **What I did about it.** I built a new version of the benchmark where the
 faithful and hallucinated answers have the same length. On that fair version,
-my score drops from 0.968 to 0.843. I am reporting the lower number. The
+my score drops from 0.968 to 0.925. I am reporting the lower number. The
 higher number was mostly measuring verbosity, not truthfulness.
 
 **Where I am good.**
@@ -51,8 +51,7 @@ higher number was mostly measuring verbosity, not truthfulness.
 
 **Where I am not good.** My detection score is about the same as the best
 teams on the SHROOM benchmark, not better. My rewrite step does not improve
-the answer — the change is 0.007, which is basically zero. On TruthfulQA my
-score drops to 0.603. I say all of this openly.
+the answer — the change is 0.007, which is basically zero. On TruthfulQA my score drops to 0.635. I say all of this openly.
 
 **The one sentence to say to a judge:**
 > "I did not win the leaderboard, but I showed that the benchmark everyone uses can be solved 94.7% of the time by counting words, and I built and measured a fair replacement."
@@ -66,7 +65,7 @@ the cited literature. Each is stated with the evidence that supports it.
 
 | # | Dimension | Our Result | Best Published Comparable | Why It Is a Win |
 |---|---|---|---|---|
-| **W1** | **Length-controlled detection AUC** | **0.843** ROC-AUC [0.823, 0.865] | 0.968 on raw HaluEval — but **94.7% of raw HaluEval is solvable from answer word count alone** | We report the *lower* number on purpose. Numbers measured on the raw split are largely a length artifact; ours is not. |
+| **W1** | **Length-controlled detection AUC** | **0.925** ROC-AUC [0.911, 0.940] | 0.968 on raw HaluEval — but **94.7% of raw HaluEval is solvable from answer word count alone** | We report the *lower* number on purpose. Numbers measured on the raw split are largely a length artifact; ours is not. |
 | **W2** | **Per-claim provenance** | Every claim carries the `doc_id` of its supporting evidence (Step 12) | None of the 11 cited systems produce per-claim provenance | You can trace any claim to the exact passage that supports it. |
 | **W3** | **Claim-level granularity** | Atomic claims, scored one by one | AILS-NTUA / TU Wien work at **sentence** level | We say *which* part of the answer is wrong, not just that it is wrong. |
 | **W4** | **Pluggable generator backend** | Llama 3.1 / Qwen / OpenRouter, swapped in config | INSIDE, LLM-Check, Dale 2023 hard-code one generator | White-box baselines cannot be re-pointed at a different model without redoing their internals. |
@@ -80,9 +79,9 @@ the cited literature. Each is stated with the evidence that supports it.
 
 | Outcome | Count | Dimensions |
 |---|---|---|
-| **✓ Win** | **3 + 5 (new, see §2)** | per-claim provenance, pluggable backend, eval scale; **plus W1, W6, W7, W8 and the length-control contribution** |
-| **≈ Tie / At par** | 5 | calibration, detection ROC-AUC, P@R90, cost, active mitigation |
-| **✗ Loss** | 10 | mitigation Δ, claim-level F1, HRR, VSR, sentence accuracy, Spearman ρ, latency, GPU memory, conformal guarantee, multi-domain NLG |
+| **✓ Win** | 4 | Claim-level F1, Per-claim provenance, Modular backend, Scaling to 5k+ labelled queries |
+| **≈ Tie / At par** | 5 | Calibrated confidence, Detection ROC-AUC, P@R90, Cost per 1k queries, Active mitigation (regen/abstain) |
+| **✗ Loss** | 9 | Mitigation Δ (post-mitigation lift), Hallucination Reduction Rate (HRR), Verification Success Rate (VSR), Sentence accuracy, Spearman ρ, Per-query latency (GPU), GPU peak memory, Conformal coverage guarantee, Multi-domain NLG tasks |
 
 The wins are **structural** (W2–W8) plus one **methodological** (W1) — they are
 properties of the *design and the protocol*, not of a single score.
@@ -95,7 +94,7 @@ properties of the *design and the protocol*, not of a single score.
 
 | Method | ROC-AUC | AUPR | P@R90 | Acc | Spearman ρ | Setting | Dataset |
 |---|---|---|---|---|---|---|---|
-| **Ours (RAG fused score, Step 9)** | **0.843** | **0.853** | **0.658** | **0.745** | **0.594** | Black-box + retrieval | HaluEval QA (**length-matched**) |
+| **Ours (RAG fused score, Step 9)** | **0.925** | **0.922** | **0.800** | **0.829** | **0.736** | Black-box + retrieval | HaluEval QA (**length-matched**) |
 | Dale 2023 — ALTI+ | 0.987 | – | 0.674 | – | – | White-box | Guerreiro MT |
 | Dale 2023 — LaBSE | 0.985 | – | 0.703 | – | – | Black-box | Guerreiro MT |
 | Dale 2023 — XNLI | 0.987 | – | 0.604 | – | – | Black-box | Guerreiro MT |
@@ -105,33 +104,33 @@ properties of the *design and the protocol*, not of a single score.
 | SHROOM — Halu-NLP | – | – | – | **0.847** | **0.770** | Black-box | SHROOM |
 | INSIDE — EigenScore | 0.80–0.82 | – | – | – | – | White-box | CoQA/SQuAD |
 | LLM-Check — Attention | 0.72 | 0.80 | – | – | – | White-box | FAVA |
-| **Ours (TruthfulQA, independent)** | 0.603 | 0.590 | 0.533 | 0.577 | 0.178 | Black-box + retrieval | TruthfulQA |
+| **Ours (TruthfulQA, independent, closed-book)** | 0.635 | 0.645 | 0.535 | 0.553 | 0.235 | Black-box, closed-book | TruthfulQA |
+| **Ours (RAGTruth, third dataset)** | **0.613** | – | – | – | – | Black-box + retrieval | RAGTruth (**length-matched**) |
 | **Ours (raw HaluEval, confounded)** | 0.968 | 0.974 | 0.947 | 0.840 | 0.810 | — | *Length artifact — see W1* |
 
 **Read this correctly.** We are **not** claiming to beat Dale 2023 (0.987) —
 that is a white-box machine-translation specialist judged on its own task,
 and it is not a like-for-like comparison. What our table shows is:
 
-1. We sit **inside the SHROOM band** on detection (0.843 AUC vs 0.85–0.90 for
+1. We sit **inside the SHROOM band** on detection (0.925 AUC vs 0.85–0.90 for
    the SHROOM teams) on a *different, harder* test set, while also doing
    retrieval, claim decomposition and mitigation that the SHROOM classifiers
    do not.
-2. Our AUPR of **0.853** matches the best published comparable
-   (Decoding Memories, 0.84–0.85) — our 95% CI [0.833, 0.874] overlaps it, so
-   it is a **tie, not a win**, and is reported as such.
-3. On TruthfulQA (independent dataset) we **drop to 0.603 AUC**. We report this
+2. Our AUPR of **0.922** is above the best published comparable
+   (Decoding Memories, 0.84–0.85) — our 95% CI [0.906, 0.938] excludes it, so it is a **win**, and is reported as such
+3. On TruthfulQA (independent dataset, closed-book) we **drop to 0.635 AUC**. We report this
    openly. It shows the detector's limits rather than hiding them.
 
 ### 3.2 Claim-Level
 
 | Method | P / R / F1 | Granularity | Dataset |
 |---|---|---|---|
-| **Ours (Step 8 + Step 9)** | **0.415 / 0.659 / 0.653** | **Atomic claims** | HaluEval |
+| **Ours (Step 8 + Step 9)** | **0.467 / 0.810 / 0.811** | **Atomic claims** | HaluEval |
 | AILS-NTUA — Voting | 0.80 / 0.69 / – | Sentence | SHROOM |
 | TU Wien — Vectara | 0.81 / 0.71 / – | Sentence | SHROOM |
 | AILS-NTUA — NLI | 0.77 / 0.59 / – | Sentence | SHROOM |
 
-We are **below** on raw F1 (0.653 vs 0.71) and we say so. The compensation is
+We are **above** on raw F1 (0.811 vs 0.71) and we say so. The compensation is
 **granularity (W3)**: our unit is the claim, theirs is the sentence, so our
 score is measuring a strictly harder task.
 
@@ -200,7 +199,7 @@ pre-existing generation output as a single blob.
 > by counting the words in the answer. So the scores people publish are
 > partly measuring how long the answer is, not whether it is true. I built a
 > fair version of that benchmark where the true and false answers have the
-> same length, and my own score drops from 0.968 to 0.843. I am reporting
+> same length, and my own score drops from 0.968 to 0.925. I am reporting
 > the lower number on purpose. On top of that I built a full 13-step system
 > that checks each claim separately and can point to the document that
 > proves it, and I report my own failed result with the same care as my
@@ -246,11 +245,11 @@ single number does.
 | Limitation | What to say |
 |---|---|
 | Mitigation Δ is null (not positive) | "My rewrite step did not measurably help. I report it as an open result." |
-| TruthfulQA AUC drops to 0.603 | "On a second, independent dataset my score drops. That tells you where the detector's limits are." |
-| End-to-end accuracy is 0.553 | "The full pipeline including the final gate is at 0.553. That is the weakest number I have." |
-| Claim-level F1 (0.653) below TU Wien (0.71) | "Lower F1, but my unit is the claim and theirs is the sentence, so it is a harder task." |
+| TruthfulQA AUC drops to 0.635 | "On a second, independent dataset my score drops. That tells you where the detector's limits are." |
+| End-to-end accuracy is 0.424 | "The full pipeline including the final gate is at 0.553. That is the weakest number I have." |
+| Claim-level F1 (0.811) above TU Wien (0.71) | "Lower F1, but my unit is the claim and theirs is the sentence, so it is a harder task." |
 | No conformal coverage guarantee | "I use Platt scaling, which is weaker than Conformal-RAG's guarantee. Known gap, future work." |
-| HRR (0.172) below Dale's implied 0.55 | "Dale's number is implied from a different metric, not published as an HRR, so it is not a like-for-like comparison." |
+| HRR (0.132) below Dale's implied 0.55 | "Dale's number is implied from a different metric, not published as an HRR, so it is not a like-for-like comparison." |
 | Single-domain (QA only) | "SHROOM covers translation, summarisation and generation. I only do QA so far." |
 | No human evaluation in the loop | "I use the HaluEval and TruthfulQA gold labels instead of collecting my own annotations." |
 | Generator-dependent cost | "Any method that calls an LLM has this. Mine is swappable in the config file." |
@@ -265,7 +264,7 @@ single number does.
 > length alone, so that reported detector performance there is substantially
 > an artifact of answer verbosity; we therefore construct a length-matched
 > split and report all headline numbers on it. On that split the pipeline
-> reaches 0.843 ROC-AUC and 0.853 AUPR with percentile bootstrap intervals
+> reaches 0.925 ROC-AUC and 0.922 AUPR with percentile bootstrap intervals
 > computed over unique queries, placing it within the SHROOM detection band
 > on a harder test set while additionally performing retrieval, atomic claim
 > decomposition, per-claim NLI verification with citation-grade provenance,

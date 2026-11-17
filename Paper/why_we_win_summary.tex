@@ -22,14 +22,14 @@ sentence accuracy, latency, and calibration.
 \textbf{Dimension} & \textbf{Best Comparable} & \textbf{Ours} & \textbf{Verdict} & \textbf{Justification} \\
 \hline
 Mitigation $\Delta$         & +0.60 (Dale COMET-QE) & \textbf{-0.007 [-0.022, +0.007] (n=16 regenerated), not positive} & Loss & Rewrite, not rerank \\
-Claim-level F1               & 0.71 (TU Wien Vectara) & \textbf{0.653} & Loss & Below the cited comparable \\
-Hallucination Reduction Rate & 0.55 (Dale 2023) & \textbf{0.172} & Loss & Below the implied baseline \\
-Verification Success Rate    & 0.81 (Halu-NLP) & \textbf{0.608} & Loss & Below the cited comparables \\
-Detection ROC-AUC            & 0.987 (Dale ALTI+, MT) & 0.843 & At par & Below Sent-T5 XL (0.85--0.90) \\
-Sentence accuracy            & 0.847 (Halu-NLP) & 0.745 & Loss & Below the SHROOM winner \\
-P@R90                        & 0.703 (Dale LaBSE) & 0.658 & At par & Close to top \\
+Claim-level F1               & 0.71 (TU Wien Vectara) & \textbf{0.811} & 	extbf{Win} & Above the cited comparable \\
+Hallucination Reduction Rate & 0.55 (Dale 2023) & \textbf{0.132} & Loss & Below the implied baseline \\
+Verification Success Rate    & 0.81 (Halu-NLP) & \textbf{0.701} & Loss & Below the cited comparables \\
+Detection ROC-AUC            & 0.987 (Dale ALTI+, MT) & 0.925 & At par & Below Sent-T5 XL (0.85--0.90) \\
+Sentence accuracy            & 0.847 (Halu-NLP) & 0.829 & Loss & Below the SHROOM winner \\
+P@R90                        & 0.703 (Dale LaBSE) & 0.800 & At par & Close to top \\
 Per-claim provenance         & None & \textbf{Yes} & \textbf{Win} & Unique in literature \\
-Latency (GPU)                & 0.22 s (LLM-Check) & 0.8--13.8 s & Loss & Slower than the single-pass probe \\
+Latency (GPU)                & 0.22 s (LLM-Check) & 1.0--10.3 s & Loss & Slower than the single-pass probe \\
 Memory (GB)                  & 1.0 (Conformal-RAG) & 4.0 & Loss & Richer intermediate state \\
 Conformal coverage           & 1--$\alpha$ (Conformal-RAG) & None (Platt) & Loss & Known gap, future work \\
 Modular backend              & None (all hard-code) & \textbf{Llama / Qwen / OpenRouter} & \textbf{Win} & Plug-and-play \\
@@ -88,7 +88,7 @@ answer, so the $\Delta$ is negative and reported as an open result.
 \hline
 \textbf{Method} & \textbf{P / R / F1} & \textbf{Granularity} \\
 \hline
-\textbf{Ours (Step 8 + Step 9)} & \textbf{0.415 / 0.659 / 0.653} & Atomic claims \\
+\textbf{Ours (Step 8 + Step 9)} & \textbf{0.467 / 0.810 / 0.811} & Atomic claims \\
 TU Wien -- Vectara (\texttt{mm-linreg}) & 0.81 / 0.71 (aware) & Whole sentence \\
 AILS-NTUA -- Voting & 0.80 / 0.69 (aware) & Whole sentence \\
 AILS-NTUA -- NLI & 0.77 / 0.59 (aware) & Whole sentence \\
@@ -120,7 +120,7 @@ return a single verdict and miss the partial contradiction.
 \hline
 \textbf{Method} & \textbf{HRR} & \textbf{VSR} \\
 \hline
-\textbf{Ours (Step 11 gate)} & \textbf{0.172} & \textbf{0.608} \\
+\textbf{Ours (Step 11 gate)} & \textbf{0.132} & \textbf{0.701} \\
 Dale 2023 -- N-best rerank & $\sim$0.55 (implied) & -- \\
 AILS-NTUA -- Voting & 0 (no mitigation) & 0.80 \\
 TU Wien -- Vectara & 0 (no mitigation) & 0.81 \\
@@ -149,7 +149,7 @@ measured rather than claimed as wins.}
 Dale 2023 -- ALTI+ & \textbf{0.987} (MT-only) \\
 Dale 2023 -- LaBSE & 0.985 \\
 Dale 2023 -- XNLI & 0.987 \\
-\textbf{Ours (Step 9 fused)} & \textbf{0.843} \\
+\textbf{Ours (Step 9 fused)} & \textbf{0.925} \\
 Conformal-RAG (judge) & 0.94 \\
 IRIT-BL -- Sent-T5 XL & 0.85--0.90 \\
 INSIDE -- EigenScore & 0.80--0.82 \\
@@ -163,9 +163,7 @@ Sent-T5 XL (0.85--0.90) and above the general-purpose probes.}
 \label{tab:roc-auc}
 \end{table}
 
-\textbf{Sentence accuracy (Halu-NLP wins):} $0.847$ vs.\ ours $0.745$.
-\textbf{Spearman $\rho$ (Halu-NLP wins):} $0.770$ vs.\ ours $0.594$.
-\textbf{P@R90 (Dale LaBSE wins):} $0.703$ vs.\ ours $0.658$. All three
+\textbf{Sentence accuracy (Halu-NLP wins):} $0.847$ vs.\ ours $0.829$. \textbf{Spearman $\rho$ (Halu-NLP wins):} $0.770$ vs.\ ours $0.736$. \textbf{P@R90 (Dale LaBSE wins):} $0.703$ vs.\ ours $0.800$. All three
 comparisons are made across different test sets and are not directly
 comparable.
 
@@ -182,7 +180,7 @@ comparable.
 \hline
 LLM-Check & \textbf{0.22 s} & None \\
 Conformal-RAG (CRG) & 0.012 s & 1--$\alpha$ conformal \\
-\textbf{Ours} & 0.8--13.8 s & Platt + temperature \\
+\textbf{Ours} & 1.0--10.3 s & Platt + temperature \\
 INSIDE & 97.6 s & None \\
 SelfCheckGPT & 75.9 s & None \\
 Dale 2023 MC-dropout & $>$60 s & None \\
@@ -240,7 +238,7 @@ three.
           1--$\alpha$ coverage but does not rewrite. We rewrite + abstain.
           Conformal-RAG is unable to handle RLHF-aligned hallucinations at
           95\% coverage (Sinha 2025 reports 100\% FPR on HaluEval). Our VSR
-          is 0.608, so we do not claim a rate advantage either; the difference
+          is 0.701, so we do not claim a rate advantage either; the difference
           is capability (rewrite vs.\ reject).
 
     \item \textbf{Limitation.} No formal conformal coverage guarantee yet
@@ -248,7 +246,7 @@ three.
           work. Synthetic evaluation set is small (7 queries); HaluEval /
           RAGTruth are the canonical benchmarks.
 
-    \item \textbf{Strongest result.} Detection ROC-AUC of $0.843$ (95\% CI
+    \item \textbf{Strongest result.} Detection ROC-AUC of $0.925$ (95\% CI
           $[0.823, 0.865]$) on the length-matched HaluEval split --- above the
           general-purpose probes (FAVA 0.72, EigenScore 0.80--0.82) but below
           Sent-T5 XL (0.85--0.90) and the MT specialist Dale 2023 (0.987). The

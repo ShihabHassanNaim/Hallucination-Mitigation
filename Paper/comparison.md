@@ -44,7 +44,7 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 
 | Method | ROC-AUC | AUPR | P@R90 | Setting | Dataset |
 |---|---|---|---|---|---|
-| **Ours (RAG fused score, Step 9)** | **0.843** | **0.853** | **0.658** | Black-box + retrieval | HaluEval QA (length-matched) |
+| **Ours (RAG fused score, Step 9)** | **0.925** | **0.922** | **0.800** | Black-box + retrieval | HaluEval QA (length-matched) |
 | Dale 2023 — ALTI+ | 0.987 (fully detached) | – | 0.674 | White-box | Guerreiro MT |
 | Dale 2023 — LaBSE | 0.985 | – | 0.703 | Black-box | Guerreiro MT |
 | Dale 2023 — XNLI | 0.987 | – | 0.604 | Black-box | Guerreiro MT |
@@ -59,12 +59,71 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 
 | Method | Claim P / R / F1 | Granularity | Dataset |
 |---|---|---|---|
-| **Ours (Step 8 + Step 9)** | **0.415 / 0.659 / 0.653** (per-claim NLI) | Atomic claims | HaluEval |
+| **Ours (Step 8 + Step 9)** | **0.467 / 0.810 / 0.811** (per-claim NLI) | Atomic claims | HaluEval |
 | AILS-NTUA — NLI | 0.77 / 0.59 (aware) | Sentence | SHROOM |
 | AILS-NTUA — Voting | 0.80 / 0.69 (aware) | Sentence | SHROOM |
 | TU Wien — Vectara | 0.81 / 0.71 (aware) | Sentence | SHROOM |
 
 **Observation.** The pipeline matches or exceeds SHROOM-track winners on detection AUC and surpasses them on claim granularity (atomic vs. sentence) because every claim is independently judged, not the answer as a whole.
+
+### 3.3 Cross-dataset detection (the same pipeline, three benchmarks)
+
+The number in 3.1 is measured on one split of one dataset. The table below is the
+same pipeline on three, each with the setting it requires. A number is only
+comparable within its own row: the datasets differ in task, answer length and
+in whether there is a source to verify against.
+
+| Dataset | Setting | Detection ROC-AUC | 95% CI | Claim F1 | Retrieval recall@5 |
+|---|---|---|---|---|---|
+| **HaluEval QA (length-matched)** | retrieval on | **0.925** | [0.9113, 0.9401] | 0.811 | 0.994 |
+| **RAGTruth (length-matched)** | retrieval on | **0.613** | [0.5494, 0.6581] | 0.727 | 0.902 |
+| **TruthfulQA** | **closed-book** | **0.635** | [0.6107, 0.6594] | not measurable | n/a (no corpus) |
+
+**TruthfulQA is closed-book and that is the honest way to run it.** Its
+retrieval corpus was built from the dataset's own reference answers, so
+retrieving against it would measure "is this answer the reference answer" —
+the label, not the answer. With retrieval on, the detection AUC was 0.9589
+with a near-binary score distribution; that number was a leak. The run
+reported above switches retrieval off, leaves the grounding term out, and
+drops the components that need a source rather than feeding them a
+placeholder. The audit is in `docs/corpus_leak_audit.md`.
+
+**RAGTruth is the third dataset and the one with a published comparison.**
+RAGTruth's own paper reports response-level detection F1, and the published
+AUROC anchors are LLM-Check's "Overall" column — a weighted average across
+four target models, with no per-task breakdown. The only like-for-like
+comparison is pooled against pooled:
+
+| System | Metric | Published | Ours | 95% CI | Verdict |
+|---|---|---|---|---|---|
+| LLM-Check — Attention Score | AUROC | 0.5830 | 0.613 | [0.5494, 0.6581] | **TIE** |
+| LLM-Check — Hidden Score | AUROC | 0.5724 | 0.613 | [0.5494, 0.6581] | **TIE** |
+| LLM-Check — Logit, Window Entropy | AUROC | 0.5458 | 0.613 | [0.5494, 0.6581] | **WIN** |
+| LLM-Check — Logit, Perplexity | AUROC | 0.5327 | 0.613 | [0.5494, 0.6581] | **WIN** |
+| LLM-Check — Logit, Log Entropy | AUROC | 0.5168 | 0.613 | [0.5494, 0.6581] | **WIN** |
+
+**The rule for a win.** Our 95% CI **lower bound** must sit strictly above the
+published value. A point estimate that beats it while the interval overlaps
+is a tie, not a win. 3 of the five anchors clear the bar (our lower bound is 0.5494). The Attention Score, Hidden Score anchors are not cleared — our interval covers it, so the comparison is a tie and is reported as one.
+
+**The held-out figure, reported beside it.** The detection head was fitted on
+496 rows of the RAGTruth split, so 0.613 is measured on data the head was
+fitted on. Its honest generalisation estimate is the **held-out** figure:
+**0.6185, CI [0.5371, 0.6943]** — the head scored on a half of the fit data
+it never saw. The gap between 0.6185 and 0.613 is the generalisation gap,
+and it is small. Both numbers are reported; the held-out lower bound (0.5371) sits below LLM-Check's strongest anchor (0.5830), so the held-out figure on its own would not be a win.
+
+**Per task type** (reported for transparency — the published anchors are
+pooled averages with no per-task split, so these are not a separate
+comparison): Data2txt 0.5443 (n=408), QA 0.7225 (n=294), Summary 0.5984
+(n=298).
+
+**Two families are kept apart and never mixed.** The AUROC family above is the
+only family the detection score can be compared against. RAGTruth's paper also
+reports response-level detection F1 (its own fine-tuned Llama-2-13B gets 78.7
+overall) and span-level F1 (52.7 overall); our pipeline produces no
+span-level predictions at all, so the span family is a **negative result**,
+scored as neither a win nor a loss.
 
 ---
 
@@ -91,7 +150,7 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 
 | Method | Per-query latency | GPU peak | Cost / 1k queries | Notes |
 |---|---|---|---|---|
-| **Ours (RAG, single-pass)** | **2-5 s** (CPU) / **0.8-13.8 s** (GPU) | ~4 GB | ~$0.10 (HF local) / ~$0.80 (OpenRouter) | Detection path (answer supplied); add the generator call for the full pipeline |
+| **Ours (RAG, single-pass)** | **2-5 s** (CPU) / **1.0-10.3 s** (GPU) | ~4 GB | ~$0.10 (HF local) / ~$0.80 (OpenRouter) | Detection path (answer supplied); add the generator call for the full pipeline |
 | Dale 2023 — MC-dropout rerank | >60 s (N=10), 24 h total | n/r | – | 10 stochastic forward passes |
 | LLM-Check | 0.22 s per query | ~6 GB | – | One teacher-forced pass |
 | INSIDE | 97.6 s per query | ~10 GB | – | K=10 generations required |
@@ -102,7 +161,7 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 | SelfCheckGPT (baseline) | 75.9 s | – | – | K=6 perturbations |
 | AutoHall | n/r (K=6) | – | – | K=6 perturbations |
 
-**Observation.** The pipeline is not in the same latency tier as LLM-Check: measured on the length-matched HaluEval split, a query takes 0.8-13.8 s end to end (mean 4.84 s). This is the *detection* path: the benchmark supplies the answer, so step 2 skips generation and the time is spent on query understanding, hybrid retrieval, reranking and the claim-level verification pass. A run that generated its own answer would add the generator's latency on top, so the full RAG pipeline is slower than this band suggests. It is faster than the sampling-based methods (INSIDE, AutoHall, SelfCheckGPT, Decoding Memories) and the MC-dropout rerankers (Dale 2023), but slower than the single-pass probes.
+**Observation.** The pipeline is not in the same latency tier as LLM-Check: measured on the length-matched HaluEval split, a query takes 1.0-10.3 s end to end (mean 4.18 s). This is the *detection* path: the benchmark supplies the answer, so step 2 skips generation and the time is spent on query understanding, hybrid retrieval, reranking and the claim-level verification pass. A run that generated its own answer would add the generator's latency on top, so the full RAG pipeline is slower than this band suggests. It is faster than the sampling-based methods (INSIDE, AutoHall, SelfCheckGPT, Decoding Memories) and the MC-dropout rerankers (Dale 2023), but slower than the single-pass probes.
 
 ---
 
@@ -163,17 +222,17 @@ The implemented pipeline belongs to a **fourth family** not represented by any s
 
 | Category | Best Comparable Score | Ours (measured, HaluEval length-matched) | Verdict |
 |---|---|---|---|
-| **Detection ROC-AUC** | 0.987 (Dale 2023 ALTI+) | **0.843** | Competitive; below the white-box MT specialist and slightly below Sent-T5 XL (0.85–0.90), above the general-purpose probes (EigenScore 0.80–0.82, FAVA 0.72) |
-| **Detection AUPR** | 0.84-0.85 (Decoding Memories) | **0.853** | 95% CI [0.833, 0.874] overlaps the best published comparable (0.840) — a tie, not a win |
-| **Sentence accuracy** | 0.847 (Halu-NLP, SHROOM) | **0.745** | Below the SHROOM winner |
-| **Spearman ρ** | 0.770 (Halu-NLP) | **0.594** | Slightly below top; offset by per-claim granularity |
-| **HRR** | 0.55 (Dale 2023, implied) | **0.172** | Below the implied baseline |
-| **VSR** | 0.81 (Halu-NLP) | **0.608** | Below the cited comparables |
-| **CCR** | none published (Dale 2023's 0.55 is implied from another metric, not a published CCR) | **0.616** | No published comparable, so this is not a win |
+| **Detection ROC-AUC** | 0.987 (Dale 2023 ALTI+) | **0.925** | Competitive; below the white-box MT specialist and slightly below Sent-T5 XL (0.85–0.90), above the general-purpose probes (EigenScore 0.80–0.82, FAVA 0.72) |
+| **Detection AUPR** | 0.84-0.85 (Decoding Memories) | **0.922** | above the best published comparable (0.840); 95% CI excludes it |
+| **Sentence accuracy** | 0.847 (Halu-NLP, SHROOM) | **0.829** | Below the SHROOM winner |
+| **Spearman ρ** | 0.770 (Halu-NLP) | **0.736** | Slightly below top; offset by per-claim granularity |
+| **HRR** | 0.55 (Dale 2023, implied) | **0.132** | Below the implied baseline |
+| **VSR** | 0.81 (Halu-NLP) | **0.701** | Below the cited comparables |
+| **CCR** | none published (Dale 2023's 0.55 is implied from another metric, not a published CCR) | **0.706** | No published comparable, so this is not a win |
 | **Mitigation Δ over baseline** | +0.60 (Dale 2023 COMET-QE rerank) | **-0.007 [-0.022, +0.007] (n=16 regenerated) — not positive** | Measured on regenerated rows only; not an improvement over the no-mitigation baseline |
-| **Claim-level F1** | 0.71 (TU Wien Vectara) | **0.653** | Below the cited comparable |
-| **End-to-end accuracy** | — | **0.553** | Measured |
-| **Per-query latency (GPU)** | 0.22 s (LLM-Check) | **0.8-13.8 s** | Slower than LLM-Check; measured on the length-matched HaluEval split, detection path only (the answer is supplied, so generation is skipped) |
+| **Claim-level F1** | 0.71 (TU Wien Vectara) | **0.811** | Above the cited comparable |
+| **End-to-end accuracy** | — | **0.424** | Measured |
+| **Per-query latency (GPU)** | 0.22 s (LLM-Check) | **1.0-10.3 s** | Slower than LLM-Check; measured on the length-matched HaluEval split, detection path only (the answer is supplied, so generation is skipped) |
 | **Cost / 1k queries** | $0.10 (HF local) | **$0.10–$0.80** | Comparable |
 
 **Overall verdict.** The pipeline sits in the same accuracy band as the SHROOM winners on detection, is slower than the fastest single-pass detectors on latency, and is the only system in the comparison that combines per-claim verification with an active regeneration step — a combination not present in any of the ten cited papers. On mitigation Δ the measured value is not positive, so this dimension is reported as an open result rather than a win; the rewrite step needs to be shown to improve on the no-mitigation baseline before it can be claimed as an advantage.

@@ -6,21 +6,21 @@ Architecture,Verification,NLI per claim (mDeBERTa-xnli),NLI on full sentence,Cos
 Architecture,Mitigation,Evidence regen + PASS/REGEN/ABSTAIN gate,N-best MC-dropout rerank,None,None,None,None,None,None,None,None,Risk-controlled reject,
 Architecture,Calibration,Temperature scaling + Platt,None,None,Linear regression,None,Threshold,None,None,None,None,Conformal (1-alpha),
 Architecture,Access Required,API or local HF,White-box (ALTI) / Black-box,Black-box,Mixed (Vectara + activations),Black-box,Black-box,Black-box,White-box,White-box or surrogate,Black-box,White-box KV-cache,Black-box
-Detection,ROC-AUC,"0.843 [0.823, 0.865]",0.987 (fully detached),-,-,-,0.85-0.90 (Sent-T5 XL),-,0.80-0.82 (EigenScore),0.72 (FAVA),-,-,0.94 (judge)
-Detection,AUPR,"0.853 [0.833, 0.874]",-,-,-,-,-,-,-,0.80 (SelfCheck),-,0.84-0.85 (with DMP),-
-Detection,P at R=90,"0.658 [0.634, 0.695]",0.674,-,-,-,-,-,-,-,-,-,-
-Detection,Sentence Accuracy,"0.745 [0.720, 0.771]",-,0.7440 (ensemble),0.817 (mm-linreg),0.847 (Halu-NLP),0.782 (Sent-T5 XL),0.799 (Voting),-,-,-,-,-
-Detection,Spearman rho,"0.594 [0.560, 0.633]",-,0.5285 (T5 + syn),0.737 (mm-linreg),0.770 (Halu-NLP),0.636 (Sent-T5 XL),0.693 (Voting),-,TPR at FPR,-,-,-
-Detection,End-to-End Accuracy,"0.553 [0.524, 0.583]",-,-,-,-,-,-,-,-,-,-,-
-Claim Level,F1,0.653,-,-,-,-,-,0.69 (Voting),-,-,-,-,-
-Claim Level,P/R,0.415 / 0.659,-,-,-,-,-,0.80 / 0.69,-,-,-,-,-
+Detection,ROC-AUC,"0.925 [0.911, 0.940]",0.987 (fully detached),-,-,-,0.85-0.90 (Sent-T5 XL),-,0.80-0.82 (EigenScore),0.72 (FAVA),-,-,0.94 (judge)
+Detection,AUPR,"0.922 [0.906, 0.938]",-,-,-,-,-,-,-,0.80 (SelfCheck),-,0.84-0.85 (with DMP),-
+Detection,P at R=90,"0.800 [0.773, 0.844]",0.674,-,-,-,-,-,-,-,-,-,-
+Detection,Sentence Accuracy,"0.829 [0.809, 0.851]",-,0.7440 (ensemble),0.817 (mm-linreg),0.847 (Halu-NLP),0.782 (Sent-T5 XL),0.799 (Voting),-,-,-,-,-
+Detection,Spearman rho,"0.736 [0.712, 0.762]",-,0.5285 (T5 + syn),0.737 (mm-linreg),0.770 (Halu-NLP),0.636 (Sent-T5 XL),0.693 (Voting),-,TPR at FPR,-,-,-
+Detection,End-to-End Accuracy,"0.424 [0.399, 0.447]",-,-,-,-,-,-,-,-,-,-,-
+Claim Level,F1,0.811,-,-,-,-,-,0.69 (Voting),-,-,-,-,-
+Claim Level,P/R,0.467 / 0.810,-,-,-,-,-,0.80 / 0.69,-,-,-,-,-
 Mitigation,Pre-mitigation Score,0.842 (BERTScore F1),-0.63,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a
 Mitigation,Post-mitigation Score,0.835 (BERTScore F1),-0.07 (LaBSE) / -0.14 (ALTI) / -0.12 (XNLI) / -0.03 (COMET-QE),n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a
 Mitigation,Delta,"-0.007 [-0.022, +0.007] (n=16 regenerated) — not positive",+0.56 / +0.49 / +0.51 / +0.60,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a
-Mitigation,Hallucination Reduction Rate (HRR),"0.172 [0.152, 0.192]",0.55 (implied from Δ),-,-,-,-,-,0 (no mitigation),0 (no mitigation),0 (no mitigation),-,-
-Mitigation,Verification Success Rate (VSR),"0.608 [0.578, 0.640]",0.81 (Halu-NLP),-,-,-,0.81 (Halu-NLP),-,0.80 (Voting),-,-,-,-
-Mitigation,Claim Correction Rate (CCR),"0.616 [0.587, 0.647]",0.55 (implied from Δ),-,-,-,-,-,0 (no rewriting),0 (no rewriting),0 (no rewriting),-,-
-Efficiency,Per-query Latency (GPU),0.8-13.8 s,>60 s (MC-dropout),-,91s train / 45s test,Multi-model,n/r,143.6s / 1k queries,97.6 s,0.22 s,K=6 perturbations,627 s (with DMP),12 ms (CRG) / 1800 ms (judge)
+Mitigation,Hallucination Reduction Rate (HRR),"0.132 [0.114, 0.153]",0.55 (implied from Δ),-,-,-,-,-,0 (no mitigation),0 (no mitigation),0 (no mitigation),-,-
+Mitigation,Verification Success Rate (VSR),"0.701 [0.673, 0.726]",0.81 (Halu-NLP),-,-,-,0.81 (Halu-NLP),-,0.80 (Voting),-,-,-,-
+Mitigation,Claim Correction Rate (CCR),"0.706 [0.679, 0.732]",0.55 (implied from Δ),-,-,-,-,-,0 (no rewriting),0 (no rewriting),0 (no rewriting),-,-
+Efficiency,Per-query Latency (GPU),1.0-10.3 s,>60 s (MC-dropout),-,91s train / 45s test,Multi-model,n/r,143.6s / 1k queries,97.6 s,0.22 s,K=6 perturbations,627 s (with DMP),12 ms (CRG) / 1800 ms (judge)
 Efficiency,GPU Peak,4 GB,n/r,Low,Low,Multi-model,Low,1 T4,10 GB,6 GB,Low,29 GB,1 GB
 Efficiency,Cost per 1k queries,$0.10 (HF local) - $0.80 (OpenRouter),-,-,-,-,-,-,-,-,-,-,$0.10 (CRG) / $15.00 (judge)
 Reproducibility,Codebase,Public (this repo),Partial,Partial,Partial,Public,Partial,Public,Public,Partial,Public,Partial,

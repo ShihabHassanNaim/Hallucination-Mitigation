@@ -146,7 +146,7 @@ This is **publication-grade** — a downstream auditor can verify every claim by
 
 | Method | HRR (Hallucination Reduction Rate) |
 |---|---|
-| **Ours (Step 11 gate)** | **0.172** |
+| **Ours (Step 11 gate)** | **0.132** |
 | Dale 2023 — N-best rerank | ~0.55 (implied from Δ) |
 | AILS-NTUA — Voting | 0 (no mitigation) |
 | TU Wien — Vectara | 0 (no mitigation) |
@@ -159,7 +159,7 @@ This is **publication-grade** — a downstream auditor can verify every claim by
 
 | Method | VSR (fraction of answers with zero contradictions) |
 |---|---|
-| **Ours (per-claim NLI)** | **0.608** |
+| **Ours (per-claim NLI)** | **0.701** |
 | AILS-NTUA — Voting | 0.80 (model-aware) |
 | TU Wien — Vectara | 0.81 (model-aware) |
 | Halu-NLP (SHROOM winner) | 0.81 |
@@ -169,7 +169,7 @@ This is **publication-grade** — a downstream auditor can verify every claim by
 
 | Method | CCR (fraction of contradicted claims edited out) |
 |---|---|
-| **Ours (Step 10 regen)** | **0.616** |
+| **Ours (Step 10 regen)** | **0.706** |
 | Dale 2023 — N-best rerank | ~0.55 (implied from Δ, MT only) |
 | AILS-NTUA / DUTh / TU Wien / IRIT-BL | 0 (no rewriting) |
 
@@ -178,13 +178,13 @@ This is **publication-grade** — a downstream auditor can verify every claim by
 1. **HRR + CCR.** Only two systems in the comparison actively mitigate: Dale 2023 (N-best rerank via MC-dropout) and ours (evidence-guided regen). Dale reranks; we rewrite. Rewriting preserves supported claims and edits contradicted ones; reranking picks the least-bad candidate but cannot edit content.
 2. **VSR.** Same as Position 3 — atomic claim granularity catches intra-sentence contradictions. Every sentence-level system scores ≤0.81 because partial contradictions get averaged out.
 
-Neither of these is a *measured* advantage. Our HRR (0.172) and VSR (0.608) are both below the cited comparables, and our CCR (0.616) has no published CCR to compare against — Dale 2023's 0.55 is implied from its mitigation Δ rather than published as a CCR, and the other cited systems have no mitigation stage at all. What the rewrite architecture buys is the *capability* to edit a contradicted claim in place, not a better rate on this evaluation.
+Neither of these is a *measured* advantage. Our HRR (0.132) and VSR (0.701) are both below the cited comparables, and our CCR (0.706) has no published CCR to compare against — Dale 2023's 0.55 is implied from its mitigation Δ rather than published as a CCR, and the other cited systems have no mitigation stage at all. What the rewrite architecture buys is the *capability* to edit a contradicted claim in place, not a better rate on this evaluation.
 
 ### Verdict
 
-**NOT A WIN — reported as measured.** Ours is the only QA-side system actively rewriting contradicted content, but the measured HRR (0.172) and CCR (0.616) are reported as measured rather than claimed as wins against Dale 2023's implied HRR of ~0.55.
+**NOT A WIN — reported as measured.** Ours is the only QA-side system actively rewriting contradicted content, but the measured HRR (0.132) and CCR (0.706) are reported as measured rather than claimed as wins against Dale 2023's implied HRR of ~0.55.
 
-**NOT A WIN on the rate — the structural argument stands.** Atomic granularity + per-claim NLI is structurally superior to sentence-level classification for partial contradictions, but the measured VSR (0.608) is below the cited comparables (0.80–0.81), so the granularity claim is a capability argument rather than a rate advantage.
+**NOT A WIN on the rate — the structural argument stands.** Atomic granularity + per-claim NLI is structurally superior to sentence-level classification for partial contradictions, but the measured VSR (0.701) is below the cited comparables (0.80–0.81), so the granularity claim is a capability argument rather than a rate advantage.
 
 ---
 
@@ -196,7 +196,7 @@ Neither of these is a *measured* advantage. Our HRR (0.172) and VSR (0.608) are 
 | 2. Mitigation Δ | ✗ LOSS | Dale 2023 +0.60 (different domain) | -0.007 [-0.022, +0.007] (n=16 regenerated) — not positive measured vs. +0.60 |
 | 3. Atomic claim granularity | ✅ WIN | TU Wien (split only, sentence verdict) | **unique structural win** |
 | 4. Citation provenance per claim | ✅ WIN | None of the 10 | **unique in literature** |
-| 5. HRR / VSR / CCR | ❌ LOSS on the rates | Halu-NLP VSR 0.81 vs. **Ours 0.608** | −0.202 VSR; HRR 0.172 vs. ~0.55 implied |
+| 5. HRR / VSR / CCR | ❌ LOSS on the rates | Halu-NLP VSR 0.81 vs. **Ours 0.701** | −0.109 VSR; HRR 0.132 vs. ~0.55 implied |
 
 *Positions 2 and 5 are not wins and are reported as measured. The mitigation Δ is -0.007 BERTScore F1 (95% CI [-0.022, +0.007]) on the 16 of 500 rows where step 10 regenerated (the first 500 rows of the 1000-row split), and the HRR / VSR / CCR rates are below the cited comparables. The rewrite path is implemented and exercised, but on this sample it did not improve similarity to the gold answer; improving it is future work. The defensible claims are the architectural ones — Positions 1, 3 and 4.
 

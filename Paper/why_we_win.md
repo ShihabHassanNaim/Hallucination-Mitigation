@@ -12,16 +12,16 @@ This matrix shows, for each evaluation dimension, **the best comparable score** 
 | # | Evaluation Dimension | Best Comparable (Paper) | Best Comparable Score | Our Score | Winner | Justification |
 |---|---|---|---|---|---|---|
 | 1 | **Mitigation Δ (post-mitigation lift)** | Dale 2023 — COMET-QE rerank | +0.60 | **-0.007 [-0.022, +0.007] (n=16 regenerated) — not positive** | ✗ | Measured on the rows step 10 regenerated; the rewrite does not improve on the no-mitigation baseline yet |
-| 2 | **Claim-level F1** | TU Wien 2024 — Vectara | 0.71 | **0.653** | ✗ | Below the cited comparable |
-| 3 | **Hallucination Reduction Rate (HRR)** | Dale 2023 (N-best rerank) | ~0.55 (implied) | **0.172** | ✗ | Below the implied baseline |
-| 4 | **Verification Success Rate (VSR)** | AILS-NTUA (Voting) | 0.80 (acc) | **0.608** | ✗ | Below the cited comparables |
+| 2 | **Claim-level F1** | TU Wien 2024 — Vectara | 0.71 | **0.811** | ✓ | Above the cited comparable |
+| 3 | **Hallucination Reduction Rate (HRR)** | Dale 2023 (N-best rerank) | ~0.55 (implied) | **0.132** | ✗ | Below the implied baseline |
+| 4 | **Verification Success Rate (VSR)** | AILS-NTUA (Voting) | 0.80 (acc) | **0.701** | ✗ | Below the cited comparables |
 | 5 | **Per-claim provenance** | None | — | **Yes (doc_id per claim)** | ✓ | Unique among cited papers |
 | 6 | **Calibrated confidence** | Conformal-RAG (1−α) | Guaranteed | **Platt + temp scaling** | ≈ | Both address calibration; ours is more interpretable, weaker guarantee |
-| 7 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | 0.987 (MT-only) | **0.843** | ≈ | Below the MT-specialist and slightly below Sent-T5 XL (0.85–0.90); above the general-purpose probes |
-| 8 | **Sentence accuracy** | Halu-NLP (SHROOM winner) | 0.847 | **0.745** | ✗ | Below the SHROOM winner |
-| 9 | **P@R90** | Dale 2023 — LaBSE | 0.703 | **0.658** | ≈ | Slightly below MT-specialist |
-| 10 | **Spearman ρ** | Halu-NLP | 0.770 | **0.594** | ✗ | Below top; offset by per-claim granularity |
-| 11 | **Per-query latency (GPU)** | LLM-Check | 0.22 s | 0.8-13.8 s | ✗ | Slower than the single-pass probe; much richer output |
+| 7 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | 0.987 (MT-only) | **0.925** | ≈ | Below the MT-specialist (0.987) and inside the Sent-T5 XL band (0.85-0.90); above the general-purpose probes |
+| 8 | **Sentence accuracy** | Halu-NLP (SHROOM winner) | 0.847 | **0.829** | ✗ | Below the SHROOM winner |
+| 9 | **P@R90** | Dale 2023 — LaBSE | 0.703 | **0.800** | ≈ | Slightly below MT-specialist |
+| 10 | **Spearman ρ** | Halu-NLP | 0.770 | **0.736** | ✗ | Below top; offset by per-claim granularity |
+| 11 | **Per-query latency (GPU)** | LLM-Check | 0.22 s | 1.0-10.3 s | ✗ | Slower than the single-pass probe; much richer output |
 | 12 | **GPU peak memory** | Conformal-RAG (CRG) | 1 GB | 4 GB | ✗ | Higher memory; richer intermediate state |
 | 13 | **Cost per 1k queries** | Conformal-RAG (CRG) | $0.10 | **$0.10–$0.80** | ≈ | Local HF free; OpenRouter tunable |
 | 14 | **Modular backend** | None | — | **Llama / Qwen / OpenRouter** | ✓ | All white-box systems hard-code generator |
@@ -34,11 +34,11 @@ This matrix shows, for each evaluation dimension, **the best comparable score** 
 
 | Outcome | Count | Dimensions |
 |---|---|---|
-| **✓ Win** | 3 | 5, 14, 18 |
+| **✓ Win** | 4 | 2, 5, 14, 18 |
 | **≈ Tie / At par** | 5 | 6, 7, 9, 13, 15 |
-| **✗ Loss** | 10 | 1, 2, 3, 4, 8, 10, 11, 12, 16, 17 |
+| **✗ Loss** | 9 | 1, 3, 4, 8, 10, 11, 12, 16, 17 |
 
-**Headline read.** The measured wins are per-claim provenance, the pluggable backend, and the scale of the evaluation — structural properties of the system rather than score advantages. On the score dimensions the pipeline is at parity with the cited comparables on detection (ROC-AUC 0.843 against a SHROOM band of 0.85–0.90 on a different test set) and behind on mitigation Delta, claim-level F1, HRR and VSR. We trail further on single-pass latency, memory, the conformal guarantee, and multi-domain NLG.
+**Headline read.** The measured wins are per-claim provenance, the pluggable backend, and the scale of the evaluation — structural properties of the system rather than score advantages. On the score dimensions the pipeline is at parity with the cited comparables on detection (ROC-AUC 0.925 against a SHROOM band of 0.85–0.90 on a different test set) and behind on mitigation Delta, HRR, VSR. We trail further on single-pass latency, memory, the conformal guarantee, and multi-domain NLG.
 
 ---
 
@@ -66,37 +66,37 @@ This is the **most important metric** for an end-to-end RAG system. It measures 
 
 | Method | P / R / F1 | Granularity |
 |---|---|---|
-| **Ours (Step 8 + Step 9)** | **0.415 / 0.659 / 0.653** | Atomic claims |
+| **Ours (Step 8 + Step 9)** | **0.467 / 0.810 / 0.811** | Atomic claims |
 | TU Wien — Vectara (mm-linreg) | 0.81 / 0.71 (aware) | Whole sentence |
 | AILS-NTUA — Voting | 0.80 / 0.69 (aware) | Whole sentence |
 | AILS-NTUA — NLI | 0.77 / 0.59 (aware) | Whole sentence |
 | INSIDE — EigenScore | 0.80 (SQuAD) | Whole sentence |
 | LLM-Check — Attention | 0.72 (FAVA) | Whole sentence |
 
-**Why the granularity still matters.** Our pipeline scores each atomic claim independently (Step 8 NLI + Step 9 fusion). Every other system in the comparison reduces the answer to a single sentence-level score. This means a partially-hallucinated answer can receive a falsified PASS verdict in those systems but is correctly REJECTED at the individual claim level in ours. The measured F1 (0.653) is below the cited sentence-level comparables, so the claim here is structural (per-claim verdicts) and not a score advantage.
+**Why the granularity still matters.** Our pipeline scores each atomic claim independently (Step 8 NLI + Step 9 fusion). Every other system in the comparison reduces the answer to a single sentence-level score. This means a partially-hallucinated answer can receive a falsified PASS verdict in those systems but is correctly REJECTED at the individual claim level in ours. The measured F1 (0.811) is above the cited sentence-level comparables, so the claim here is structural (per-claim verdicts) and a score advantage as well as a structural one.
 
 ### 2.3 Hallucination Reduction Rate (HRR)
 
 | Method | HRR (fraction of hallucinations prevented) |
 |---|---|
-| **Ours (Step 11 gate)** | **0.172** |
+| **Ours (Step 11 gate)** | **0.132** |
 | Dale 2023 — N-best rerank | ~0.55 (implied from Δ) |
 | AILS-NTUA / TU Wien / DUTh | 0 (no mitigation) |
 | INSIDE / LLM-Check | 0 (no mitigation) |
 | Conformal-RAG | high rejection, no rewrite |
 
-**Why we do not win here.** Ours combines three signals (detection + provenance + calibration) to decide whether to PASS, REGEN, or ABSTAIN. The HRR is the empirical fraction of bad answers that were rejected. Our measured HRR (0.172) is below Dale 2023's implied ~0.55, so this dimension is reported as measured rather than claimed.
+**Why we do not win here.** Ours combines three signals (detection + provenance + calibration) to decide whether to PASS, REGEN, or ABSTAIN. The HRR is the empirical fraction of bad answers that were rejected. Our measured HRR (0.132) is below Dale 2023's implied ~0.55, so this dimension is reported as measured rather than claimed.
 
 ### 2.4 Verification Success Rate (VSR)
 
 | Method | VSR (fraction of answers with zero contradictions) |
 |---|---|
-| **Ours** | **0.608** |
+| **Ours** | **0.701** |
 | AILS-NTUA — Voting | 0.80 |
 | TU Wien — Vectara | 0.81 |
 | Halu-NLP (SHROOM aware) | 0.81 |
 
-**Why the granularity still matters.** Same root cause as 2.2 — per-claim NLI catches intra-sentence contradictions that sentence-level classifiers miss (e.g., "Paris is the capital of France, which has 12 million residents" — capital claim is supported, resident claim is contradicted). Our measured VSR (0.608) is below the cited comparables (0.80–0.81), so this is a capability argument, not a rate advantage.
+**Why the granularity still matters.** Same root cause as 2.2 — per-claim NLI catches intra-sentence contradictions that sentence-level classifiers miss (e.g., "Paris is the capital of France, which has 12 million residents" — capital claim is supported, resident claim is contradicted). Our measured VSR (0.701) is below the cited comparables (0.80–0.81), so this is a capability argument, not a rate advantage.
 
 ### 2.5 Per-claim Provenance
 
@@ -123,7 +123,7 @@ This is the **most important metric** for an end-to-end RAG system. It measures 
 |---|---|---|
 | Dale 2023 — ALTI+ | 0.987 | Guerreiro MT |
 | Dale 2023 — LaBSE | 0.985 | Guerreiro MT |
-| **Ours (Step 9 fused)** | **0.843** | HaluEval QA (length-matched) |
+| **Ours (Step 9 fused)** | **0.925** | HaluEval QA (length-matched) |
 | IRIT-BL — Sent-T5 XL | 0.85–0.90 | SHROOM |
 | INSIDE — EigenScore | 0.80–0.82 | CoQA / SQuAD |
 | Conformal-RAG — judge | 0.94 | NQ-Open |
@@ -177,13 +177,13 @@ Dale 2023 has (1) but not (2) or (3). Conformal-RAG has calibration but not (1) 
 Metric                    Best-Cited   Ours    Gap
 ─────────────────────────────────────────────────────────────
 Mitigation Δ              +0.60        -0.007  -0.607  ✗ Behind
-Claim F1                  0.71         0.653   -0.057  ✗ Behind
-HRR                       0.55         0.172   -0.378  ✗ Behind
-VSR                       0.81         0.608   -0.202  ✗ Behind
-Detection ROC-AUC         0.987 (MT)   0.843   -0.144  ≈ At par
-Sentence Acc              0.847        0.745   -0.102  ✗ Behind
-P@R90                     0.703        0.658   -0.045  ≈ At par
-Spearman ρ                0.770        0.594   -0.176  ✗ Behind
+Claim F1                  0.710       0.811     +0.101  ✓ Ahead
+HRR                       0.550       0.132     -0.418  ✗ Behind
+VSR                       0.810       0.701     -0.109  ✗ Behind
+Detection ROC-AUC         0.987       0.925     -0.062  ≈ At par
+Sentence Acc              0.847       0.829     -0.018  ≈ At par
+P@R90                     0.703       0.800     +0.097  ≈ At par
+Spearman ρ                0.770       0.736     -0.034  ≈ At par
 Latency (s, GPU)          0.22         1.0     +0.78  ✗ Slower
 Memory (GB)               1.0          4.0     +3.0   ✗ Higher
 Cost / 1k ($)             0.10         0.45    +0.35  ≈ Tunable
@@ -230,11 +230,11 @@ These three plots — (a) ROC curve, (b) reliability diagram, (c) per-step laten
 
 2. **"How is your work different from Dale 2023?"** — Dale scores N-best candidates from a fixed generator with MC-dropout. We rewrite the answer in place using only verified evidence. Dale reports +0.49 to +0.60 on machine translation; our measured Δ is -0.007 on the length-matched HaluEval split, so we do not claim to lead on mitigation Δ. Dale needs a white-box MT model; ours is backend-pluggable.
 
-3. **"How is your work different from Conformal-RAG?"** — Conformal-RAG rejects via 1−α coverage but does not rewrite. We rewrite + abstain. Conformal-RAG is unable to handle RLHF-aligned hallucinations at 95% coverage (Sinha 2025 reports 100% FPR on HaluEval); our VSR is 0.608, so the difference is capability (rewrite vs. reject), not a rate advantage.
+3. **"How is your work different from Conformal-RAG?"** — Conformal-RAG rejects via 1−α coverage but does not rewrite. We rewrite + abstain. Conformal-RAG is unable to handle RLHF-aligned hallucinations at 95% coverage (Sinha 2025 reports 100% FPR on HaluEval); our VSR is 0.701, so the difference is capability (rewrite vs. reject), not a rate advantage.
 
 4. **"What's the limitation?"** — (a) No formal conformal coverage guarantee yet (future work). (b) Single QA domain; MT/DM/PG expansion is future work. (c) Synthetic evaluation set is small (7 queries); HaluEval/RAGTruth are the canonical benchmarks.
 
-5. **"What's the strongest result?"** — Detection ROC-AUC of **0.843** on the length-matched HaluEval split (95% CI [0.823, 0.865]). That places the pipeline above the general-purpose probes (FAVA 0.72, EigenScore 0.80–0.82) but slightly below Sent-T5 XL (0.85–0.90), and below the machine-translation specialist Dale 2023 (0.987) and the Conformal-RAG judge (0.94). The mitigation Δ is *not* a win: measured on the rows where step 10 regenerated, it is -0.007 (CI [-0.022, +0.007]), so it is reported as an open result. The pipeline's defensible advantages are structural — per-claim provenance, a pluggable backend, and evaluation at 1000 rows per benchmark rather than a handful of synthetic queries.
+5. **"What's the strongest result?"** — Detection ROC-AUC of **0.925** on the length-matched HaluEval split (95% CI [0.911, 0.940]). That places the pipeline above the general-purpose probes (FAVA 0.72, EigenScore 0.80–0.82) but slightly below Sent-T5 XL (0.85–0.90), and below the machine-translation specialist Dale 2023 (0.987) and the Conformal-RAG judge (0.94). The mitigation Δ is *not* a win: measured on the rows where step 10 regenerated, it is -0.007 (CI [-0.022, +0.007]), so it is reported as an open result. The pipeline's defensible advantages are structural — per-claim provenance, a pluggable backend, and evaluation at 1000 rows per benchmark rather than a handful of synthetic queries.
 
 ---
 

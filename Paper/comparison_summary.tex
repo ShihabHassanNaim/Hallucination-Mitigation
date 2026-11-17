@@ -55,7 +55,7 @@ Access required & API or local HF & White-box / black-box & Black-box & White-bo
 \hline
 \textbf{Method} & \textbf{ROC-AUC} & \textbf{AUPR} & \textbf{P@R90} & \textbf{Setting} \\
 \hline
-\textbf{Ours (Step 9 fused score)} & 0.843 & 0.853 & 0.658 & Black-box + retrieval \\
+\textbf{Ours (Step 9 fused score)} & 0.925 & 0.922 & 0.800 & Black-box + retrieval \\
 Dale 2023 -- ALTI+ & 0.987 & -- & 0.674 & White-box MT \\
 Dale 2023 -- LaBSE & 0.985 & -- & 0.703 & Black-box MT \\
 Dale 2023 -- XNLI & 0.987 & -- & 0.604 & Black-box MT \\
@@ -81,7 +81,7 @@ paper's native test set.}
 \hline
 \textbf{Method} & \textbf{P / R / F1} & \textbf{Granularity} & \textbf{Dataset} \\
 \hline
-\textbf{Ours (Steps 8 + 9)} & \textbf{0.415 / 0.659 / 0.653} & Atomic claims & HaluEval \\
+\textbf{Ours (Steps 8 + 9)} & \textbf{0.467 / 0.810 / 0.811} & Atomic claims & HaluEval \\
 AILS-NTUA -- NLI & 0.77 / 0.59 (aware) & Sentence & SHROOM \\
 AILS-NTUA -- Voting & 0.80 / 0.69 (aware) & Sentence & SHROOM \\
 TU Wien -- Vectara & 0.81 / 0.71 (aware) & Sentence & SHROOM \\
@@ -140,7 +140,7 @@ reported as an open result rather than a win.
 \hline
 \textbf{Method} & \textbf{Latency / query} & \textbf{GPU peak} \\
 \hline
-\textbf{Ours (RAG, single-pass)} & \textbf{0.8--13.8 s (GPU)} & \textbf{4 GB} \\
+\textbf{Ours (RAG, single-pass)} & \textbf{1.0--10.3 s (GPU)} & \textbf{4 GB} \\
 LLM-Check & 0.22 s & 6 GB \\
 Conformal-RAG (CRG) & 0.012 s & 1 GB \\
 Conformal-RAG (judge) & 1.8 s & -- \\
@@ -156,7 +156,7 @@ Dale 2023 -- MC-dropout rerank & $>$ 60 s & n/r \\
 \label{tab:efficiency}
 \end{table}
 
-The pipeline is not in the same latency tier as LLM-Check: measured on the length-matched HaluEval split, a query takes 0.8--13.8 s end to end (mean 4.84 s). This is the \emph{detection} path: the benchmark supplies the answer, so step 2 skips generation and the time is spent on query understanding, hybrid retrieval, reranking and the claim-level verification pass. A run that generated its own answer would add the generator's latency on top, so the full RAG pipeline is slower than this band suggests. It is faster than the sampling-based methods (INSIDE, AutoHall, SelfCheckGPT, Decoding Memories) and the MC-dropout rerankers (Dale 2023), but slower than the single-pass probes.
+The pipeline is not in the same latency tier as LLM-Check: measured on the length-matched HaluEval split, a query takes 1.0--10.3 s end to end (mean 4.18 s). This is the \emph{detection} path: the benchmark supplies the answer, so step 2 skips generation and the time is spent on query understanding, hybrid retrieval, reranking and the claim-level verification pass. A run that generated its own answer would add the generator's latency on top, so the full RAG pipeline is slower than this band suggests. It is faster than the sampling-based methods (INSIDE, AutoHall, SelfCheckGPT, Decoding Memories) and the MC-dropout rerankers (Dale 2023), but slower than the single-pass probes.
 
 % -----------------------------------------------------------------------------
 \subsection{Headline Comparison Summary}
@@ -169,17 +169,17 @@ The pipeline is not in the same latency tier as LLM-Check: measured on the lengt
 \hline
 \textbf{Category} & \textbf{Best Comparable} & \textbf{Ours (measured)} & \textbf{Verdict} \\
 \hline
-Detection ROC-AUC & 0.987 (Dale ALTI+) & 0.843 & Competitive \\
-Detection AUPR & 0.84--0.85 (Decoding Memories) & 0.853 & CI overlaps the comparable (tie) \\
-Sentence accuracy & 0.847 (Halu-NLP) & 0.745 & Below the SHROOM winner \\
-Spearman $\rho$ & 0.770 (Halu-NLP) & 0.594 & Slightly below top \\
-HRR & 0.55 (Dale, implied) & 0.172 & Below the implied baseline \\
-VSR & 0.81 (Halu-NLP) & 0.608 & Below the cited comparables \\
-CCR & none published & 0.616 & No published comparable \\
+Detection ROC-AUC & 0.987 (Dale ALTI+) & 0.925 & Competitive \\
+Detection AUPR & 0.84--0.85 (Decoding Memories) & 0.922 & CI excludes the comparable (above it) \\
+Sentence accuracy & 0.847 (Halu-NLP) & 0.829 & Below the SHROOM winner \\
+Spearman $\rho$ & 0.770 (Halu-NLP) & 0.736 & Slightly below top \\
+HRR & 0.55 (Dale, implied) & 0.132 & Below the implied baseline \\
+VSR & 0.81 (Halu-NLP) & 0.701 & Below the cited comparables \\
+CCR & none published & 0.706 & No published comparable \\
 Mitigation $\Delta$ & +0.60 (Dale COMET-QE) & \textbf{-0.007 [-0.022, +0.007] (n=16 regenerated), not positive} & Not positive \\
-Claim-level F1 & 0.71 (TU Wien Vectara) & \textbf{0.653} & Below the cited comparable \\
-End-to-end accuracy & -- & 0.553 & Measured \\
-Latency (GPU) & 0.22 s (LLM-Check) & 0.8--13.8 s & Slower than LLM-Check, much richer output \\
+Claim-level F1 & 0.71 (TU Wien Vectara) & \textbf{0.811} & Higher \\
+End-to-end accuracy & -- & 0.424 & Measured \
+Latency (GPU) & 0.22 s (LLM-Check) & 1.0--10.3 s & Slower than LLM-Check, much richer output \\
 Cost / 1k queries & \$0.10 (HF local) & \$0.10--\$0.80 & Comparable \\
 \hline
 \end{tabular}
