@@ -1,0 +1,237 @@
+{
+  "n_rows": 300,
+  "n_tune": 150,
+  "n_holdout": 150,
+  "components": [
+    "similarity",
+    "retrieval_top1",
+    "nli",
+    "coverage",
+    "eedc",
+    "detector_trust",
+    "grounding"
+  ],
+  "component_direction": {
+    "similarity": {
+      "auc_tune": 0.6643,
+      "auc_all": 0.6153,
+      "auc_all_ci95": [
+        0.5452,
+        0.681
+      ],
+      "sign": 1.0,
+      "sign_source": "all (CI excludes 0.5)",
+      "direction_decisive": true,
+      "per_task_auc_all": {
+        "Data2txt": 0.5296,
+        "QA": 0.6238,
+        "Summary": 0.5328
+      }
+    },
+    "retrieval_top1": {
+      "auc_tune": 0.607,
+      "auc_all": 0.5973,
+      "auc_all_ci95": [
+        0.5277,
+        0.6645
+      ],
+      "sign": 1.0,
+      "sign_source": "all (CI excludes 0.5)",
+      "direction_decisive": true,
+      "per_task_auc_all": {
+        "Data2txt": 0.4425,
+        "QA": 0.512,
+        "Summary": 0.5818
+      }
+    },
+    "nli": {
+      "auc_tune": 0.437,
+      "auc_all": 0.4373,
+      "auc_all_ci95": [
+        0.3683,
+        0.5075
+      ],
+      "sign": -1.0,
+      "sign_source": "all (tuning-half AUC within noise)",
+      "direction_decisive": false,
+      "per_task_auc_all": {
+        "Data2txt": 0.4457,
+        "QA": 0.3037,
+        "Summary": 0.3821
+      }
+    },
+    "coverage": {
+      "auc_tune": 0.4563,
+      "auc_all": 0.4476,
+      "auc_all_ci95": [
+        0.3785,
+        0.5164
+      ],
+      "sign": -1.0,
+      "sign_source": "all (tuning-half AUC within noise)",
+      "direction_decisive": false,
+      "per_task_auc_all": {
+        "Data2txt": 0.4519,
+        "QA": 0.3069,
+        "Summary": 0.3913
+      }
+    },
+    "eedc": {
+      "auc_tune": 0.5454,
+      "auc_all": 0.5581,
+      "auc_all_ci95": [
+        0.4882,
+        0.6288
+      ],
+      "sign": 1.0,
+      "sign_source": "all (tuning-half AUC within noise)",
+      "direction_decisive": false,
+      "per_task_auc_all": {
+        "Data2txt": 0.449,
+        "QA": 0.4767,
+        "Summary": 0.5398
+      }
+    },
+    "detector_trust": {
+      "auc_tune": 0.3772,
+      "auc_all": 0.3985,
+      "auc_all_ci95": [
+        0.3292,
+        0.4711
+      ],
+      "sign": -1.0,
+      "sign_source": "all (CI excludes 0.5)",
+      "direction_decisive": true,
+      "per_task_auc_all": {
+        "Data2txt": 0.5143,
+        "QA": 0.3918,
+        "Summary": 0.4902
+      }
+    },
+    "grounding": {
+      "auc_tune": 0.4443,
+      "auc_all": 0.4483,
+      "auc_all_ci95": [
+        0.3823,
+        0.5136
+      ],
+      "sign": -1.0,
+      "sign_source": "all (tuning-half AUC within noise)",
+      "direction_decisive": false,
+      "per_task_auc_all": {
+        "Data2txt": 0.3934,
+        "QA": 0.211,
+        "Summary": 0.2442
+      }
+    }
+  },
+  "models": {
+    "logistic (fitted)": {
+      "roc_auc_tune": 0.7522,
+      "roc_auc_holdout": 0.6267,
+      "roc_auc_holdout_ci95": [
+        0.527,
+        0.7267
+      ],
+      "roc_auc_all": 0.6849,
+      "per_task_all": {
+        "Data2txt": 0.707,
+        "QA": 0.8012,
+        "Summary": 0.6471
+      },
+      "weights": {
+        "similarity": 0.8198,
+        "retrieval_top1": 0.2765,
+        "nli": 0.875,
+        "coverage": -0.6929,
+        "eedc": -0.0814,
+        "detector_trust": 0.2478,
+        "grounding": 0.9043
+      }
+    },
+    "unweighted signed sum": {
+      "roc_auc_tune": 0.6777,
+      "roc_auc_holdout": 0.6313,
+      "roc_auc_holdout_ci95": [
+        0.5308,
+        0.7238
+      ],
+      "roc_auc_all": 0.6566,
+      "per_task_all": {
+        "Data2txt": 0.5452,
+        "QA": 0.7032,
+        "Summary": 0.6173
+      },
+      "weights": {
+        "similarity": 1.0,
+        "retrieval_top1": 1.0,
+        "nli": 1.0,
+        "coverage": 1.0,
+        "eedc": 1.0,
+        "detector_trust": 1.0,
+        "grounding": 1.0
+      }
+    },
+    "hand-set weights (current)": {
+      "roc_auc_tune": 0.3585,
+      "roc_auc_holdout": 0.3786,
+      "roc_auc_holdout_ci95": [
+        0.2813,
+        0.4764
+      ],
+      "roc_auc_all": 0.3627,
+      "per_task_all": {
+        "Data2txt": 0.4906,
+        "QA": 0.3346,
+        "Summary": 0.4055
+      },
+      "weights": {
+        "similarity": -0.2609,
+        "retrieval_top1": -0.1739,
+        "nli": -0.2174,
+        "coverage": -0.1304,
+        "eedc": -0.087,
+        "detector_trust": -0.1304,
+        "grounding": -0.0
+      }
+    }
+  },
+  "fitted_head": {
+    "weights": {
+      "similarity": 0.819782,
+      "retrieval_top1": 0.276537,
+      "nli": 0.875047,
+      "coverage": -0.69292,
+      "eedc": -0.081417,
+      "detector_trust": 0.247843,
+      "grounding": 0.904309
+    },
+    "component_mean": {
+      "similarity": 0.626415,
+      "retrieval_top1": 0.620005,
+      "nli": 0.557751,
+      "coverage": 0.62516,
+      "eedc": 0.459638,
+      "detector_trust": 0.826912,
+      "grounding": 0.51347
+    },
+    "component_std": {
+      "similarity": 0.13407,
+      "retrieval_top1": 0.36358,
+      "nli": 0.263169,
+      "coverage": 0.26924,
+      "eedc": 0.04779,
+      "detector_trust": 0.202671,
+      "grounding": 0.269408
+    },
+    "sign": {
+      "similarity": 1.0,
+      "retrieval_top1": 1.0,
+      "nli": -1.0,
+      "coverage": -1.0,
+      "eedc": 1.0,
+      "detector_trust": -1.0,
+      "grounding": -1.0
+    }
+  }
+}

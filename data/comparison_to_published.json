@@ -1,0 +1,208 @@
+{
+  "source_metrics": "data/metrics_ragtruth_fitted.json",
+  "n_queries": 1000,
+  "ours": {
+    "detection_roc_auc": 0.628588,
+    "detection_roc_auc_ci95": [
+      0.5976366084669409,
+      0.660264743518717
+    ],
+    "per_task_roc_auc": {
+      "Data2txt": {
+        "n": 408,
+        "roc_auc": 0.5718
+      },
+      "QA": {
+        "n": 294,
+        "roc_auc": 0.7221
+      },
+      "Summary": {
+        "n": 298,
+        "roc_auc": 0.6473
+      }
+    }
+  },
+  "auroc_comparison": [
+    {
+      "system": "LLM-Check (Attention Score)",
+      "metric": "AUROC",
+      "value": 0.583,
+      "scope": "overall (weighted avg, black-box)",
+      "our_auc": 0.628588,
+      "our_ci95": [
+        0.5976366084669409,
+        0.660264743518717
+      ],
+      "our_ci_lower": 0.5976366084669409,
+      "verdict": "WIN"
+    },
+    {
+      "system": "LLM-Check (Hidden Score)",
+      "metric": "AUROC",
+      "value": 0.5724,
+      "scope": "overall (weighted avg, black-box)",
+      "our_auc": 0.628588,
+      "our_ci95": [
+        0.5976366084669409,
+        0.660264743518717
+      ],
+      "our_ci_lower": 0.5976366084669409,
+      "verdict": "WIN"
+    },
+    {
+      "system": "LLM-Check (Logit, Window Entropy)",
+      "metric": "AUROC",
+      "value": 0.5458,
+      "scope": "overall (weighted avg, black-box)",
+      "our_auc": 0.628588,
+      "our_ci95": [
+        0.5976366084669409,
+        0.660264743518717
+      ],
+      "our_ci_lower": 0.5976366084669409,
+      "verdict": "WIN"
+    },
+    {
+      "system": "LLM-Check (Logit, Perplexity)",
+      "metric": "AUROC",
+      "value": 0.5327,
+      "scope": "overall (weighted avg, black-box)",
+      "our_auc": 0.628588,
+      "our_ci95": [
+        0.5976366084669409,
+        0.660264743518717
+      ],
+      "our_ci_lower": 0.5976366084669409,
+      "verdict": "WIN"
+    },
+    {
+      "system": "LLM-Check (Logit, Log Entropy)",
+      "metric": "AUROC",
+      "value": 0.5168,
+      "scope": "overall (weighted avg, black-box)",
+      "our_auc": 0.628588,
+      "our_ci95": [
+        0.5976366084669409,
+        0.660264743518717
+      ],
+      "our_ci_lower": 0.5976366084669409,
+      "verdict": "WIN"
+    }
+  ],
+  "f1_comparison": [
+    {
+      "system": "Finetuned Llama-2-13B (RAGTruth's own)",
+      "metric": "F1",
+      "value": 0.787,
+      "scope": "overall"
+    },
+    {
+      "system": "Finetuned Llama-2-13B (RAGTruth's own)",
+      "metric": "F1",
+      "value": 0.782,
+      "scope": "writing/summarization"
+    },
+    {
+      "system": "Finetuned Llama-2-13B (RAGTruth's own)",
+      "metric": "F1",
+      "value": 0.682,
+      "scope": "question answering"
+    },
+    {
+      "system": "Finetuned Llama-2-13B (RAGTruth's own)",
+      "metric": "F1",
+      "value": 0.591,
+      "scope": "data-to-text"
+    },
+    {
+      "system": "Prompt gpt-4-turbo",
+      "metric": "F1",
+      "value": 0.634,
+      "scope": "overall"
+    },
+    {
+      "system": "Prompt gpt-4-turbo",
+      "metric": "F1",
+      "value": 0.634,
+      "scope": "writing/summarization"
+    },
+    {
+      "system": "Prompt gpt-4-turbo",
+      "metric": "F1",
+      "value": 0.476,
+      "scope": "data-to-text"
+    },
+    {
+      "system": "Prompt gpt-4-turbo",
+      "metric": "F1",
+      "value": 0.456,
+      "scope": "question answering"
+    },
+    {
+      "system": "SelfCheckGPT gpt-3.5-turbo",
+      "metric": "F1",
+      "value": 0.588,
+      "scope": "overall"
+    },
+    {
+      "system": "LMvLM gpt-4-turbo",
+      "metric": "F1",
+      "value": 0.494,
+      "scope": "overall"
+    },
+    {
+      "system": "Prompt gpt-3.5-turbo",
+      "metric": "F1",
+      "value": 0.529,
+      "scope": "overall"
+    }
+  ],
+  "not_reported": [
+    {
+      "system": "Conformal-RAG",
+      "reason": "does not report RAGTruth"
+    },
+    {
+      "system": "INSIDE",
+      "reason": "evaluates on FAVA-Annotation, not RAGTruth (LLM-Check Table 2); RAGTruth is not reported"
+    },
+    {
+      "system": "Decoding Memories",
+      "reason": "does not report RAGTruth"
+    },
+    {
+      "system": "AutoHall",
+      "reason": "does not report RAGTruth"
+    }
+  ],
+  "scope_note": "The LLM-Check anchors are the 'Overall' column of its Table 4: a weighted average across the target models (Llama-2-13b, Llama-2-70b, GPT-4, Mistral-7b). It reports no per-task breakdown, so the only like-for-like comparison is our pooled number against its pooled number. Our pooled number is over 1000 rows drawn equally from the three RAGTruth task types.",
+  "f1_family_note": "The RAGTruth paper reports response-level detection F1. This pipeline's headline detection metric is AUROC on a length-matched, instance-paired split of the RAGTruth test data. The two are not directly comparable; the F1 anchors are recorded for completeness only.",
+  "span_f1_family": {
+    "_note": "Span-level detection F1 on RAGTruth (character-level overlap with the gold spans). From the RAGTruth paper, Table 6. Our pipeline does NOT produce span-level predictions, so this family is reported as a negative result and is NOT a comparison target.",
+    "source": "RAGTruth: A Hallucination Corpus for Developing Trustworthy Retrieval-Augmented Language Models",
+    "source_url": "https://arxiv.org/abs/2401.00396",
+    "source_pdf": "ragtruth_paper.pdf",
+    "table": "Table 6",
+    "measured_on": "RAGTruth test set, 450 instances (150 per task type)",
+    "anchors": [
+      {
+        "system": "Finetuned Llama-2-13B (RAGTruth's own)",
+        "metric": "span F1",
+        "value": 0.527,
+        "scope": "overall"
+      },
+      {
+        "system": "Prompt Baseline gpt-4-turbo",
+        "metric": "span F1",
+        "value": 0.283,
+        "scope": "overall"
+      },
+      {
+        "system": "Prompt Baseline gpt-3.5-turbo",
+        "metric": "span F1",
+        "value": 0.128,
+        "scope": "overall"
+      }
+    ]
+  }
+}

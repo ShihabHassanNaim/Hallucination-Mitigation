@@ -1,0 +1,68 @@
+{
+  "_about": "Published results on the RAGTruth dataset, verified against the source PDFs on 2026-11-17. Every number here was read out of the paper's own table, not from a secondary summary. The source PDFs are checked in as ragtruth_paper.pdf (arXiv 2401.00396) and llmcheck_paper.pdf (LLM-Check, NeurIPS 2024).",
+
+  "_rules": [
+    "A 'comparable' must report the SAME metric on the SAME dataset. AUROC and F1 are not interchangeable, so the two families of anchors below are kept separate and are never mixed in one comparison.",
+    "A win requires our 95% CI LOWER BOUND to sit strictly above the published value. A point estimate that beats it but whose interval overlaps does not count as a win.",
+    "An anchor is rejected if the source says 'not reported', 'implied', 'projected', or 'no rewriting'."
+  ],
+
+  "auroc_family": {
+    "_note": "Detection AUROC on RAGTruth. From LLM-Check (NeurIPS 2024), Table 4: 'Detection on the RAGTruth Dataset using Llama-2-7b model in white-box and black-box setting'. The 'Overall' column is the weighted average across the black-box models (Llama-2-13b, Llama-2-70b, GPT-4, Mistral-7b).",
+    "source": "LLM-Check: Investigating Detection of Hallucinations in Large Language Models",
+    "source_url": "https://openreview.net/forum?id=LYx4w3CAgy",
+    "source_pdf": "llmcheck_paper.pdf",
+    "table": "Table 4",
+    "measured_on": "RAGTruth, external references available",
+    "anchors": [
+      {"system": "LLM-Check (Attention Score)", "metric": "AUROC", "value": 0.5830, "scope": "overall (weighted avg, black-box)"},
+      {"system": "LLM-Check (Hidden Score)", "metric": "AUROC", "value": 0.5724, "scope": "overall (weighted avg, black-box)"},
+      {"system": "LLM-Check (Logit, Window Entropy)", "metric": "AUROC", "value": 0.5458, "scope": "overall (weighted avg, black-box)"},
+      {"system": "LLM-Check (Logit, Perplexity)", "metric": "AUROC", "value": 0.5327, "scope": "overall (weighted avg, black-box)"},
+      {"system": "LLM-Check (Logit, Log Entropy)", "metric": "AUROC", "value": 0.5168, "scope": "overall (weighted avg, black-box)"}
+    ]
+  },
+
+  "f1_family": {
+    "_note": "Response-level detection F1 on RAGTruth. From the RAGTruth paper (arXiv 2401.00396), Table 5: 'The response-level hallucination detection performance for each baseline method across different tasks and different models'. These are NOT comparable to an AUROC.",
+    "source": "RAGTruth: A Hallucination Corpus for Developing Trustworthy Retrieval-Augmented Language Models",
+    "source_url": "https://arxiv.org/abs/2401.00396",
+    "source_pdf": "ragtruth_paper.pdf",
+    "table": "Table 5",
+    "measured_on": "RAGTruth test set, 450 instances (150 per task type)",
+    "anchors": [
+      {"system": "Finetuned Llama-2-13B (RAGTruth's own)", "metric": "F1", "value": 0.787, "scope": "overall"},
+      {"system": "Finetuned Llama-2-13B (RAGTruth's own)", "metric": "F1", "value": 0.782, "scope": "writing/summarization"},
+      {"system": "Finetuned Llama-2-13B (RAGTruth's own)", "metric": "F1", "value": 0.682, "scope": "question answering"},
+      {"system": "Finetuned Llama-2-13B (RAGTruth's own)", "metric": "F1", "value": 0.591, "scope": "data-to-text"},
+      {"system": "Prompt gpt-4-turbo", "metric": "F1", "value": 0.634, "scope": "overall"},
+      {"system": "Prompt gpt-4-turbo", "metric": "F1", "value": 0.634, "scope": "writing/summarization"},
+      {"system": "Prompt gpt-4-turbo", "metric": "F1", "value": 0.476, "scope": "data-to-text"},
+      {"system": "Prompt gpt-4-turbo", "metric": "F1", "value": 0.456, "scope": "question answering"},
+      {"system": "SelfCheckGPT gpt-3.5-turbo", "metric": "F1", "value": 0.588, "scope": "overall"},
+      {"system": "LMvLM gpt-4-turbo", "metric": "F1", "value": 0.494, "scope": "overall"},
+      {"system": "Prompt gpt-3.5-turbo", "metric": "F1", "value": 0.529, "scope": "overall"}
+    ]
+  },
+
+  "span_f1_family": {
+    "_note": "Span-level detection F1 on RAGTruth (character-level overlap with the gold spans). From the RAGTruth paper, Table 6. Our pipeline does NOT produce span-level predictions, so this family is reported as a negative result and is NOT a comparison target.",
+    "source": "RAGTruth: A Hallucination Corpus for Developing Trustworthy Retrieval-Augmented Language Models",
+    "source_url": "https://arxiv.org/abs/2401.00396",
+    "source_pdf": "ragtruth_paper.pdf",
+    "table": "Table 6",
+    "measured_on": "RAGTruth test set, 450 instances (150 per task type)",
+    "anchors": [
+      {"system": "Finetuned Llama-2-13B (RAGTruth's own)", "metric": "span F1", "value": 0.527, "scope": "overall"},
+      {"system": "Prompt Baseline gpt-4-turbo", "metric": "span F1", "value": 0.283, "scope": "overall"},
+      {"system": "Prompt Baseline gpt-3.5-turbo", "metric": "span F1", "value": 0.128, "scope": "overall"}
+    ]
+  },
+
+  "not_reported_on_ragtruth": [
+    {"system": "Conformal-RAG", "reason": "does not report RAGTruth"},
+    {"system": "INSIDE", "reason": "evaluates on FAVA-Annotation, not RAGTruth (LLM-Check Table 2); RAGTruth is not reported"},
+    {"system": "Decoding Memories", "reason": "does not report RAGTruth"},
+    {"system": "AutoHall", "reason": "does not report RAGTruth"}
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "n_rows": 99,
+  "detection_roc_auc": 0.7118,
+  "detection_roc_auc_ci95": [
+    0.608,
+    0.8179
+  ],
+  "per_task": {
+    "Data2txt": {
+      "n": 33,
+      "roc_auc": 0.7033,
+      "ci95": [
+        0.4346,
+        0.9136
+      ]
+    },
+    "QA": {
+      "n": 33,
+      "roc_auc": 0.7868,
+      "ci95": [
+        0.6071,
+        0.9296
+      ]
+    },
+    "Summary": {
+      "n": 33,
+      "roc_auc": 0.6815,
+      "ci95": [
+        0.4762,
+        0.8647
+      ]
+    }
+  },
+  "dataset": "ragtruth_matched"
+}

@@ -1,0 +1,73 @@
+{
+  "n_rows": 300,
+  "per_task": {
+    "Data2txt": {
+      "n": 100,
+      "auc_higher_means_faithful": 0.2853,
+      "auc_ci95": [
+        0.1653,
+        0.4316
+      ],
+      "mean_faithful": 0.4309,
+      "mean_hallucinated": 0.3684
+    },
+    "Data2txt::novel": {
+      "n": 100,
+      "auc_higher_means_faithful": 0.7147,
+      "auc_ci95": [
+        0.5684,
+        0.8347
+      ],
+      "mean_faithful": 0.5691,
+      "mean_hallucinated": 0.6316
+    },
+    "QA": {
+      "n": 100,
+      "auc_higher_means_faithful": 0.2243,
+      "auc_ci95": [
+        0.1397,
+        0.3222
+      ],
+      "mean_faithful": 0.7471,
+      "mean_hallucinated": 0.6081
+    },
+    "QA::novel": {
+      "n": 100,
+      "auc_higher_means_faithful": 0.7757,
+      "auc_ci95": [
+        0.6778,
+        0.8603
+      ],
+      "mean_faithful": 0.2529,
+      "mean_hallucinated": 0.3919
+    },
+    "Summary": {
+      "n": 100,
+      "auc_higher_means_faithful": 0.1918,
+      "auc_ci95": [
+        0.1127,
+        0.2772
+      ],
+      "mean_faithful": 0.8236,
+      "mean_hallucinated": 0.6971
+    },
+    "Summary::novel": {
+      "n": 100,
+      "auc_higher_means_faithful": 0.8082,
+      "auc_ci95": [
+        0.7228,
+        0.8873
+      ],
+      "mean_faithful": 0.1764,
+      "mean_hallucinated": 0.3029
+    }
+  },
+  "overall_coverage": {
+    "n": 300,
+    "auc_higher_means_faithful": 0.4389,
+    "auc_ci95": [
+      0.3729,
+      0.5059
+    ]
+  }
+}

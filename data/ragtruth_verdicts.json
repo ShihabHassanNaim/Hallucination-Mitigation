@@ -1,0 +1,32 @@
+{
+  "n_rows": 100,
+  "per_label": {
+    "0": {
+      "n_claims": 501,
+      "verdict_mix": {
+        "contradicted": 0.2375,
+        "supported": 0.475,
+        "unknown": 0.2874
+      },
+      "contradiction_rate": 0.2375,
+      "mean_confidence": 0.4808
+    },
+    "1": {
+      "n_claims": 403,
+      "verdict_mix": {
+        "contradicted": 0.2705,
+        "supported": 0.4194,
+        "unknown": 0.3102
+      },
+      "contradiction_rate": 0.2705,
+      "mean_confidence": 0.4671
+    }
+  },
+  "per_task_verdict_mix": {
+    "Data2txt": {
+      "contradicted": 0.2522,
+      "supported": 0.4502,
+      "unknown": 0.2976
+    }
+  }
+}

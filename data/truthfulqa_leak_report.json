@@ -1,0 +1,16 @@
+{
+  "n_rows": 1000,
+  "n_corpus_docs": 778,
+  "n_distinct_answers": 960,
+  "rows_whose_own_answer_is_in_their_own_knowledge_doc": 500,
+  "by_label": {
+    "0": 500
+  },
+  "rows_whose_answer_is_an_entire_corpus_doc": 34,
+  "corpus_docs_containing_another_questions_answer": 89,
+  "doc_answer_count": {
+    "min": 0,
+    "median": 1,
+    "max": 3
+  }
+}

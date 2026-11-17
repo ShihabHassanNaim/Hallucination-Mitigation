@@ -1,0 +1,120 @@
+{
+  "n_queries": 8,
+  "per_query": [
+    {
+      "query": "Instruction:\nWrite an objective overview about the following local business based only on the provided structured data in the JSON format. You should include details and cover the information mentioned in the customers' review. The overview should be 100 - 200 words. Don't make up information. ",
+      "decision": "ABSTAIN",
+      "confidence": 0.2698,
+      "retrieval_recall_at_5": 0.0,
+      "retrieval_precision_at_5": 0.0,
+      "retrieval_mrr": 0.0,
+      "retrieval_ndcg": 0.0,
+      "claim_precision": 0.125,
+      "verification_success_rate": 0.0,
+      "end_to_end_accuracy": 0.0
+    },
+    {
+      "query": "Instruction:\nWrite an objective overview about the following local business based only on the provided structured data in the JSON format. You should include details and cover the information mentioned in the customers' review. The overview should be 100 - 200 words. Don't make up information. ",
+      "decision": "ABSTAIN",
+      "confidence": 0.2996,
+      "retrieval_recall_at_5": 0.0,
+      "retrieval_precision_at_5": 0.0,
+      "retrieval_mrr": 0.0,
+      "retrieval_ndcg": 0.0,
+      "claim_precision": 0.1875,
+      "verification_success_rate": 0.0,
+      "end_to_end_accuracy": 0.0
+    },
+    {
+      "query": "Instruction:\nWrite an objective overview about the following local business based only on the provided structured data in the JSON format. You should include details and cover the information mentioned in the customers' review. The overview should be 100 - 200 words. Don't make up information. ",
+      "decision": "ABSTAIN",
+      "confidence": 0.2388,
+      "retrieval_recall_at_5": 0.0,
+      "retrieval_precision_at_5": 0.0,
+      "retrieval_mrr": 0.0,
+      "retrieval_ndcg": 0.0,
+      "claim_precision": 0.0,
+      "verification_success_rate": 0.0,
+      "end_to_end_accuracy": 0.0
+    },
+    {
+      "query": "Instruction:\nWrite an objective overview about the following local business based only on the provided structured data in the JSON format. You should include details and cover the information mentioned in the customers' review. The overview should be 100 - 200 words. Don't make up information. ",
+      "decision": "ABSTAIN",
+      "confidence": 0.2695,
+      "retrieval_recall_at_5": 0.0,
+      "retrieval_precision_at_5": 0.0,
+      "retrieval_mrr": 0.0,
+      "retrieval_ndcg": 0.0,
+      "claim_precision": 0.0,
+      "verification_success_rate": 1.0,
+      "end_to_end_accuracy": 0.0
+    },
+    {
+      "query": "Instruction:\nWrite an objective overview about the following local business based only on the provided structured data in the JSON format. You should include details and cover the information mentioned in the customers' review. The overview should be 100 - 200 words. Don't make up information. ",
+      "decision": "ABSTAIN",
+      "confidence": 0.2586,
+      "retrieval_recall_at_5": 0.0,
+      "retrieval_precision_at_5": 0.0,
+      "retrieval_mrr": 0.0,
+      "retrieval_ndcg": 0.0,
+      "claim_precision": 0.0,
+      "verification_success_rate": 0.0,
+      "end_to_end_accuracy": 0.0
+    },
+    {
+      "query": "Instruction:\nWrite an objective overview about the following local business based only on the provided structured data in the JSON format. You should include details and cover the information mentioned in the customers' review. The overview should be 100 - 200 words. Don't make up information. ",
+      "decision": "ABSTAIN",
+      "confidence": 0.2413,
+      "retrieval_recall_at_5": 0.0,
+      "retrieval_precision_at_5": 0.0,
+      "retrieval_mrr": 0.0,
+      "retrieval_ndcg": 0.0,
+      "claim_precision": 0.0,
+      "verification_success_rate": 0.0,
+      "end_to_end_accuracy": 0.0
+    },
+    {
+      "query": "Instruction:\nWrite an objective overview about the following local business based only on the provided structured data in the JSON format. You should include details and cover the information mentioned in the customers' review. The overview should be 100 - 200 words. Don't make up information. ",
+      "decision": "ABSTAIN",
+      "confidence": 0.2997,
+      "retrieval_recall_at_5": 0.0,
+      "retrieval_precision_at_5": 0.0,
+      "retrieval_mrr": 0.0,
+      "retrieval_ndcg": 0.0,
+      "claim_precision": 0.15384615384615385,
+      "verification_success_rate": 0.0,
+      "end_to_end_accuracy": 0.0
+    },
+    {
+      "query": "Instruction:\nWrite an objective overview about the following local business based only on the provided structured data in the JSON format. You should include details and cover the information mentioned in the customers' review. The overview should be 100 - 200 words. Don't make up information. ",
+      "decision": "ABSTAIN",
+      "confidence": 0.2896,
+      "retrieval_recall_at_5": 0.0,
+      "retrieval_precision_at_5": 0.0,
+      "retrieval_mrr": 0.0,
+      "retrieval_ndcg": 0.0,
+      "claim_precision": 0.1111111111111111,
+      "verification_success_rate": 0.0,
+      "end_to_end_accuracy": 0.0
+    }
+  ],
+  "aggregate": {
+    "mean_claim_precision": 0.07218215811965811,
+    "stdev_claim_precision": 0.07509448752996913,
+    "mean_retrieval_recall_at_5": 0.0,
+    "stdev_retrieval_recall_at_5": 0.0,
+    "mean_retrieval_precision_at_5": 0.0,
+    "stdev_retrieval_precision_at_5": 0.0,
+    "mean_retrieval_mrr": 0.0,
+    "stdev_retrieval_mrr": 0.0,
+    "mean_retrieval_ndcg": 0.0,
+    "stdev_retrieval_ndcg": 0.0,
+    "mean_verification_success_rate": 0.125,
+    "stdev_verification_success_rate": 0.33071891388307384,
+    "mean_end_to_end_accuracy": 0.0,
+    "stdev_end_to_end_accuracy": 0.0,
+    "mean_confidence": 0.2708625,
+    "stdev_confidence": 0.02253840819024272
+  },
+  "dataset": "ragtruth_eval_1000_matched"
+}

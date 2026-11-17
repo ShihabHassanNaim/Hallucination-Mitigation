@@ -1,0 +1,464 @@
+{
+  "n_rows": 99,
+  "n_tune": 49,
+  "n_holdout": 50,
+  "components": [
+    "similarity",
+    "retrieval_top1",
+    "nli",
+    "coverage",
+    "eedc",
+    "detector_trust",
+    "grounding"
+  ],
+  "component_auc": {
+    "similarity": {
+      "auc_all": 0.6174,
+      "per_task": {
+        "Data2txt": 0.7363,
+        "QA": 0.5037,
+        "Summary": 0.5
+      }
+    },
+    "retrieval_top1": {
+      "auc_all": 0.609,
+      "per_task": {
+        "Data2txt": 0.3874,
+        "QA": 0.5037,
+        "Summary": 0.5056
+      }
+    },
+    "nli": {
+      "auc_all": 0.4478,
+      "per_task": {
+        "Data2txt": 0.4945,
+        "QA": 0.2463,
+        "Summary": 0.5111
+      }
+    },
+    "coverage": {
+      "auc_all": 0.4678,
+      "per_task": {
+        "Data2txt": 0.4808,
+        "QA": 0.2353,
+        "Summary": 0.5241
+      }
+    },
+    "eedc": {
+      "auc_all": 0.6044,
+      "per_task": {
+        "Data2txt": 0.6264,
+        "QA": 0.5441,
+        "Summary": 0.4741
+      }
+    },
+    "detector_trust": {
+      "auc_all": 0.4127,
+      "per_task": {
+        "Data2txt": 0.3571,
+        "QA": 0.5496,
+        "Summary": 0.5315
+      }
+    },
+    "grounding": {
+      "auc_all": 0.4589,
+      "per_task": {
+        "Data2txt": 0.2995,
+        "QA": 0.2316,
+        "Summary": 0.1259
+      }
+    }
+  },
+  "candidates": {
+    "configured (no grounding)": {
+      "weights": {
+        "similarity": 0.3,
+        "retrieval_top1": 0.2,
+        "nli": 0.25,
+        "coverage": 0.15,
+        "eedc": 0.1,
+        "detector_trust": 0.0,
+        "grounding": 0.0
+      },
+      "roc_auc_tune": 0.4567,
+      "roc_auc_holdout": 0.6684,
+      "roc_auc_holdout_ci95": [
+        0.5064,
+        0.8143
+      ],
+      "roc_auc_all": 0.5627,
+      "per_task": {
+        "Data2txt": {
+          "n": 33,
+          "roc_auc_holdout": 0.5588,
+          "roc_auc_all": 0.5165
+        },
+        "QA": {
+          "n": 33,
+          "roc_auc_holdout": 0.3857,
+          "roc_auc_all": 0.2353
+        },
+        "Summary": {
+          "n": 33,
+          "roc_auc_holdout": 0.4792,
+          "roc_auc_all": 0.4926
+        }
+      },
+      "per_task_tune": {
+        "Data2txt": 0.5556,
+        "QA": 0.1111,
+        "Summary": 0.5119
+      },
+      "roc_auc_tune_mean_task": 0.3929
+    },
+    "grounding=0.15": {
+      "weights": {
+        "similarity": 0.2609,
+        "retrieval_top1": 0.1739,
+        "nli": 0.2174,
+        "coverage": 0.1304,
+        "eedc": 0.087,
+        "detector_trust": 0.0,
+        "grounding": 0.1304
+      },
+      "roc_auc_tune": 0.44,
+      "roc_auc_holdout": 0.6389,
+      "roc_auc_holdout_ci95": [
+        0.4792,
+        0.7886
+      ],
+      "roc_auc_all": 0.5355,
+      "per_task": {
+        "Data2txt": {
+          "n": 33,
+          "roc_auc_holdout": 0.5294,
+          "roc_auc_all": 0.4451
+        },
+        "QA": {
+          "n": 33,
+          "roc_auc_holdout": 0.2571,
+          "roc_auc_all": 0.1949
+        },
+        "Summary": {
+          "n": 33,
+          "roc_auc_holdout": 0.3958,
+          "roc_auc_all": 0.4222
+        }
+      },
+      "per_task_tune": {
+        "Data2txt": 0.5333,
+        "QA": 0.1429,
+        "Summary": 0.4405
+      },
+      "roc_auc_tune_mean_task": 0.3722
+    },
+    "grounding=0.25": {
+      "weights": {
+        "similarity": 0.24,
+        "retrieval_top1": 0.16,
+        "nli": 0.2,
+        "coverage": 0.12,
+        "eedc": 0.08,
+        "detector_trust": 0.0,
+        "grounding": 0.2
+      },
+      "roc_auc_tune": 0.4233,
+      "roc_auc_holdout": 0.6337,
+      "roc_auc_holdout_ci95": [
+        0.4724,
+        0.7827
+      ],
+      "roc_auc_all": 0.5242,
+      "per_task": {
+        "Data2txt": {
+          "n": 33,
+          "roc_auc_holdout": 0.5294,
+          "roc_auc_all": 0.3956
+        },
+        "QA": {
+          "n": 33,
+          "roc_auc_holdout": 0.2286,
+          "roc_auc_all": 0.1765
+        },
+        "Summary": {
+          "n": 33,
+          "roc_auc_holdout": 0.3542,
+          "roc_auc_all": 0.3852
+        }
+      },
+      "per_task_tune": {
+        "Data2txt": 0.4889,
+        "QA": 0.1429,
+        "Summary": 0.369
+      },
+      "roc_auc_tune_mean_task": 0.3336
+    },
+    "grounding=0.35": {
+      "weights": {
+        "similarity": 0.2222,
+        "retrieval_top1": 0.1481,
+        "nli": 0.1852,
+        "coverage": 0.1111,
+        "eedc": 0.0741,
+        "detector_trust": 0.0,
+        "grounding": 0.2593
+      },
+      "roc_auc_tune": 0.41,
+      "roc_auc_holdout": 0.6181,
+      "roc_auc_holdout_ci95": [
+        0.4571,
+        0.7725
+      ],
+      "roc_auc_all": 0.5084,
+      "per_task": {
+        "Data2txt": {
+          "n": 33,
+          "roc_auc_holdout": 0.5294,
+          "roc_auc_all": 0.3571
+        },
+        "QA": {
+          "n": 33,
+          "roc_auc_holdout": 0.1857,
+          "roc_auc_all": 0.1618
+        },
+        "Summary": {
+          "n": 33,
+          "roc_auc_holdout": 0.3333,
+          "roc_auc_all": 0.3444
+        }
+      },
+      "per_task_tune": {
+        "Data2txt": 0.3778,
+        "QA": 0.1587,
+        "Summary": 0.3095
+      },
+      "roc_auc_tune_mean_task": 0.282
+    },
+    "grounding=0.50": {
+      "weights": {
+        "similarity": 0.2,
+        "retrieval_top1": 0.1333,
+        "nli": 0.1667,
+        "coverage": 0.1,
+        "eedc": 0.0667,
+        "detector_trust": 0.0,
+        "grounding": 0.3333
+      },
+      "roc_auc_tune": 0.39,
+      "roc_auc_holdout": 0.5903,
+      "roc_auc_holdout_ci95": [
+        0.4278,
+        0.7472
+      ],
+      "roc_auc_all": 0.4887,
+      "per_task": {
+        "Data2txt": {
+          "n": 33,
+          "roc_auc_holdout": 0.5294,
+          "roc_auc_all": 0.3352
+        },
+        "QA": {
+          "n": 33,
+          "roc_auc_holdout": 0.1714,
+          "roc_auc_all": 0.1544
+        },
+        "Summary": {
+          "n": 33,
+          "roc_auc_holdout": 0.2917,
+          "roc_auc_all": 0.2704
+        }
+      },
+      "per_task_tune": {
+        "Data2txt": 0.3111,
+        "QA": 0.1587,
+        "Summary": 0.2262
+      },
+      "roc_auc_tune_mean_task": 0.232
+    },
+    "grounding=0.75": {
+      "weights": {
+        "similarity": 0.1714,
+        "retrieval_top1": 0.1143,
+        "nli": 0.1429,
+        "coverage": 0.0857,
+        "eedc": 0.0571,
+        "detector_trust": 0.0,
+        "grounding": 0.4286
+      },
+      "roc_auc_tune": 0.3917,
+      "roc_auc_holdout": 0.5694,
+      "roc_auc_holdout_ci95": [
+        0.4057,
+        0.7243
+      ],
+      "roc_auc_all": 0.4783,
+      "per_task": {
+        "Data2txt": {
+          "n": 33,
+          "roc_auc_holdout": 0.5,
+          "roc_auc_all": 0.3187
+        },
+        "QA": {
+          "n": 33,
+          "roc_auc_holdout": 0.1143,
+          "roc_auc_all": 0.1507
+        },
+        "Summary": {
+          "n": 33,
+          "roc_auc_holdout": 0.2708,
+          "roc_auc_all": 0.2296
+        }
+      },
+      "per_task_tune": {
+        "Data2txt": 0.2667,
+        "QA": 0.2063,
+        "Summary": 0.1786
+      },
+      "roc_auc_tune_mean_task": 0.2172
+    },
+    "grounding=1.00": {
+      "weights": {
+        "similarity": 0.15,
+        "retrieval_top1": 0.1,
+        "nli": 0.125,
+        "coverage": 0.075,
+        "eedc": 0.05,
+        "detector_trust": 0.0,
+        "grounding": 0.5
+      },
+      "roc_auc_tune": 0.375,
+      "roc_auc_holdout": 0.5556,
+      "roc_auc_holdout_ci95": [
+        0.3905,
+        0.7104
+      ],
+      "roc_auc_all": 0.4645,
+      "per_task": {
+        "Data2txt": {
+          "n": 33,
+          "roc_auc_holdout": 0.4706,
+          "roc_auc_all": 0.3077
+        },
+        "QA": {
+          "n": 33,
+          "roc_auc_holdout": 0.1286,
+          "roc_auc_all": 0.1471
+        },
+        "Summary": {
+          "n": 33,
+          "roc_auc_holdout": 0.2708,
+          "roc_auc_all": 0.1963
+        }
+      },
+      "per_task_tune": {
+        "Data2txt": 0.2667,
+        "QA": 0.1905,
+        "Summary": 0.1429
+      },
+      "roc_auc_tune_mean_task": 0.2
+    },
+    "grounding only": {
+      "weights": {
+        "similarity": 0.0,
+        "retrieval_top1": 0.0,
+        "nli": 0.0,
+        "coverage": 0.0,
+        "eedc": 0.0,
+        "detector_trust": 0.0,
+        "grounding": 1.0
+      },
+      "roc_auc_tune": 0.3933,
+      "roc_auc_holdout": 0.52,
+      "roc_auc_holdout_ci95": [
+        0.3605,
+        0.6696
+      ],
+      "roc_auc_all": 0.4589,
+      "per_task": {
+        "Data2txt": {
+          "n": 33,
+          "roc_auc_holdout": 0.3971,
+          "roc_auc_all": 0.2995
+        },
+        "QA": {
+          "n": 33,
+          "roc_auc_holdout": 0.1857,
+          "roc_auc_all": 0.2316
+        },
+        "Summary": {
+          "n": 33,
+          "roc_auc_holdout": 0.25,
+          "roc_auc_all": 0.1259
+        }
+      },
+      "per_task_tune": {
+        "Data2txt": 0.2667,
+        "QA": 0.3016,
+        "Summary": 0.0357
+      },
+      "roc_auc_tune_mean_task": 0.2013
+    }
+  },
+  "grounding_variants": {
+    "top-1 (in pipeline)": {
+      "auc_all": 0.5411,
+      "per_task": {
+        "Data2txt": 0.7005,
+        "QA": 0.7684,
+        "Summary": 0.8741
+      }
+    },
+    "all retrieved": {
+      "auc_all": 0.5265,
+      "per_task": {
+        "Data2txt": 0.7033,
+        "QA": 0.7059,
+        "Summary": 0.8259
+      }
+    },
+    "gold source": {
+      "auc_all": 0.5411,
+      "per_task": {
+        "Data2txt": 0.7885,
+        "QA": 0.7426,
+        "Summary": 0.8741
+      }
+    }
+  },
+  "selected": {
+    "name": "configured (no grounding)",
+    "weights": {
+      "similarity": 0.3,
+      "retrieval_top1": 0.2,
+      "nli": 0.25,
+      "coverage": 0.15,
+      "eedc": 0.1,
+      "detector_trust": 0.0,
+      "grounding": 0.0
+    },
+    "roc_auc_tune_mean_task": 0.3929,
+    "roc_auc_tune": 0.4567,
+    "roc_auc_holdout": 0.6684,
+    "roc_auc_holdout_ci95": [
+      0.5064,
+      0.8143
+    ],
+    "per_task": {
+      "Data2txt": {
+        "n": 33,
+        "roc_auc_holdout": 0.5588,
+        "roc_auc_all": 0.5165
+      },
+      "QA": {
+        "n": 33,
+        "roc_auc_holdout": 0.3857,
+        "roc_auc_all": 0.2353
+      },
+      "Summary": {
+        "n": 33,
+        "roc_auc_holdout": 0.4792,
+        "roc_auc_all": 0.4926
+      }
+    }
+  }
+}

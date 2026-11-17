@@ -1,0 +1,27 @@
+{
+  "n_rows": 300,
+  "components": {
+    "hallucination_probability": {
+      "auc_all": 0.5389,
+      "auc_all_ci95": [
+        0.4741,
+        0.5991
+      ],
+      "per_task_auc_all": {
+        "Data2txt": 0.5389
+      },
+      "direction": "risk"
+    },
+    "detector_trust": {
+      "auc_all": 0.4611,
+      "auc_all_ci95": [
+        0.4009,
+        0.5259
+      ],
+      "per_task_auc_all": {
+        "Data2txt": 0.4611
+      },
+      "direction": "trust"
+    }
+  }
+}

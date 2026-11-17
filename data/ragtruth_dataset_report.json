@@ -1,0 +1,57 @@
+{
+  "rows_total": 2675,
+  "task_types": {
+    "QA": {
+      "rows": 875,
+      "hallucinated": 160,
+      "base_rate_hallucinated": 0.1829,
+      "length_only_auc": 0.7025,
+      "mean_words_hallucinated": 149.3,
+      "mean_words_faithful": 106.2
+    },
+    "Data2txt": {
+      "rows": 900,
+      "hallucinated": 579,
+      "base_rate_hallucinated": 0.6433,
+      "length_only_auc": 0.4818,
+      "mean_words_hallucinated": 156.4,
+      "mean_words_faithful": 160.5
+    },
+    "Summary": {
+      "rows": 900,
+      "hallucinated": 204,
+      "base_rate_hallucinated": 0.2267,
+      "length_only_auc": 0.5147,
+      "mean_words_hallucinated": 110.6,
+      "mean_words_faithful": 110.0
+    }
+  },
+  "length_only_auc": {
+    "ALL": 0.6595,
+    "base_rate": 0.3525
+  },
+  "evaluation_file": "data\\ragtruth_eval_1000.jsonl",
+  "evaluation_rows": 1000,
+  "evaluation_length_only_auc": 0.5479,
+  "matched_file": "data\\ragtruth_eval_1000_matched.jsonl",
+  "matched_rows": 1000,
+  "matched_pairs": 500,
+  "matched_length_only_auc": 0.5239,
+  "corpus_file": "data\\ragtruth_corpus.jsonl",
+  "corpus_docs": 298,
+  "instances_eligible": 368,
+  "selected_label_balance": {
+    "QA": {
+      "rows": 294,
+      "hallucinated": 147
+    },
+    "Data2txt": {
+      "rows": 408,
+      "hallucinated": 204
+    },
+    "Summary": {
+      "rows": 298,
+      "hallucinated": 149
+    }
+  }
+}
