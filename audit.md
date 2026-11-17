@@ -887,4 +887,48 @@ does not match the current detector starts from scratch and says so.
 
 ---
 
+## 18. Paper Consolidation Record (2026-11-17)
+
+The five markdown artefacts that §12 and §16 describe as separate files
+(`wins_summary.md`, `why_we_win.md`, `five_position_comparison.md`,
+`comparison.md`, `comparison_detailed.md`) are now **one file**:
+`Paper/comparison.md`.
+
+**Why.** Five documents restating the same measurements in different shapes
+is five places for a number to go stale, and the audit had already found
+cases where they disagreed. One document, one generator, one set of numbers.
+
+**What changed.**
+
+- `Paper/comparison.md` is the single human-facing comparison. It carries
+  the three-dataset table, the per-dataset comparisons (HaluEval,
+  TruthfulQA, RAGTruth), the mitigation section, the speed/cost section,
+  the 21-dimension win matrix, the visual headline block the demo page
+  charts, and the five defensible positions.
+- `Paper/why_we_win_summary.tex` and `Paper/comparison_summary.tex` remain
+  — they are the LaTeX surfaces of the same content.
+- `src/evaluation/literature.py` and `scripts/plot_wins.py` now read the
+  consolidated document. The verdict matrix, the tally, the visual headline
+  block and the five positions are all parsed from it.
+- The generator (`scripts/fill_comparison_table.py`) owns every number in
+  the consolidated document, including the win-matrix verdict cells and the
+  verdict tally, which are now derived from the matrix rows rather than
+  written by hand.
+
+**Note on the numbers quoted in §12 and §16.** They describe the state of
+the paper at the date of this audit. The consolidated document's current
+tally is **8 wins / 5 ties / 8 losses** across 21 dimensions, and the
+RAGTruth head-to-head against LLM-Check is **3 wins / 2 ties**. The
+earlier "5 wins / 1 tie / 0 losses" figure counted a narrower matrix
+against comparables whose numbers have since been re-measured.
+
+The tally moved from 8/4/9 to 8/5/8 when the win rule was corrected to
+apply the confidence interval in both directions. Sentence accuracy used
+to be reported as a loss because the point estimate fell under the
+published value; its interval [0.809, 0.851] straddles Halu-NLP's 0.847,
+so it is a tie. Every surface -- the markdown table, the LaTeX matrix,
+the chart and the frontend's parsers -- now applies that one rule.
+
+---
+
 *End of audit.*

@@ -451,7 +451,7 @@ flowchart LR
 
     subgraph LIT[Literature Material]
         L1[Paper/comparison_table.csv<br/>11 systems + Ours]
-        L2[Paper/why_we_win.md<br/>verdict matrix + tally]
+        L2[Paper/comparison.md<br/>verdict matrix + tally]
     end
 
     D1 & D2 & D3 --> E1
@@ -576,10 +576,10 @@ flowchart TB
     %% ============ EVAL + LIT ============
     subgraph EVAL_LAYER[Evaluation — src/evaluation/]
         RPT[report.py<br/>load_report + multi-dataset]
-        LIT[literature.py<br/>Paper/comparison_table.csv + why_we_win.md]
+        LIT[literature.py<br/>Paper/comparison_table.csv + comparison.md]
     end
     METRICS --> RPT
-    Paper[Paper/<br/>13 PDFs + comparison_table.csv<br/>+ why_we_win.md] --> LIT
+    Paper[Paper/<br/>13 PDFs + comparison_table.csv<br/>+ comparison.md] --> LIT
     RPT --> FLASK
     LIT --> FLASK
 

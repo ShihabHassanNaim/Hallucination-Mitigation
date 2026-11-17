@@ -1,0 +1,39 @@
+{
+  "_what_this_is": "Measurements from the step-10 rewrite investigation. These are NOT the headline mitigation result -- that one is in data/mitigation_results.json, which is the committed 500-row run of the all-or-nothing code. This file holds the smaller A/B experiments that were run to find out WHY the rewrite does not work, so that section 5.3 of Paper/comparison.md can state the cause from a measurement rather than from an assertion.",
+  "_why_it_is_separate": "The numbers here come from 100-row and short-run probes, not from the 500-row length-matched split. They are therefore not comparable with the published delta and are reported only as diagnostic evidence.",
+  "_measured_on": "data/halueval_eval_1000_matched.jsonl",
+
+  "evidence_mode_guards": {
+    "_what": "The per-answer guard. It exists to stop a retrieved passage being substituted for a short correct answer. Measured on the answer it protects: the similarity score of that answer before and after the substitution.",
+    "_why_it_matters": "Without this guard the rewrite can drive the score from 1.000 to 0.811, i.e. the 'fix' makes the answer much worse. The guard is what prevents that.",
+    "score_before_guard": 1.0,
+    "score_after_guard": 0.811,
+    "mode_that_caused_it": "evidence",
+    "mode_that_fixes_it": "claim_edit"
+  },
+
+  "per_claim_guards": {
+    "_what": "A/B on the step-10 guards, old all-or-nothing behaviour vs new per-claim behaviour, on the same 100 rows.",
+    "_result": "The rewrite fires on more rows, but the extra rewrites do not improve the delta. The point estimate moves from slightly positive to slightly negative and the interval still covers zero. This is a design fix, not a performance win.",
+    "n_rows": 100,
+    "old": {
+      "regenerated_rows": 8,
+      "unique_queries": 4,
+      "edited_decisions": 10,
+      "abstain_aborted": 24,
+      "delta_on_regenerated_rows": 0.0038,
+      "delta_on_all_rows": 0.0003,
+      "rouge_l_on_regenerated_rows": 0.0121
+    },
+    "new": {
+      "regenerated_rows": 10,
+      "unique_queries": 5,
+      "edited_decisions": 12,
+      "abstain_aborted": 22,
+      "delta_on_regenerated_rows": -0.0022,
+      "delta_on_regenerated_rows_ci95": [-0.0184, 0.0139],
+      "delta_on_all_rows": -0.00022,
+      "rouge_l_on_regenerated_rows": -0.0037
+    }
+  }
+}

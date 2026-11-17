@@ -285,9 +285,8 @@ The plotting script refuses to read any cell marked "projected", so an
 estimate can never be drawn on a chart as though it were a measurement.
 
 The same generator rewrites the prose tables that repeat those numbers —
-`Paper/comparison.md`, `Paper/comparison_summary.tex`,
-`Paper/why_we_win.md`, `Paper/why_we_win_summary.tex` and
-`Paper/five_position_comparison.md`. Each row is matched by its *stable
+`Paper/comparison.md`, `Paper/comparison_summary.tex` and
+`Paper/why_we_win_summary.tex`. Each row is matched by its *stable
 text* rather than by the number it currently holds, so the fill is
 idempotent: re-running after a new evaluation refreshes every row, and a
 second run with the same metrics changes nothing. A row whose metric has
@@ -647,7 +646,7 @@ Two pages:
 - **`/`** — docs + query + result panel (decision, confidence, per-claim verdicts, evidence, 13 step traces, dataset-aware Accuracy + Evaluation panels, side-by-side dataset comparison card, "Why this paper wins" panel)
 - **`/structure`** — full project tree with depth selector, hidden-file toggle, and live filter. Backed by `GET /api/structure?depth=N&include_hidden=1`.
 - **`/evaluation`** — dedicated evaluation dashboard with dataset selector + per-query drill-down.
-- **`/literature`** — side-by-side comparison against 11 published hallucination-detection systems (Dale 2023, DUTh, TU Wien, SHROOM, IRIT-BL, AILS-NTUA, INSIDE, LLM-Check, AutoHall, Decoding Memories, Conformal-RAG). Verdict matrix (✓/≈/✗) + headline bar chart + full table + defence talking points. Backed by `/api/literature/comparison`, `/api/literature/why-we-win`, `/api/literature/headline` — all of which parse `Paper/comparison_table.csv` + `Paper/why_we_win.md`.
+- **`/literature`** — side-by-side comparison against 11 published hallucination-detection systems (Dale 2023, DUTh, TU Wien, SHROOM, IRIT-BL, AILS-NTUA, INSIDE, LLM-Check, AutoHall, Decoding Memories, Conformal-RAG). Verdict matrix (✓/≈/✗) + headline bar chart + full table + defence talking points. Backed by `/api/literature/comparison`, `/api/literature/why-we-win`, `/api/literature/headline` — all of which parse `Paper/comparison_table.csv` + `Paper/comparison.md`.
 
 ## Evaluation
 
