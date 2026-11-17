@@ -1287,6 +1287,7 @@ _DRIFT_SURFACES = (
     "why_we_win_summary.tex",
     "five_position_comparison.md",
     "wins_summary.md",
+    "comparison_detailed.md",
 )
 
 

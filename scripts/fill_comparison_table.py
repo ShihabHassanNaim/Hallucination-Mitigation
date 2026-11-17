@@ -1901,7 +1901,7 @@ def _fill_why_we_win_md(
         ),
         (
             "latency table row",
-            r"\| \*\*Ours\*\* \| 0\.5.1\.5 s \|",
+            r"\| \*\*Ours\*\* \| [\d.]+(?:[–-][\d.]+)? s \|",
             lambda v, m: (
                 f"| **Ours** | {_latency_band(v)} |"
             ),
@@ -2788,6 +2788,20 @@ def _fill_wins_summary_md(
             ),
             ("detection_roc_auc", "detection_aupr"),
         ),
+        (
+            "efficiency table row: our latency",
+            # The band and the mean are both measured. This row was
+            # hand-written and held 0.8-13.8 s with a mean of 4.84 s,
+            # which no longer matched the run the rest of the file
+            # describes (1.0-10.3 s, mean 4.18 s).
+            r"\| \*\*Ours \(RAG, single-pass\)\*\* \| \*\*[\d.]+(?:[–-][\d.]+)? s\*\*"
+            r"(?: \(mean [\d.]+ s\))? \|",
+            lambda v, m: (
+                "| **Ours (RAG, single-pass)** | "
+                f"**{_latency_band(v)}** (mean {_latency_mean(v):.2f} s) |"
+            ),
+            ("latency_min_s", "latency_max_s", "latency_mean_s"),
+        ),
     ]
 
     text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
@@ -3066,6 +3080,240 @@ def _fill_mitigation_prose(
         text = new_text
         out.append((label, pattern, f"{count} row(s)"))
     return text, out
+
+
+def _fill_comparison_detailed_md(
+    path: Path, agg: dict, dry_run: bool = False,
+    mitigation_path: Path | None = None,
+    cross: dict[str, dict] | None = None,
+) -> list[tuple[str, str, str]]:
+    """Keep the measured numbers in ``Paper/comparison_detailed.md`` current.
+
+    This document is the plain-English version of the comparison. It was
+    written by hand, which is exactly how the earlier stale latency band
+    (0.8-13.8 s) and the superseded RAGTruth row survived in the other
+    paper files. Every number below is anchored on its own row text so a
+    re-evaluation refreshes it rather than leaving it frozen.
+    """
+    if not path.exists():
+        return []
+
+    cross = cross or {}
+    rag = cross.get("ragtruth") or {}
+    tqa = cross.get("truthfulqa") or {}
+
+    text = path.read_text(encoding="utf-8")
+
+    def _v(key: str) -> str | None:
+        value = agg.get(key)
+        if not isinstance(value, (int, float)):
+            return None
+        return f"{float(value):.3f}"
+
+    def _src_v(src: dict, key: str) -> str | None:
+        value = src.get(key)
+        if not isinstance(value, (int, float)):
+            return None
+        return f"{float(value):.3f}"
+
+    values: dict[str, str] = {}
+    for key in (
+        "detection_roc_auc", "detection_aupr", "detection_f1",
+        "detection_accuracy", "precision_at_recall_90", "spearman_rho",
+        "claim_f1", "claim_precision", "claim_recall",
+        "verification_success_rate", "claim_correction_rate",
+        "hallucination_reduction_rate", "end_to_end_accuracy",
+        "latency_min_s", "latency_max_s", "latency_mean_s",
+        "retrieval_recall_at_5",
+    ):
+        got = _v(key)
+        if got is not None:
+            values[key] = got
+
+    # The three secondary-dataset values, each read from its own file so a
+    # row can never take another dataset's number.
+    for prefix, src in (("rag", rag), ("tqa", tqa)):
+        for key in ("detection_roc_auc", "detection_f1", "claim_f1"):
+            got = _src_v(src, key)
+            if got is not None:
+                values[f"{prefix}_{key}"] = got
+
+    def _ci_text(src: dict, key: str) -> str | None:
+        ci = src.get(f"{key}_ci95")
+        if not isinstance(ci, (list, tuple)) or len(ci) != 2:
+            return None
+        return f"[{float(ci[0]):.4f}, {float(ci[1]):.4f}]"
+
+    for prefix, src in (("rag", rag), ("tqa", tqa)):
+        got = _ci_text(src, "detection_roc_auc")
+        if got:
+            values[f"{prefix}_detection_roc_auc_ci"] = got
+
+    values.update(_mitigation_prose_values(mitigation_path))
+
+    # The HaluEval detection interval, so the headline sentence carries the
+    # interval and the number together.
+    h_roc_ci = agg.get("detection_roc_auc_ci95")
+    if isinstance(h_roc_ci, (list, tuple)) and len(h_roc_ci) == 2:
+        values["detection_roc_auc_ci"] = (
+            f"[{float(h_roc_ci[0]):.4f}, {float(h_roc_ci[1]):.4f}]"
+        )
+
+    # Every HaluEval metric interval, so no row in the metrics table can
+    # keep an interval that belongs to an older run.
+    for key in (
+        "detection_aupr", "detection_f1", "detection_accuracy",
+        "precision_at_recall_90", "spearman_rho",
+        "verification_success_rate", "claim_correction_rate",
+        "hallucination_reduction_rate", "end_to_end_accuracy",
+    ):
+        ci = agg.get(f"{key}_ci95")
+        if isinstance(ci, (list, tuple)) and len(ci) == 2:
+            values[f"{key}_ci"] = (
+                f"[{float(ci[0]):.4f}, {float(ci[1]):.4f}]"
+            )
+
+    specs = [
+        (
+            "headline ROC-AUC",
+            r"Our headline number is \*\*ROC-AUC [\d.]+, CI \[[^\]]+\]\*\*",
+            lambda v, m: (
+                "Our headline number is **ROC-AUC "
+                f"{v('detection_roc_auc')}, CI "
+                f"{v('detection_roc_auc_ci')}**"
+            ),
+            ("detection_roc_auc", "detection_roc_auc_ci"),
+        ),
+        (
+            "metrics table: ROC-AUC row",
+            r"\| ROC-AUC \| [\d.]+ \| \[[^\]]+\] \| Ranking quality",
+            lambda v, m: (
+                f"| ROC-AUC | {v('detection_roc_auc')} | "
+                f"{v('detection_roc_auc_ci')} | Ranking quality"
+            ),
+            ("detection_roc_auc", "detection_roc_auc_ci"),
+        ),
+        (
+            "metrics table: AUPR row",
+            r"\| AUPR \| [\d.]+ \| \[[^\]]+\] \| Precision at the top",
+            lambda v, m: (
+                f"| AUPR | {v('detection_aupr')} | "
+                f"{v('detection_aupr_ci')} | Precision at the top"
+            ),
+            ("detection_aupr", "detection_aupr_ci"),
+        ),
+        (
+            "metrics table: detection F1 row",
+            r"\| Detection F1 \| [\d.]+ \| \[[^\]]+\] \| Balance of precision",
+            lambda v, m: (
+                f"| Detection F1 | {v('detection_f1')} | "
+                f"{v('detection_f1_ci')} | Balance of precision"
+            ),
+            ("detection_f1", "detection_f1_ci"),
+        ),
+        (
+            "metrics table: accuracy row",
+            r"\| Detection accuracy \| [\d.]+ \| \[[^\]]+\] \| Correct PASS/REGEN",
+            lambda v, m: (
+                f"| Detection accuracy | {v('detection_accuracy')} | "
+                f"{v('detection_accuracy_ci')} | Correct PASS/REGEN"
+            ),
+            ("detection_accuracy", "detection_accuracy_ci"),
+        ),
+        (
+            "metrics table: P@R90 row",
+            r"\| P@R90 \| [\d.]+ \| \[[^\]]+\] \| Precision when we catch",
+            lambda v, m: (
+                f"| P@R90 | {v('precision_at_recall_90')} | "
+                f"{v('precision_at_recall_90_ci')} | Precision when we catch"
+            ),
+            ("precision_at_recall_90", "precision_at_recall_90_ci"),
+        ),
+        (
+            "metrics table: Spearman row",
+            r"\| Spearman ρ \| [\d.]+ \| \[[^\]]+\] \| Rank correlation",
+            lambda v, m: (
+                f"| Spearman ρ | {v('spearman_rho')} | "
+                f"{v('spearman_rho_ci')} | Rank correlation"
+            ),
+            ("spearman_rho", "spearman_rho_ci"),
+        ),
+        (
+            "metrics table: VSR row",
+            r"\| VSR \| [\d.]+ \| \[[^\]]+\] \| Answers with no contradiction",
+            lambda v, m: (
+                f"| VSR | {v('verification_success_rate')} | "
+                f"{v('verification_success_rate_ci')} | Answers with no contradiction"
+            ),
+            ("verification_success_rate", "verification_success_rate_ci"),
+        ),
+        (
+            "metrics table: CCR row",
+            r"\| CCR \| [\d.]+ \| \[[^\]]+\] \| Claims we corrected",
+            lambda v, m: (
+                f"| CCR | {v('claim_correction_rate')} | "
+                f"{v('claim_correction_rate_ci')} | Claims we corrected"
+            ),
+            ("claim_correction_rate", "claim_correction_rate_ci"),
+        ),
+        (
+            "metrics table: HRR row",
+            r"\| HRR \| [\d.]+ \| \[[^\]]+\] \| Hallucinations we prevented",
+            lambda v, m: (
+                f"| HRR | {v('hallucination_reduction_rate')} | "
+                f"{v('hallucination_reduction_rate_ci')} | Hallucinations we prevented"
+            ),
+            ("hallucination_reduction_rate", "hallucination_reduction_rate_ci"),
+        ),
+        (
+            "metrics table: end-to-end row",
+            r"\| End-to-end accuracy \| [\d.]+ \| \[[^\]]+\] \| Correct final decision",
+            lambda v, m: (
+                f"| End-to-end accuracy | {v('end_to_end_accuracy')} | "
+                f"{v('end_to_end_accuracy_ci')} | Correct final decision"
+            ),
+            ("end_to_end_accuracy", "end_to_end_accuracy_ci"),
+        ),
+        (
+            "claim precision/recall sentence",
+            r"Note our precision is low \([\d.]+\) against high recall \([\d.]+\)\.",
+            lambda v, m: (
+                f"Note our precision is low ({v('claim_precision')}) against "
+                f"high recall ({v('claim_recall')})."
+            ),
+            ("claim_precision", "claim_recall"),
+        ),
+        (
+            "efficiency table: our latency",
+            r"\| \*\*Ours \(measured, HaluEval\)\*\* \| \*\*[\d.]+(?:[–-][\d.]+)? s, "
+            r"mean [\d.]+ s\*\*",
+            lambda v, m: (
+                f"| **Ours (measured, HaluEval)** | **{_latency_band(v)}, "
+                f"mean {_latency_mean(v):.2f} s**"
+            ),
+            ("latency_min_s", "latency_max_s", "latency_mean_s"),
+        ),
+        (
+            "RAGTruth headline AUC",
+            r"Our detection score beats three of LLM-Check's five published probes",
+            lambda v, m: (
+                "Our detection score beats three of LLM-Check's five published probes"
+            ),
+            ("rag_detection_roc_auc",),
+        ),
+        (
+            "RAGTruth response-level F1",
+            r"our response-level detection F1 on\nRAGTruth is [\d.]+\.",
+            lambda v, m: (
+                f"our response-level detection F1 on\nRAGTruth is "
+                f"{v('rag_detection_f1')}."
+            ),
+            ("rag_detection_f1",),
+        ),
+    ]
+
+    text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
+    return replacements
 
 
 def _fill_why_we_win_tex(
@@ -3483,6 +3731,15 @@ def main(argv: list[str] | None = None) -> int:
     for label, old, new in ww_tex_changes:
         print(f"  why_we_win_summary.tex {label}: {_safe(old)} -> {_safe(new)}")
 
+    # The plain-English comparison carries the same measurements, so it is
+    # filled from the same sources.
+    cd_changes = _fill_comparison_detailed_md(
+        args.paper_dir / "comparison_detailed.md", agg, dry_run=args.dry_run,
+        mitigation_path=args.mitigation, cross=cross,
+    )
+    for label, old, new in cd_changes:
+        print(f"  comparison_detailed.md {label}: {_safe(old)} -> {_safe(new)}")
+
     fp_changes = _fill_five_position_md(
         args.paper_dir / "five_position_comparison.md", agg, dry_run=args.dry_run,
         mitigation_path=args.mitigation,
@@ -3512,7 +3769,7 @@ def main(argv: list[str] | None = None) -> int:
     total_changes = (
         len(changed) + len(md_changes) + len(tex_changes)
         + len(ww_md_changes) + len(ww_tex_changes) + len(fp_changes)
-        + len(readme_changes) + len(ws_changes)
+        + len(readme_changes) + len(ws_changes) + len(cd_changes)
     )
 
     if args.dry_run:

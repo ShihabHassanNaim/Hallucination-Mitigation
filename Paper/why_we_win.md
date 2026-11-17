@@ -137,7 +137,7 @@ This is the **most important metric** for an end-to-end RAG system. It measures 
 |---|---|
 | LLM-Check | **0.22 s** |
 | Conformal-RAG (CRG) | 0.012 s |
-| **Ours** | 0.8-13.8 s |
+| **Ours** | 1.0-10.3 s |
 | LLM-Check — Hidden | 2.7 s |
 | AILS-NTUA (Voting) | 143.6 s / 1k queries |
 | INSIDE | 97.6 s |

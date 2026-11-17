@@ -156,7 +156,7 @@ translation* reranker, so the two deltas are not on the same axis.
 
 | Method | Per-query latency (GPU) | GPU peak | Cost / 1k queries |
 |---|---|---|---|
-| **Ours (RAG, single-pass)** | **0.8–13.8 s** (mean 4.84 s) | **4 GB** | **$0.10 (HF local) – $0.80 (OpenRouter)** |
+| **Ours (RAG, single-pass)** | **1.0-10.3 s** (mean 4.18 s) | **4 GB** | **$0.10 (HF local) – $0.80 (OpenRouter)** |
 | LLM-Check | 0.22 s | 6 GB | – |
 | Conformal-RAG (CRG) | 12 ms | 1 GB | $0.10 |
 | Conformal-RAG (judge) | 1800 ms | – | $15.00 |
