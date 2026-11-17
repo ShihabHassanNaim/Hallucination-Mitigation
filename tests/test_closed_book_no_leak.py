@@ -20,6 +20,8 @@ score distribution -- a detector reading the answer key.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 
@@ -155,3 +157,87 @@ def test_step09_documented_signs_are_the_truth_signs():
     from src.steps.step09_confidence_fusion import TRUST_COMPONENTS
 
     assert TRUST_COMPONENTS == {"nli", "coverage", "grounding", "detector_trust"}
+
+
+# --- the artefact side of the same protection ------------------------------
+#
+# The tests above lock the *pipeline* into the closed-book path. These lock
+# the *files*: the two retrieval-on TruthfulQA runs that predate the fix
+# still carried the leaked numbers 0.9589 and 0.602764, and both are the
+# shape of the label rather than a measurement of it (retrieval recovered
+# the reference answer for 972-1000 rows). Leaving them in the repository
+# as ordinary-looking metrics files is a trap: nothing reads them, but a
+# future run that wrote to the old path, or a reader quoting the highest
+# number in the tree, would put a leaked value into the paper.
+
+
+def _load(path):
+    import json
+    from pathlib import Path
+
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+LEAKED_TRUTHFULQA_FILES = (
+    "data/metrics_truthfulqa.json",
+    "data/metrics_truthfulqa_fitted.json",
+)
+
+
+@pytest.mark.parametrize("path", LEAKED_TRUTHFULQA_FILES)
+def test_the_leaked_truthfulqa_files_are_quarantined(path):
+    """The two leaked files must stay emptied and labelled, not restored."""
+    blob = _load(path)
+
+    assert blob.get("_QUARANTINED") is True, (
+        f"{path} holds a leaked TruthfulQA measurement; it must stay "
+        f"quarantined so the number cannot be quoted"
+    )
+    assert "detection_roc_auc" not in blob.get("aggregate", {}), (
+        f"{path} must not carry an aggregate ROC-AUC"
+    )
+    assert not blob.get("per_query"), (
+        f"{path} must not carry per-row scores"
+    )
+
+
+@pytest.mark.parametrize("path", LEAKED_TRUTHFULQA_FILES)
+def test_the_quarantine_marker_names_the_honest_measurement(path):
+    """A reader who opens the file must be pointed at the real number."""
+    blob = _load(path)
+
+    honest = blob.get("_honest_measurement", {})
+    assert honest.get("path") == "data/metrics_truthfulqa_closedbook.json"
+    # The honest file must actually exist and carry that value.
+    real = _load(honest["path"])
+    assert real["aggregate"]["detection_roc_auc"] == honest["detection_roc_auc"]
+
+
+def test_the_honest_truthfulqa_number_is_the_one_the_paper_reads():
+    """The generator must read the closed-book file, never a leaked one."""
+    from scripts.fill_comparison_table import CROSS_DATASETS
+
+    sources = {p for p, _ in CROSS_DATASETS}
+    assert Path("data/metrics_truthfulqa_closedbook.json") in sources
+    for leaked in LEAKED_TRUTHFULQA_FILES:
+        assert Path(leaked) not in sources, (
+            f"{leaked} is quarantined and must never be a paper source"
+        )
+
+
+def test_no_truthfulqa_run_has_retrieval_reading_the_answer_key():
+    """The honest TruthfulQA file must show retrieval was switched off.
+
+    ``retrieval_recall_at_5 == 1.0`` on nearly every row is the leak
+    signature: the corpus was built from the reference answers, so
+    retrieval hand-held the gold answer to the verifier.
+    """
+    real = _load("data/metrics_truthfulqa_closedbook.json")
+
+    assert real.get("retrieval_source") == "none"
+    assert real.get("grounding_source") == "none"
+    for row in real.get("per_query", []):
+        assert row.get("retrieval_recall_at_5") in (0.0, None), (
+            "the closed-book run must not retrieve anything; a non-zero "
+            "retrieval score means the answer key leaked back in"
+        )

@@ -86,7 +86,10 @@ DATASET_REGISTRY: dict[str, Dict[str, str]] = {
     },
     "truthfulqa": {
         "label": "TruthfulQA",
-        "path": "data/metrics_truthfulqa.json",
+        # Closed-book. The old path (data/metrics_truthfulqa.json) held a
+        # retrieval-on run against a corpus built from the dataset's own
+        # reference answers, so it measured the label; it is quarantined.
+        "path": "data/metrics_truthfulqa_closedbook.json",
         "description": (
             "500 questions × 2 references (truthful vs misconception). No "
             "answer-length confound: length alone classifies 45.1% of rows."

@@ -6,7 +6,7 @@ test set.
 Usage:
   python -m scripts.evaluate_full --synth --out data/metrics.json
   python -m scripts.evaluate_full --dataset halueval    --out data/metrics_halueval.json
-  python -m scripts.evaluate_full --dataset truthfulqa  --out data/metrics_truthfulqa.json
+  python -m scripts.evaluate_full --dataset truthfulqa  --out data/metrics_truthfulqa_closedbook.json
 """
 from __future__ import annotations
 

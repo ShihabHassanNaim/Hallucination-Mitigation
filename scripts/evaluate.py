@@ -3,7 +3,7 @@
 Usage:
   python -m scripts.evaluate --data data/synth.jsonl --out data/metrics.json
   python -m scripts.evaluate --dataset halueval    --out data/metrics_halueval.json
-  python -m scripts.evaluate --dataset truthfulqa  --out data/metrics_truthfulqa.json
+  python -m scripts.evaluate --dataset truthfulqa  --out data/metrics_truthfulqa_closedbook.json
 """
 from __future__ import annotations
 
@@ -81,7 +81,15 @@ _DATASET_DEFAULTS: dict[str, dict[str, str]] = {
     },
     "truthfulqa": {
         "data": "data/truthfulqa_eval_1000.jsonl",
-        "out": "data/metrics_truthfulqa.json",
+        # The old path, data/metrics_truthfulqa.json, held a retrieval-on
+        # run whose corpus was the dataset's own reference answers, so it
+        # measured the label rather than the answer. It is quarantined.
+        # This lighter script has no closed-book switch of its own, so it
+        # writes to the closed-book name rather than risk dropping a
+        # second leaky file under the old one. For the paper numbers use
+        # scripts.evaluate_full, which switches retrieval and grounding off
+        # for this dataset.
+        "out": "data/metrics_truthfulqa_closedbook.json",
     },
 }
 

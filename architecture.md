@@ -440,7 +440,7 @@ flowchart LR
     subgraph METRICS_OUT[Metrics Output]
         M1[data/metrics.json]
         M2[data/metrics_halueval.json]
-        M3[data/metrics_truthfulqa.json]
+        M3[data/metrics_truthfulqa_closedbook.json]
     end
 
     subgraph FRONTEND_USE[Frontend Consumers]
@@ -567,7 +567,7 @@ flowchart TB
     %% ============ OUTPUTS ============
     S12A --> RJSON[JSON Result]
     S12A --> RMD[Markdown Report]
-    S13A --> METRICS[(data/metrics.json<br/>data/metrics_halueval.json<br/>data/metrics_truthfulqa.json)]
+    S13A --> METRICS[(data/metrics.json<br/>data/metrics_halueval.json<br/>data/metrics_truthfulqa_closedbook.json)]
 
     RJSON --> ENTRY
     RMD --> ENTRY

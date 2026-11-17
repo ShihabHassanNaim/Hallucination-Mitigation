@@ -3,7 +3,8 @@
 This is a thin wrapper that invokes :mod:`scripts.evaluate` and
 :mod:`scripts.evaluate_full` once per dataset slug, so the resulting
 files land in the paths the Flask app's ``DATASET_REGISTRY`` already
-expects (``data/metrics_halueval.json``, ``data/metrics_truthfulqa.json``).
+expects (``data/metrics_halueval.json``,
+``data/metrics_truthfulqa_closedbook.json``).
 
 Usage::
 
@@ -106,7 +107,11 @@ def main() -> None:
     # Final summary.
     print("\n=== Summary ===")
     for slug in targets:
-        out = Path(f"data/metrics_{slug}.json")
+        # TruthfulQA is written closed-book; the old retrieval-on path is
+        # quarantined and must never be reported as a result.
+        name = ("metrics_truthfulqa_closedbook.json" if slug == "truthfulqa"
+                else f"metrics_{slug}.json")
+        out = Path("data") / name
         if out.exists():
             print(f"  {slug:>10}  -> {out}  ({out.stat().st_size // 1024} KB)")
         else:

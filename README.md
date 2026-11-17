@@ -210,7 +210,7 @@ produced by these commands:
 ```bash
 # Single dataset — base retrieval / generation metrics
 python -m scripts.evaluate --dataset halueval    # writes data/metrics_halueval.json
-python -m scripts.evaluate --dataset truthfulqa  # writes data/metrics_truthfulqa.json
+python -m scripts.evaluate --dataset truthfulqa  # writes data/metrics_truthfulqa_closedbook.json
 
 # Single dataset — full detection + HRR/CCR/VSR
 python -m scripts.evaluate_full --dataset halueval
@@ -324,8 +324,9 @@ generator (`grounded_generation` peaks at 1.3 ms across all 1000 rows). A
 run that generated its own answer would add the generator's latency on
 top, so the full RAG pipeline is slower than this band suggests.
 
-Once both `data/metrics_halueval.json` and `data/metrics_truthfulqa.json`
-exist, the Flask demo page (`/`) shows a dataset-pill selector on the
+Once both `data/metrics_halueval.json` and
+`data/metrics_truthfulqa_closedbook.json` exist, the Flask demo page (`/`)
+shows a dataset-pill selector on the
 **Accuracy** and **Evaluation** panels, and a side-by-side **Cross-dataset
 comparison** card with one column per dataset plus a Δ column. The
 dedicated `/evaluation` page has the same controls plus per-query drill-down.
