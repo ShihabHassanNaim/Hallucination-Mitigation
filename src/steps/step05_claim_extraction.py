@@ -5,7 +5,7 @@ intrinsic_overlap with the query.
 """
 from __future__ import annotations
 
-from . import Step, StepContext
+from . import Step, StepContext, generator_of
 from ..types import Claim
 from ..utils.claim_extractor import extract_claims, intrinsic_overlap
 
@@ -23,7 +23,8 @@ class Step05ClaimExtraction(Step):
         answer = self.ctx.answer or ""
 
         pipeline = self.ctx.metadata.get("pipeline")
-        llm_generate = getattr(pipeline.generator, "generate", None) if getattr(pipeline, "generator", None) else None
+        gen = generator_of(pipeline)
+        llm_generate = getattr(gen, "generate", None) if gen is not None else None
 
         claims_text = extract_claims(answer, mode=mode, llm_generate=llm_generate)
         query = self.ctx.metadata.get("rewritten_query", self.ctx.query)

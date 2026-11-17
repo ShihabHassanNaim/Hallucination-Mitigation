@@ -444,7 +444,8 @@ class _FakePipe:
     def load_index(self, index_dir: str) -> None:  # noqa: ARG002
         pass
 
-    def run(self, query, answer=None, label=None, gold_answer=None):  # noqa: ARG002
+    def run(self, query, answer=None, label=None, gold_answer=None,
+            metadata=None):  # noqa: ARG002
         self.evaluated.append(query)
         raise _StopRun()
 

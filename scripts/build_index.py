@@ -15,13 +15,23 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Build a FAISS+BM25 hybrid index.")
     ap.add_argument("--input", required=True, help="JSONL file with {text: ...} rows")
     ap.add_argument("--out", default="data/index")
+    ap.add_argument(
+        "--chunk-size", type=int, default=400,
+        help="characters per chunk (default 400). RAGTruth's contexts are "
+             "whole documents of ~1700 characters; chunking them at 400 "
+             "splits one document across several retrievable pieces, so a "
+             "query that matches the opening of a document never retrieves "
+             "the part that holds the answer.",
+    )
+    ap.add_argument("--chunk-overlap", type=int, default=50)
     args = ap.parse_args()
 
     cfg = load_config()
     embedder = BGE_M3Embedder.from_config(cfg) if hasattr(BGE_M3Embedder, "from_config") else BGE_M3Embedder()
     rows = [json.loads(line) for line in Path(args.input).read_text(encoding="utf-8").splitlines() if line.strip()]
     docs = [r["text"] for r in rows]
-    chunks = chunk_documents(docs, chunk_size=400, chunk_overlap=50)
+    chunks = chunk_documents(docs, chunk_size=args.chunk_size,
+                             chunk_overlap=args.chunk_overlap)
     doc_ids = [c[0] for c in chunks]
     docs = [c[1] for c in chunks]
     vecs = embedder.encode(docs)

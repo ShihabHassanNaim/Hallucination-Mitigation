@@ -24,10 +24,12 @@ def _pick_device() -> str:
 class BGE_M3Embedder:
     """Dense embedder. ``encode(texts) -> ndarray[float32]`` shape (n, dim)."""
 
-    def __init__(self, dim: int = 1024, model_name: str = "BAAI/bge-m3", device: str | None = None):
+    def __init__(self, dim: int = 1024, model_name: str = "BAAI/bge-m3", device: str | None = None,
+                 dtype: str = "fp16"):
         self.dim = dim
         self.model_name = model_name
         self.device = device or _pick_device()
+        self.dtype = dtype
         self._model = None
 
     def _load_hf(self) -> None:
@@ -35,7 +37,14 @@ class BGE_M3Embedder:
             from sentence_transformers import SentenceTransformer  # type: ignore
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"sentence-transformers not available: {exc}")
-        m = SentenceTransformer(self.model_name, device=self.device, trust_remote_code=True)
+        kwargs = {}
+        # fp16 halves the embedder's VRAM footprint. On CPU it is slower and
+        # poorly supported, so it stays fp32 there.
+        if self.dtype == "fp16" and self.device.startswith("cuda"):
+            kwargs["model_kwargs"] = {"torch_dtype": "float16"}
+            kwargs["tokenizer_kwargs"] = {}
+        m = SentenceTransformer(self.model_name, device=self.device,
+                                trust_remote_code=True, **kwargs)
         # bge-m3 outputs 1024-d vectors; if smaller model, override dim.
         test_vec = m.encode(["ping"], normalize_embeddings=True)
         self.dim = int(test_vec.shape[-1])
@@ -53,6 +62,7 @@ class BGE_M3Embedder:
 
 def from_config(cfg) -> BGE_M3Embedder:
     name = (cfg.models or {}).get("embedder", "BAAI/bge-m3")
-    embedder = BGE_M3Embedder(model_name=name)
+    dtype = ((cfg.models or {}).get("embedder_dtype") or "fp16").lower()
+    embedder = BGE_M3Embedder(model_name=name, dtype=dtype)
     embedder._load_hf()
     return embedder

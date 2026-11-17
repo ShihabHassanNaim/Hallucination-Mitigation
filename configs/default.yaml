@@ -51,6 +51,19 @@ step06_retrieval:
   weight_dense: 1.0
   weight_bm25: 1.0
   index_path: "data/index"
+  # "retrieved" (default) or "none".
+  #
+  # "none" runs the pipeline closed-book: step 6 retrieves nothing and the
+  # whole verification chain runs without a source. This is required for a
+  # dataset whose retrieval corpus holds the reference answers -- TruthfulQA
+  # is the case: its corpus was built from the dataset's own "knowledge"
+  # field, which is the set of correct answers, so retrieval finds the
+  # answer key for every row and any verification against the retrieved
+  # document measures the label.
+  #
+  # The evaluation harness overrides this per dataset
+  # (scripts/evaluate_full.py --retrieval-source).
+  retrieval_source: "retrieved"
 
 step07_reranking:
   enabled: true
@@ -58,15 +71,121 @@ step07_reranking:
 
 step08_nli_verification:
   max_evidence_chars: 4000
+  # The NLI truncates its premise to 512 tokens. When the retrieved
+  # document is longer than that, the verifier only sees the opening of
+  # it, so a claim the document supports later is judged "unknown". The
+  # premise is therefore shortened to the sentences that are about the
+  # claim before it is handed to the NLI.
+  max_premise_chars: 1800
   device: "auto"
 
 step09_fusion_weights:
-  similarity: 0.30
-  retrieval:  0.20
-  nli:        0.25
-  coverage:   0.15
-  eedc:       0.10
-  detector:   0.15               # step-3 XGBoost hallucination probability (inverted)
+  # The fitted detection head for step 9.
+  #
+  # The weights in this block were originally set by hand and never
+  # validated against a detection metric. On RAGTruth that hand-set fusion
+  # scored ROC-AUC 0.360 as a detection score -- worse than chance --
+  # because the trust-oriented components (nli, coverage) were added with
+  # positive weights into a score whose sign was never checked against the
+  # label.
+  #
+  # `detection_head` below is a logistic regression on standardised
+  # components, fitted on a tuning half of the RAGTruth matched split and
+  # evaluated on a held-out half the fit never saw.
+  #
+  # Fitted on 496 rows of the matched split (data/detection_head_refit600.json).
+  # Held-out detection ROC-AUC 0.6185, CI [0.5371, 0.6943]; per task type
+  # 0.67 (Data2txt), 0.78 (QA), 0.62 (Summary).
+  #
+  # The earlier 99-row fit reported a held-out 0.667 -- but both the tuning
+  # and the all-data AUC fell as the sample grew (0.7139 at 99 rows, 0.6849
+  # at 300, 0.6609 at 496). The small fit was optimistically biased. The
+  # 496-row head is the one in use, and its held-out interval is the
+  # narrower and more trustworthy of the two.
+  # See scripts/fit_detection_head.py.
+  #
+  # `sign` records which components are trust signals (high value = less
+  # likely hallucinated) and which are risk signals. The fusion negates the
+  # trust components before standardising, so a larger contribution to the
+  # risk score always means "more likely hallucinated".
+  #
+  # A sign is never decided inside the noise band: a component whose 95%
+  # bootstrap interval contains 0.5 carries no directional evidence, and its
+  # sign comes from the full data with the choice recorded. This is what
+  # caught `detector_trust`, which the first fit signed as a risk signal on
+  # the strength of a tuning-half AUC of 0.5008.
+  detection_head:
+    weights:
+      similarity: 0.571052
+      retrieval_top1: 0.118817
+      nli: 1.249675
+      coverage: -1.034543
+      eedc: -0.074934
+      detector_trust: 0.322765
+      grounding: 0.588701
+    sign:
+      similarity: 1.0
+      retrieval_top1: 1.0
+      nli: -1.0
+      coverage: -1.0
+      eedc: 1.0
+      # detector_trust is 1 - hallucination_probability, so it is a TRUST
+      # signal: a higher trust means the step-3 detector thinks the answer
+      # is more likely faithful.
+      #
+      # The fit originally gave this +1 (risk) on the strength of a
+      # tuning-half AUC of 0.5008 -- a coin flip that landed 0.0008 above
+      # the 0.5 line. Measured properly the direction is unambiguous:
+      # hallucination_probability AUC 0.5389 (risk), detector_trust AUC
+      # 0.4611 (trust), and the two mirror each other exactly
+      # (0.5389 + 0.4611 = 1.0000). On the 496-row fit the CI is
+      # [0.3502, 0.4626], which excludes 0.5. See
+      # scripts/check_detector_direction.py.
+      detector_trust: -1.0
+      grounding: -1.0
+    component_mean:
+      similarity: 0.618634
+      retrieval_top1: 0.601642
+      nli: 0.542829
+      coverage: 0.609476
+      eedc: 0.460945
+      detector_trust: 0.810344
+      grounding: 0.492056
+    component_std:
+      similarity: 0.139799
+      retrieval_top1: 0.365418
+      nli: 0.267181
+      coverage: 0.273714
+      eedc: 0.052152
+      detector_trust: 0.230007
+      grounding: 0.266188
+
+  # The original hand-set weights, kept as the fallback for configs that
+  # carry no fitted head.
+  fusion:
+    similarity: 0.30
+    retrieval:  0.20
+    nli:        0.25
+    coverage:   0.15
+    eedc:       0.10
+    detector:   0.15               # step-3 XGBoost hallucination probability (inverted)
+    # Lexical grounding: the share of the answer's content words that occur
+    # in the retrieved source. This is an answer-level signal, independent of
+    # the claim-level NLI, and it is what carries the score on long-form
+    # answers where the claim-level NLI cannot decide.
+    grounding:  0.00
+
+  # Which source the grounding term is measured against.
+  #
+  # "retrieved" (default) measures it against the top-1 retrieved document.
+  # "none" leaves the term out of the score entirely, and is required for a
+  # dataset whose retrieval corpus holds the reference answers -- there,
+  # grounding measures "is this answer the reference answer", which is the
+  # label rather than a measurement.
+  #
+  # The evaluation harness overrides this per dataset
+  # (scripts/evaluate_full.py --grounding-source).
+  grounding_source: "retrieved"
 
 step10_regeneration:
   # "claim_edit" rewrites only the claims the verifier flagged and leaves

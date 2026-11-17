@@ -31,7 +31,11 @@ OUT_DIR = Path("data/graphs")
 
 DATASETS = [
     ("halueval", "HaluEval QA (length-matched)", "data/metrics_halueval.json", "#2563eb"),
-    ("truthfulqa", "TruthfulQA", "data/metrics_truthfulqa.json", "#059669"),
+    # TruthfulQA is plotted from the CLOSED-BOOK run. The retrieval-on file
+    # (data/metrics_truthfulqa.json) measured against an answer-key corpus
+    # and leaked; it is not plotted.
+    ("truthfulqa", "TruthfulQA (closed-book)", "data/metrics_truthfulqa_closedbook.json", "#059669"),
+    ("ragtruth", "RAGTruth (length-matched)", "data/metrics_ragtruth_fitted.json", "#7c3aed"),
     ("halueval_raw", "HaluEval QA (raw)", "data/metrics_halueval_raw.json", "#f59e0b"),
     ("synth", "Synthetic", "data/metrics.json", "#a855f7"),
 ]

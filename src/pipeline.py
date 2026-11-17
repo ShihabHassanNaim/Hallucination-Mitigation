@@ -83,23 +83,16 @@ class Pipeline:
         if self.embedder is None:
             self.embedder = BGE_M3Embedder.from_config(self.cfg) if hasattr(BGE_M3Embedder, "from_config") else self._auto_embedder()
         if self.generator is None:
-            if use_openrouter:
-                try:
-                    from .models.generator_openrouter import from_config as or_from_config
-                    self.generator = or_from_config(self.cfg)
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("OpenRouter generator unavailable: %s; falling back to local HF", exc)
-                    from .models.generator_llama import from_config as llama_from_config
-                    self.generator = llama_from_config(self.cfg)
-            else:
-                from .models.generator_llama import from_config as llama_from_config
-                self.generator = llama_from_config(self.cfg)
+            # Defer loading the generator. On an 8 GB card the generator and
+            # the embedder together are the bulk of the footprint, and the
+            # detection path never calls the generator when the answer is
+            # supplied by the benchmark. Step 2 loads it on first use.
+            self._generator_loader = self._make_generator_loader(use_openrouter)
         if self.generator_qwen is None:
-            try:
-                from .models.generator_qwen import from_config as qwen_from_config
-                self.generator_qwen = qwen_from_config(self.cfg)
-            except Exception:
-                self.generator_qwen = None
+            # Same reasoning as the main generator: this is a second model
+            # that the detection path never touches, so it is built on first
+            # use rather than at construction time.
+            self._generator_qwen_loader = self._make_generator_qwen_loader()
         if self.nli is None:
             from .models.nli_deberta import from_config as nli_from_config
             self.nli = nli_from_config(self.cfg)
@@ -133,6 +126,50 @@ class Pipeline:
         from .models.embedder_bge_m3 import from_config
         return from_config(self.cfg)
 
+    def _make_generator_loader(self, use_openrouter: bool):
+        """Return a callable that builds the generator on first use."""
+        cfg = self.cfg
+
+        def _load():
+            if use_openrouter:
+                try:
+                    from .models.generator_openrouter import from_config as or_from_config
+                    return or_from_config(cfg)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("OpenRouter generator unavailable: %s; falling back to local HF", exc)
+                    from .models.generator_llama import from_config as llama_from_config
+                    return llama_from_config(cfg)
+            from .models.generator_llama import from_config as llama_from_config
+            return llama_from_config(cfg)
+
+        return _load
+
+    def _get_generator(self):
+        """The generator, loaded on first access."""
+        if self.generator is None and getattr(self, "_generator_loader", None) is not None:
+            self.generator = self._generator_loader()
+            self._generator_loader = None
+        return self.generator
+
+    def _make_generator_qwen_loader(self):
+        cfg = self.cfg
+
+        def _load():
+            try:
+                from .models.generator_qwen import from_config as qwen_from_config
+                return qwen_from_config(cfg)
+            except Exception:
+                return None
+
+        return _load
+
+    def _get_generator_qwen(self):
+        """The alternate Qwen generator, loaded on first access."""
+        if self.generator_qwen is None and getattr(self, "_generator_qwen_loader", None) is not None:
+            self.generator_qwen = self._generator_qwen_loader()
+            self._generator_qwen_loader = None
+        return self.generator_qwen
+
     def _build_default_index(self) -> HybridRetriever:
         corpus = load_synthetic_corpus()
         chunks = chunk_documents([d["text"] for d in corpus], chunk_size=400, chunk_overlap=50)
@@ -149,6 +186,7 @@ class Pipeline:
         answer: str | None = None,
         label: int | None = None,
         gold_answer: str | None = None,
+        metadata: dict | None = None,
     ) -> PipelineResult:
         """Run the pipeline over ``query``.
 
@@ -173,9 +211,17 @@ class Pipeline:
         gold_answer
             Optional correct answer text. Used by step 13 to decide which
             claims are true positives.
+        metadata
+            Optional extra context metadata. Used by the evaluation
+            harness to override per-dataset behaviour that is a property of
+            the dataset rather than of the pipeline -- for example
+            ``grounding_source="none"`` for a closed-book dataset whose
+            retrieval corpus contains the reference answers.
         """
         ctx = StepContext(query=query, cfg=self.cfg)
         ctx.metadata["pipeline"] = self
+        if metadata:
+            ctx.metadata.update(metadata)
         if answer is not None:
             ctx.metadata["provided_answer"] = answer
         if label is not None:

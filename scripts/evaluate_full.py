@@ -44,8 +44,22 @@ _DATASET_DEFAULTS: dict[str, dict[str, str]] = {
     },
     "truthfulqa": {
         "data": "data/truthfulqa_eval_1000.jsonl",
-        "out": "data/metrics_truthfulqa.json",
+        # The closed-book run writes to its own file. The old path,
+        # data/metrics_truthfulqa.json, holds a retrieval-on run whose
+        # corpus was the answer key -- that number leaked (0.9589) and is
+        # not reported. Keeping the two apart means a fresh run cannot
+        # silently replace the honest measurement with the leaked one.
+        "out": "data/metrics_truthfulqa_closedbook.json",
         "index": "data/index_truthfulqa",
+        # TruthfulQA is closed-book: it has no retrieval context, and its
+        # "evidence" field only ever held the gold passages used by the
+        # gold-evidence matching metric. Its retrieval corpus was built from
+        # the dataset's own reference answers, so both the grounding term
+        # and the NLI's premise would measure "is this answer the reference
+        # answer" -- the label. Retrieval is therefore switched off entirely
+        # for this dataset, and so is the grounding term.
+        "grounding_source": "none",
+        "retrieval_source": "none",
     },
 }
 
@@ -228,6 +242,42 @@ def _spearman_rho(y_true: list[int], y_score: list[float]) -> float:
         * sum((b - my) ** 2 for b in ry) ** 0.5
     )
     return num / den if den else 0.0
+
+
+def _answer_was_provided(res) -> bool:
+    """True when step 2 was handed the answer instead of generating it.
+
+    Step 2 records ``provided`` in its trace payload, and the pipeline also
+    keeps ``provided_answer`` in the context metadata. Either is enough; if
+    neither is available the answer is assumed to have been generated,
+    which is the conservative choice (the detector that was fitted for
+    generated answers is the one that applies).
+    """
+    for t in getattr(res, "step_traces", []) or []:
+        if getattr(t, "step", None) == 2:
+            payload = (getattr(t, "payload", None) or {})
+            if "provided" in payload:
+                return bool(payload["provided"])
+    meta = getattr(res, "metadata", None) or {}
+    if isinstance(meta, dict) and "provided_answer" in meta:
+        return meta["provided_answer"] is not None
+    return False
+
+
+def _fusion_risk(res, d: dict) -> float:
+    """The pipeline's hallucination risk for this row.
+
+    Step 9 emits the risk probability directly; when it is available that
+    is the score. Otherwise fall back to inverting the trust score
+    (``ctx.confidence`` is ``1 - risk``), which is the same number.
+    """
+    for t in getattr(res, "step_traces", []) or []:
+        if getattr(t, "step", None) == 9:
+            payload = (getattr(t, "payload", None) or {})
+            p = payload.get("hallucination_probability")
+            if p is not None:
+                return float(p)
+    return 1.0 - float(d.get("confidence", 0.5))
 
 
 def _detector_fingerprint() -> str:
@@ -462,6 +512,25 @@ def main() -> None:
         help="path to a saved FAISS+BM25 index directory; loads before running.",
     )
     ap.add_argument(
+        "--retrieval-source",
+        choices=["retrieved", "none"],
+        default=None,
+        help="whether step 6 retrieves evidence. 'none' runs the pipeline "
+             "closed-book, for datasets whose retrieval corpus contains the "
+             "reference answers -- verification against it would read the "
+             "label.",
+    )
+    ap.add_argument(
+        "--grounding-source",
+        choices=["retrieved", "none"],
+        default=None,
+        help="which source the step-9 grounding term is measured against. "
+             "'retrieved' (default) measures it against the top-1 retrieved "
+             "document; 'none' disables the term entirely. Use 'none' for "
+             "closed-book datasets whose retrieval corpus contains the "
+             "reference answers -- grounding there would measure the label.",
+    )
+    ap.add_argument(
         "--recompute",
         action="store_true",
         help="skip the pipeline entirely: rebuild the aggregate block (metrics "
@@ -500,9 +569,26 @@ def main() -> None:
 
     cfg = load_config()
     pipe = Pipeline(cfg=cfg)
-    if args.index:
+    # The grounding term is measured against the top-1 retrieved document by
+    # default. For a closed-book dataset whose retrieval corpus holds the
+    # reference answers, that would measure the label, so the term is
+    # switched off. The dataset decides; --grounding-source overrides it.
+    grounding_source = args.grounding_source
+    if grounding_source is None:
+        defaults = _DATASET_DEFAULTS.get(slug) or {}
+        grounding_source = defaults.get("grounding_source", "retrieved")
+    # The same reasoning applies to retrieval itself: a closed-book dataset
+    # has no legitimate corpus, so step 6 is switched off.
+    retrieval_source = args.retrieval_source
+    if retrieval_source is None:
+        defaults = _DATASET_DEFAULTS.get(slug) or {}
+        retrieval_source = defaults.get("retrieval_source", "retrieved")
+    print(f"grounding source: {grounding_source}   retrieval source: {retrieval_source}")
+    if args.index and retrieval_source != "none":
         pipe.load_index(args.index)
         print(f"loaded index: {args.index} ({pipe.retriever.n_docs} docs)")
+    elif args.index:
+        print(f"skipping index {args.index}: retrieval is disabled for this dataset")
     clf = XGBClassifier()
     clf._load()
 
@@ -623,6 +709,10 @@ def main() -> None:
                 answer=r.get("answer"),
                 label=gt if gt_known else None,
                 gold_answer=r.get("right_answer"),
+                metadata={
+                    "grounding_source": grounding_source,
+                    "retrieval_source": retrieval_source,
+                },
             )
             d = res.to_dict()
         except Exception as exc:  # noqa: BLE001
@@ -651,8 +741,27 @@ def main() -> None:
         # (cosine, claim_count, overlap, answer_length).
         from src.utils.claim_extractor import extract_claims, intrinsic_overlap
 
+        # Which score to use depends on whether the pipeline *produced* the
+        # answer or was *given* it.
+        #
+        # When the benchmark supplies the answer, the step-3 XGBoost
+        # detector is the wrong instrument: it was fitted on HaluEval, whose
+        # answers are 3-30 words, while RAGTruth's are 110-160 words of
+        # long-form prose. On RAGTruth it returns a near-constant score
+        # (0.008-0.019) and the detection ROC-AUC collapses to 0.51 no matter
+        # how good the rest of the pipeline is. The pipeline's *fusion* is
+        # the instrument that was built for this: it combines the NLI, the
+        # retrieval signal, the EEDC entropy and the lexical grounding of
+        # the answer in its source.
+        #
+        # The distinction is whether step 2 generated the answer or was
+        # handed it. A generated answer is the pipeline's own output, so the
+        # detector that was fitted to judge such answers is right. A
+        # supplied answer is the benchmark's, and the fusion judges it.
+        answer_was_generated = not _answer_was_provided(res)
+
         gen_answer = d.get("answer") or ""
-        if gen_answer:
+        if gen_answer and answer_was_generated:
             try:
                 embedder = pipe.embedder
                 qv = embedder.encode([r["query"]])[0]
@@ -670,11 +779,11 @@ def main() -> None:
             try:
                 score = float(pipe.early_classifier.predict_proba(feats))
             except Exception:
-                score = 1.0 - d.get("confidence", 0.5)
+                score = _fusion_risk(res, d)
         else:
-            # No generated answer to judge — fall back to pipeline confidence
-            # inverted (higher => more likely hallucinated).
-            score = 1.0 - d.get("confidence", 0.5)
+            # The answer was supplied by the benchmark, so the step-3
+            # detector does not apply. Use the pipeline's fused risk.
+            score = _fusion_risk(res, d)
         detector_truth.append(gt)
         detector_score.append(score)
         query_groups.append(r.get("query") or r.get("question") or f"row-{idx}")
@@ -783,6 +892,11 @@ def main() -> None:
     existing["per_query"] = per_query
     existing["n_queries"] = len(per_query)
     existing["n_failed"] = n_failed
+    # Record the instrument configuration, so the metrics file says how the
+    # detection score was produced and cannot be silently re-read with a
+    # different setting.
+    existing["grounding_source"] = grounding_source
+    existing["retrieval_source"] = retrieval_source
     out_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
     if n_failed:
         print(

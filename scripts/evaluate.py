@@ -201,12 +201,25 @@ def main() -> None:
             # document counts as gold when its text matches a gold passage.
             gold_texts = [e for e in (r.get("evidence") or []) if e]
             retrieved_texts = [e.get("text", "") for e in d["evidence"]]
+            retrieved_ids = [e.get("doc_id", "") for e in d["evidence"]]
             from src.steps.step13_evaluation import (
                 _recall_at_k, _precision_at_k, _mrr, _ndcg,
             )
-            gold_hits = _match_gold(retrieved_texts, gold_texts)
+            gold_doc_id = r.get("gold_doc_id")
+            if gold_doc_id:
+                # The dataset knows which document holds the gold context.
+                # Match on the document id, stripping the "-chunk-N" suffix
+                # the index adds when it splits a long document.
+                gold_hits = [
+                    0 for rid in retrieved_ids
+                    if rid == gold_doc_id
+                    or rid.startswith(f"{gold_doc_id}-chunk-")
+                ]
+                gold = [0]
+            else:
+                gold_hits = _match_gold(retrieved_texts, gold_texts)
+                gold = list(range(len(gold_texts)))
             retrieved = gold_hits
-            gold = list(range(len(gold_texts)))
             per_query_metrics.append({
                 "query": r["query"],
                 "decision": d["decision"],

@@ -11,7 +11,7 @@ architecture diagram, but the *execution* order is what matters.
 """
 from __future__ import annotations
 
-from . import Step, StepContext
+from . import Step, StepContext, generator_of
 
 
 class Step02GroundedGeneration(Step):
@@ -25,10 +25,13 @@ class Step02GroundedGeneration(Step):
         prompt = cfg.prompt
 
         pipeline = self.ctx.metadata.get("pipeline")
-        if backend == "qwen" and getattr(pipeline, "generator_qwen", None) is not None:
-            gen = pipeline.generator_qwen
+        if backend == "qwen":
+            getter = getattr(pipeline, "_get_generator_qwen", None)
+            gen = getter() if callable(getter) else getattr(pipeline, "generator_qwen", None)
+            if gen is None:
+                gen = generator_of(pipeline)
         else:
-            gen = getattr(pipeline, "generator", None)
+            gen = generator_of(pipeline)
 
         evidence = self.ctx.evidence
         ctx_text = "\n\n".join(e.text for e in evidence) if evidence else ""

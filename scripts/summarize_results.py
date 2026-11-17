@@ -16,7 +16,12 @@ from pathlib import Path
 
 DATASETS = [
     ("halueval", "HaluEval QA (length-matched)", "data/metrics_halueval.json"),
-    ("truthfulqa", "TruthfulQA", "data/metrics_truthfulqa.json"),
+    # TruthfulQA is run CLOSED-BOOK. Its retrieval corpus is built from the
+    # dataset's own reference answers, so retrieving against it would measure
+    # the label rather than the answer. The closed-book file is the honest
+    # measurement; the retrieval-on file leaked 0.9589 and is not reported.
+    ("truthfulqa", "TruthfulQA (closed-book)", "data/metrics_truthfulqa_closedbook.json"),
+    ("ragtruth", "RAGTruth (length-matched)", "data/metrics_ragtruth_fitted.json"),
     ("halueval_raw", "HaluEval QA (raw, length-confounded)", "data/metrics_halueval_raw.json"),
 ]
 
@@ -24,13 +29,15 @@ DATASETS = [
 # measured against the no-mitigation baseline on the rows where it fired.
 MITIGATION_PATH = "data/mitigation_results.json"
 
-# The length-matched HaluEval split and TruthfulQA are the defensible
-# headline results. The raw HaluEval split is reported for transparency
-# only: on it, answer word count alone classifies 94.7% of the rows, so it
-# measures answer verbosity as much as hallucination.
+# The length-matched HaluEval split, the closed-book TruthfulQA run and
+# RAGTruth are the defensible headline results. The raw HaluEval split is
+# reported for transparency only: on it, answer word count alone classifies
+# 94.7% of the rows, so it measures answer verbosity as much as
+# hallucination.
 HEADLINE_ORDER = [
     "halueval",
     "truthfulqa",
+    "ragtruth",
     "halueval_raw",
 ]
 
@@ -130,11 +137,20 @@ def main() -> None:
         "**How to read these numbers.** Every row is judged on the answer the "
         "dataset supplies, so the detector scores a faithful answer and a "
         "hallucinated answer for the same question separately. The "
-        "length-matched HaluEval split and TruthfulQA are the headline "
-        "results; the raw HaluEval split is shown for transparency but is "
-        "confounded — on it, answer word count alone classifies 94.7% of "
-        "rows, so it partly measures answer verbosity rather than "
-        "hallucination."
+        "length-matched HaluEval split, the closed-book TruthfulQA run and "
+        "RAGTruth are the headline results; the raw HaluEval split is shown "
+        "for transparency but is confounded — on it, answer word count alone "
+        "classifies 94.7% of rows, so it partly measures answer verbosity "
+        "rather than hallucination."
+    )
+    lines.append("")
+    lines.append(
+        "**TruthfulQA is closed-book.** Its retrieval corpus is built from the "
+        "dataset's own reference answers, so retrieving against it would "
+        "measure the label rather than the answer. Retrieval is switched off "
+        "for that run and the components that need a source are left out of "
+        "the score rather than fed a placeholder. The audit is in "
+        "`docs/corpus_leak_audit.md`."
     )
     lines.append("")
 
@@ -202,6 +218,25 @@ def main() -> None:
             for key, name in retrieval_rows:
                 lines.append(f"| {name} | {_fmt(agg.get(key))} |")
             lines.append("")
+            # On a closed-book run there is nothing to retrieve, so the
+            # retrieval metrics are zero by construction and the
+            # verification rates are one for the same reason: with no
+            # evidence, no claim can be contradicted. Reading 1.000 as
+            # "perfect verification" would be the opposite of the truth.
+            if not any(
+                (agg.get(key) or 0) for key, _ in RETRIEVAL
+            ):
+                lines.append(
+                    "**These retrieval numbers are zero by construction.** "
+                    "This run is closed-book, so step 6 retrieves nothing. "
+                    "The same applies to the VSR and CCR above: with no "
+                    "evidence there is nothing to contradict, so those rates "
+                    "are 1.000 vacuously, not because verification succeeded. "
+                    "Neither set of numbers carries information on this "
+                    "dataset, and neither is compared against a published "
+                    "system."
+                )
+                lines.append("")
 
         claim_rows = [
             (key, name) for key, name in CLAIM if agg.get(key) is not None

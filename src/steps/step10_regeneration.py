@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 
-from . import Step, StepContext
+from . import Step, StepContext, generator_of
 from ..types import Evidence
 
 
@@ -199,7 +199,7 @@ class Step10Regeneration(Step):
         guard = ""
 
         pipeline = self.ctx.metadata.get("pipeline")
-        gen = getattr(pipeline, "generator", None)
+        gen = generator_of(pipeline)
 
         # A provided answer is being *judged*, not improved. Rewriting it
         # here would mean the gate and the detector score a different answer

@@ -33,6 +33,21 @@ class StepContext:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+def generator_of(pipeline: Any) -> Any:
+    """The pipeline's generator, loaded on first use.
+
+    The pipeline builds its generators lazily so the detection path does not
+    pay their VRAM cost. A stub pipeline (as used in the tests) may carry the
+    generator directly and have no lazy loader, so fall back to the attribute.
+    """
+    if pipeline is None:
+        return None
+    getter = getattr(pipeline, "_get_generator", None)
+    if callable(getter):
+        return getter()
+    return getattr(pipeline, "generator", None)
+
+
 class Step(ABC):
     """Abstract base class for a single pipeline step."""
 

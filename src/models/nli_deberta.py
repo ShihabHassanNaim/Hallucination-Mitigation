@@ -23,9 +23,11 @@ class DebertaNLIModel:
         self,
         model_name: str = "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7",
         device: str | None = None,
+        dtype: str = "fp16",
     ):
         self.model_name = model_name
         self.device = device or _pick_device()
+        self.dtype = dtype
         self._tok = None
         self._model = None
 
@@ -34,8 +36,15 @@ class DebertaNLIModel:
             from transformers import AutoModelForSequenceClassification, AutoTokenizer  # type: ignore
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"transformers missing: {exc}")
+        import torch  # type: ignore
+
         self._tok = AutoTokenizer.from_pretrained(self.model_name)
-        self._model = AutoModelForSequenceClassification.from_pretrained(self.model_name).to(self.device)
+        model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+        # fp16 halves the NLI's VRAM footprint. On CPU fp16 matmul is slow
+        # and poorly supported, so the device check keeps fp32 there.
+        if self.dtype == "fp16" and self.device.startswith("cuda"):
+            model = model.half()
+        self._model = model.to(self.device)
         self._model.eval()
 
     def _ensure_loaded(self) -> None:
@@ -65,6 +74,7 @@ class DebertaNLIModel:
 
 def from_config(cfg) -> DebertaNLIModel:
     name = (cfg.models or {}).get("nli", "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7")
-    m = DebertaNLIModel(model_name=name)
+    dtype = ((cfg.models or {}).get("nli_dtype") or "fp16").lower()
+    m = DebertaNLIModel(model_name=name, dtype=dtype)
     m._load_hf()
     return m

@@ -28,11 +28,15 @@ echo "=== 1/5  HaluEval, length-matched split ==="
     --resume > eval_halueval_matched.log 2>&1
 echo "  exit=$? -> eval_halueval_matched.log"
 
-echo "=== 2/5  TruthfulQA ==="
+echo "=== 2/5  TruthfulQA (CLOSED-BOOK: retrieval off, the corpus is an answer key) ==="
+# TruthfulQA's retrieval corpus is built from the dataset's own reference
+# answers, so retrieving against it measures the label. Retrieval and
+# grounding are switched off and the run writes to its own file.
 "$PY" -u -m scripts.evaluate_full \
     --data data/truthfulqa_eval_1000.jsonl \
-    --out data/metrics_truthfulqa.json \
-    --index data/index_truthfulqa \
+    --out data/metrics_truthfulqa_closedbook.json \
+    --retrieval-source none \
+    --grounding-source none \
     --limit 1000 \
     --resume > eval_truthfulqa_1000.log 2>&1
 echo "  exit=$? -> eval_truthfulqa_1000.log"

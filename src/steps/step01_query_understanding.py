@@ -5,7 +5,7 @@ Intent classification + NER (GLiNER + spaCy) + LLM-based query rewrite.
 from __future__ import annotations
 
 import re
-from . import Step, StepContext
+from . import Step, StepContext, generator_of
 from ..types import Claim
 from ..utils.claim_extractor import intrinsic_overlap
 
@@ -22,7 +22,7 @@ class Step01QueryUnderstanding(Step):
         pipeline = self.ctx.metadata.get("pipeline")
         spacy_ner = getattr(pipeline, "spacy_ner", None) if pipeline else None
         gliner = getattr(pipeline, "gliner_ner", None) if pipeline else None
-        llm = getattr(pipeline, "generator", None) if pipeline else None
+        llm = generator_of(pipeline)
 
         q = self.ctx.query
 
