@@ -997,29 +997,65 @@ _PAPER_FILES = (
 )
 
 
-def test_the_aupr_row_reports_the_interval_overlap():
-    """AUPR is a tie, not a win.
+def test_the_aupr_row_verdict_follows_the_interval():
+    """The AUPR verdict must follow the interval, not the point estimate.
 
-    Our AUPR is 0.853 against Decoding Memories' reported 0.84-0.85, but
-    our own 95% CI is [0.833, 0.874], which covers that whole range. The
-    row used to say "Above the general-purpose probes", which reads as a
-    lead over the field.
+    The row used to say "Above the general-purpose probes" on the strength
+    of a point estimate whose own 95% CI covered the published range -- a
+    claim of a lead that the interval did not support. The verdict is
+    derived from the CI: it may only say "above ... 95% CI excludes it"
+    when our lower bound clears the comparable, and it must say
+    "overlaps" when the intervals intersect.
+
+    The test does not hard-code which of the two applies. The measured
+    AUPR moved from 0.853 (CI [0.833, 0.874], which covered the published
+    0.84-0.85 range) to 0.922 (CI [0.906, 0.938], which clears it), and a
+    test that pinned the old conclusion would have failed for the right
+    number arriving.
     """
     md = Path("Paper/comparison.md")
     if not md.exists():
         pytest.skip("comparison.md not present")
+    metrics = Path("data/metrics_halueval.json")
+    if not metrics.exists():
+        pytest.skip("no evaluation output to read the interval from")
+    agg = json.loads(metrics.read_text(encoding="utf-8")).get("aggregate") or {}
+
     text = md.read_text(encoding="utf-8")
     row = next((l for l in text.splitlines()
                 if l.startswith("| **Detection AUPR** |")), None)
     assert row is not None, "the AUPR row is missing from comparison.md"
     low = row.lower()
-    assert "tie" in low or "overlap" in low, (
-        f"the AUPR row does not report the interval overlap: {row}"
-    )
-    for overclaim in ("above the general-purpose probes",
-                      "above the best", "leads the field"):
+
+    ci = agg.get("detection_aupr_ci95")
+    value = agg.get("detection_aupr")
+    if not ci or len(ci) != 2 or value is None:
+        pytest.skip("the run has no AUPR interval to check the row against")
+    lo, hi = float(ci[0]), float(ci[1])
+    comparable = 0.84
+
+    if lo > comparable:
+        # Separated: the row may claim the lead, and must say the interval
+        # is what secures it.
+        assert "above" in low and "excludes" in low, (
+            f"our AUPR CI [{lo:.3f}, {hi:.3f}] clears {comparable}, so the "
+            f"row should say so: {row}"
+        )
+    elif hi < comparable:
+        assert "below" in low, (
+            f"our AUPR CI [{lo:.3f}, {hi:.3f}] sits under {comparable}, so "
+            f"the row should say so: {row}"
+        )
+    else:
+        assert "tie" in low or "overlap" in low, (
+            f"our AUPR CI [{lo:.3f}, {hi:.3f}] covers {comparable}, so the "
+            f"row should report the overlap: {row}"
+        )
+
+    # A tie may never be dressed up as a lead, whatever the interval says.
+    for overclaim in ("above the general-purpose probes", "leads the field"):
         assert overclaim not in low, (
-            f"the AUPR row still claims a lead: {row}"
+            f"the AUPR row still claims a lead over the field: {row}"
         )
 
 
@@ -1235,3 +1271,73 @@ def test_no_paper_file_holds_a_stale_mitigation_delta():
             assert token not in text, (
                 f"{path} still holds the stale mitigation figure {token!r}"
             )
+
+
+# ---------------------------------------------------------------------------
+# The generated surfaces must not drift away from the measurement.
+# ---------------------------------------------------------------------------
+
+# Every file the generator writes, including the defence-notes summary that
+# was previously hand-written and froze at whatever numbers were current
+# when it was last edited.
+_DRIFT_SURFACES = (
+    "comparison.md",
+    "comparison_summary.tex",
+    "why_we_win.md",
+    "why_we_win_summary.tex",
+    "five_position_comparison.md",
+    "wins_summary.md",
+)
+
+
+@pytest.mark.parametrize("filename", _DRIFT_SURFACES)
+def test_the_paper_surfaces_match_the_current_measurement(filename, tmp_path):
+    """Regenerating the surfaces must be a no-op on the committed files.
+
+    The generator is the only thing that keeps the paper's numbers equal to
+    the evaluation's numbers. This test runs it against the current metrics
+    into a temporary directory and requires the result to match what is
+    committed. A difference means the paper holds a number the measurement
+    no longer supports -- the exact failure that let a superseded ROC-AUC
+    of 0.843 and a claim-level F1 of 0.653 sit in the paper while the
+    measurement said 0.9251 and 0.8107.
+
+    The test is skipped when the metrics files are absent, because a fresh
+    checkout has no evaluation output to regenerate from.
+    """
+    metrics = Path("data/metrics_halueval.json")
+    if not metrics.exists():
+        pytest.skip("no evaluation output to regenerate from")
+
+    committed = Path("Paper") / filename
+    if not committed.exists():
+        pytest.skip(f"{committed} is not present")
+
+    # A copy of the real Paper/ directory, so the generator starts from the
+    # committed text and the diff isolates the measurement-driven changes.
+    staged = tmp_path / "Paper"
+    shutil.copytree("Paper", staged)
+
+    # The generator reads the CSV back to fill the cells it derives from
+    # it, so the staged run needs the committed CSV as its input.
+    staged_csv = tmp_path / "comparison_table.csv"
+    committed_csv = Path("Paper/comparison_table.csv")
+    if committed_csv.exists():
+        shutil.copy2(committed_csv, staged_csv)
+    else:
+        staged_csv.write_text("", encoding="utf-8")
+
+    rc = fill_main([
+        "--csv", str(staged_csv),
+        "--metrics", str(metrics),
+        "--mitigation", "data/mitigation_results.json",
+        "--paper-dir", str(staged),
+        "--readme", str(tmp_path / "README.md"),
+    ])
+    assert rc == 0
+
+    regenerated = (staged / filename).read_text(encoding="utf-8")
+    assert regenerated == committed.read_text(encoding="utf-8"), (
+        f"Paper/{filename} does not match the current measurement. "
+        "Run `python -m scripts.fill_comparison_table` and commit the result."
+    )

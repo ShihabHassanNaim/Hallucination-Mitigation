@@ -182,19 +182,51 @@ def test_a_score_win_requires_the_interval_to_exclude_the_comparable():
 
 
 def test_the_chart_does_not_mark_a_metric_as_a_win_when_the_ci_overlaps():
-    """The rendered chart must agree with the interval rule."""
+    """The rendered chart must agree with the interval rule.
+
+    The rule is symmetric: a metric is a win only when our 95% CI clears
+    the published comparable, and it is not a win while the intervals
+    intersect. The test used to pin the AUPR side of that rule to the
+    superseded measurement -- our CI [0.833, 0.874] covered Decoding
+    Memories' 0.84-0.85, so AUPR was a tie. The corrected instrument
+    moved AUPR to 0.922 with CI [0.906, 0.938], which clears it, so the
+    row is now a genuine win and the prose says so.
+
+    What must hold either way is that the verdict the paper prints
+    agrees with the interval that was measured.
+    """
     if not METRICS_PATH.exists() or not CSV_PATH.exists():
         pytest.skip("metrics or comparison table not present")
     agg = json.loads(METRICS_PATH.read_text(encoding="utf-8"))["aggregate"]
     aupr_ci = agg.get("detection_aupr_ci95") or []
     if len(aupr_ci) != 2:
         pytest.skip("no AUPR interval")
-    # Decoding Memories reports 0.84-0.85; our CI covers that range, so
-    # AUPR must not be presented as a win.
-    assert not (aupr_ci[0] > 0.85), (
-        f"the AUPR interval {aupr_ci} clears Decoding Memories' 0.85; the "
-        "prose needs updating, because it currently calls AUPR a tie"
+    lo, hi = float(aupr_ci[0]), float(aupr_ci[1])
+
+    comparison_md = Path("Paper/comparison.md")
+    if not comparison_md.exists():
+        pytest.skip("comparison.md not present")
+    row = next(
+        (l for l in comparison_md.read_text(encoding="utf-8").splitlines()
+         if l.startswith("| **Detection AUPR** |")),
+        None,
     )
+    assert row is not None, "the AUPR row is missing from comparison.md"
+    low = row.lower()
+
+    if lo > 0.85:
+        # Separated: the row may claim the win, and must name the
+        # interval as the reason.
+        assert "above" in low and "excludes" in low, (
+            f"our AUPR CI [{lo:.3f}, {hi:.3f}] clears Decoding Memories' "
+            f"0.85, so the row should say so: {row}"
+        )
+    else:
+        # Overlapping: the row must not claim a win.
+        assert "overlap" in low or "tie" in low, (
+            f"our AUPR CI [{lo:.3f}, {hi:.3f}] covers Decoding Memories' "
+            f"0.85, so the row should report the tie: {row}"
+        )
 
 
 def test_the_verdict_tally_matches_the_matrix():
