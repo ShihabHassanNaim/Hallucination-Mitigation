@@ -5,7 +5,7 @@ losses. These three charts show where the pipeline actually wins, so the
 paper can point at them without cherry-picking a metric that happens to
 look favourable.
 
-  9.  win_dimensions.png        — the 18-dimension verdict matrix, split
+  9.  win_dimensions.png        — the verdict matrix, split
                                   into wins / ties / losses, read from the
                                   generated table so it cannot drift.
  10. structural_advantages.png  — the capability comparison against the
@@ -18,7 +18,7 @@ look favourable.
                                   intervals, against every other
                                   comparable rather than only the best.
 
-The verdict matrix is parsed out of Paper/why_we_win.md, which is itself
+The verdict matrix is parsed out of Paper/comparison.md, which is itself
 generated from the measurements, so the chart cannot claim a win the prose
 does not.
 """
@@ -39,7 +39,7 @@ import numpy as np  # noqa: E402
 OUT_DIR = Path("data/graphs")
 METRICS_PATH = Path("data/metrics_halueval.json")
 CSV_PATH = Path("Paper/comparison_table.csv")
-VERDICT_PATH = Path("Paper/why_we_win.md")
+VERDICT_PATH = Path("Paper/comparison.md")
 
 WIN = "#16a34a"
 TIE = "#f59e0b"
@@ -97,7 +97,7 @@ def _style(ax, title: str, xlabel: str = "", ylabel: str = "") -> None:
 def plot_win_dimensions() -> None:
     """Read the verdict matrix out of the generated prose and chart it.
 
-    The matrix in ``Paper/why_we_win.md`` is generated from the
+    The matrix in ``Paper/comparison.md`` is generated from the
     measurements, so parsing it keeps the chart in step with the paper: a
     dimension can only appear as a win here if the paper calls it a win.
     """
@@ -152,7 +152,7 @@ def plot_win_dimensions() -> None:
         ax1.text(b.get_x() + b.get_width() / 2, v + 0.15, str(v),
                  ha="center", va="bottom", fontsize=13, fontweight="bold")
     ax1.set_ylim(0, max(vals) + 1.6)
-    _style(ax1, "Verdict across the 18 compared dimensions",
+    _style(ax1, f"Verdict across the {len(rows)} compared dimensions",
            ylabel="Number of dimensions")
     ax1.text(
         0.5, -0.16,
@@ -364,6 +364,22 @@ def plot_score_wins() -> None:
         m = re.search(r"[-+]?\d+(?:\.\d+)?", text)
         return float(m.group(0)) if m else None
 
+    def variant(v):
+        """Return the variant name a cell names in parentheses, if any.
+
+        A cited system can publish several variants of the same metric.
+        Dale 2023's Table 1 reports P@R90 of 67.4 for ALTI and 70.3 for
+        LaBSE, and the two are different numbers for the same metric.
+        The cell has to say which one it is, otherwise the chart ends up
+        measured against a different number than the paper's win matrix
+        quotes -- which is how this chart once claimed a P@R90 win
+        against 0.674 while the paper called the same metric "at par"
+        against 0.703.
+        """
+        text = str(v or "")
+        m = re.search(r"\(([^)]+)\)", text)
+        return m.group(1).strip() if m else ""
+
     # Metrics that are directly comparable: a score in [0,1] where higher
     # is better and both sides use the same definition.
     CANDIDATES = [
@@ -383,11 +399,24 @@ def plot_score_wins() -> None:
                     if len(r) > 1 and r[1].strip() == label), None)
         if row is None or key not in agg:
             continue
-        others = [num(row[i]) for i in other_idx if i < len(row)]
-        others = [x for x in others if x is not None and 0 <= x <= 1]
+        # The comparable cells for this metric, with the variant each one
+        # names. A cited system can publish several variants of the same
+        # metric -- Dale 2023's Table 1 reports P@R90 of 67.4 for ALTI and
+        # 70.3 for LaBSE -- and the chart has to compare against the same
+        # variant the paper's win matrix quotes. Otherwise the chart can
+        # claim a win against one number while the paper calls the same
+        # metric "at par" against a different one.
+        cells = []
+        for i in other_idx:
+            if i >= len(row):
+                continue
+            n = num(row[i])
+            if n is None or not (0 <= n <= 1):
+                continue
+            cells.append((n, variant(row[i])))
         value = agg[key]
         ci = agg.get(ci_key) or []
-        if not others:
+        if not cells:
             # No published comparable survives the filter. The metric is
             # still worth showing -- dropping it silently would hide a
             # dimension the reader expects -- but it has nothing to be
@@ -398,7 +427,10 @@ def plot_score_wins() -> None:
                 "no_comparable": True,
             })
             continue
-        best = max(others)
+        # The best comparable is the highest published score. When the
+        # highest cell names a variant, that name is carried into the
+        # chart so the reader can see which number they are looking at.
+        best, best_variant = max(cells, key=lambda c: c[0])
         # A win requires the two to be *separated*, not merely for our
         # point estimate to be higher. Comparing point estimates against a
         # published value whose interval we do not have is how a chart ends
@@ -410,13 +442,30 @@ def plot_score_wins() -> None:
         # comparable. With no interval available there is no separation to
         # demonstrate, so it is not a win.
         ci_low = ci[0] if len(ci) == 2 else None
+        ci_high = ci[1] if len(ci) == 2 else None
         win = bool(ci_low is not None and ci_low > best)
+        # The interval decides the outcome in both directions, the same
+        # way the paper's rule does. A win needs the bottom of our
+        # interval above their number; a loss needs the top of it
+        # below. Anything else is an overlap.
+        #
+        # Checking only the bottom bound -- "ci_low <= best" -- called a
+        # metric an overlap whenever our lower bound sat under their
+        # number, which is also true of an interval that sits entirely
+        # below it. Our ROC-AUC is [0.911, 0.940] against Dale's
+        # 0.987: the whole interval is under his number, so we are
+        # behind, not at par. The caption then called it a tie, which
+        # the paper's own win matrix reported as a loss.
+        loss = bool(ci_high is not None and ci_high < best)
         metrics.append({
             "label": label, "value": value, "best": best,
             "ci": ci, "win": win,
+            "variant": best_variant,
             # Kept for the caption and for the log line, so the chart can
             # say *why* a metric is not a win rather than just dropping it.
-            "overlap": (not win and ci_low is not None and ci_low <= best),
+            "overlap": (not win and not loss and ci_low is not None
+                        and ci_high is not None),
+            "loss": loss,
         })
 
     if not metrics:
@@ -457,6 +506,14 @@ def plot_score_wins() -> None:
         if m["best"] is not None:
             ax.text(x + width / 2, m["best"] + 0.025, f"{m['best']:.3f}",
                     ha="center", va="bottom", fontsize=8.5, color="#475569")
+            # When the published number comes from a named variant of the
+            # cited system, the variant is printed under the bar so the
+            # reader knows which of that system's numbers they are
+            # looking at.
+            if m.get("variant"):
+                ax.text(x + width / 2, m["best"] - 0.028,
+                        m["variant"][:18],
+                        ha="center", va="top", fontsize=6.5, color="#94a3b8")
         else:
             # Say why the space is empty rather than leaving a bare gap.
             # It is centred on the empty slot, but a metric with no
@@ -485,7 +542,13 @@ def plot_score_wins() -> None:
     from matplotlib.patches import Patch
     handles = [
         Patch(facecolor=WIN, label="Ours — separated from the comparable"),
-        Patch(facecolor=GREY, label="Ours — not separated (CI overlaps)"),
+        # The grey bars are the metrics that are not separated, and they
+        # are not all the same kind of not-separated: some tie (the CI
+        # overlaps the published value) and some are behind (the CI
+        # sits entirely below it). The legend cannot tell them apart by
+        # colour, so it says what they share and the caption below
+        # splits them.
+        Patch(facecolor=GREY, label="Ours — not separated"),
         Patch(facecolor="#cbd5e1", label="Best published comparable"),
     ]
     ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.11),
@@ -499,6 +562,7 @@ def plot_score_wins() -> None:
     # published.
     wins = [m["label"] for m in metrics if m["win"]]
     overlaps = [m["label"] for m in metrics if m.get("overlap")]
+    losses = [m["label"] for m in metrics if m.get("loss")]
     no_comp = [m["label"] for m in metrics if m.get("no_comparable")]
 
     # Short names keep the caption inside the figure. The full metric
@@ -519,7 +583,15 @@ def plot_score_wins() -> None:
         win_txt = "No metric is separated from its comparable."
     if overlaps:
         win_txt += ("\nOn " + _short(overlaps) + " the 95% CI overlaps the "
-                    "published value, so these are ties rather than wins.")
+                    "published value, so "
+                    + ("this is a tie rather than a win."
+                       if len(overlaps) == 1
+                       else "these are ties rather than wins."))
+    if losses:
+        win_txt += ("\nOn " + _short(losses) + " the 95% CI sits entirely "
+                    "below the published value, so "
+                    + ("we are behind." if len(losses) == 1
+                       else "we are behind on these."))
     if no_comp:
         win_txt += ("\n" + _short(no_comp) + " has no published comparable "
                     "to test against.")
@@ -555,9 +627,21 @@ def plot_score_wins() -> None:
             print(f"       {m['label']}: ours={m['value']:.3f} {ci_txt} "
                   f"vs no published comparable -> not comparable")
         else:
+            # The variant is part of the log line because the published
+            # number is only meaningful together with the variant it
+            # came from -- Dale 2023 reports both 0.674 and 0.703 for
+            # P@R90.
+            who = f" ({m['variant']})" if m.get("variant") else ""
+            if m["win"]:
+                outcome = "WIN"
+            elif m.get("loss"):
+                outcome = "BEHIND"
+            elif m.get("overlap"):
+                outcome = "TIE"
+            else:
+                outcome = "not separated"
             print(f"       {m['label']}: ours={m['value']:.3f} {ci_txt} "
-                  f"vs best={m['best']:.3f} -> "
-                  f"{'WIN' if m['win'] else 'not separated'}")
+                  f"vs best={m['best']:.3f}{who} -> {outcome}")
     print("  [ok] 11 score_wins.png")
 
 

@@ -148,9 +148,9 @@ def test_fill_cannot_write_to_the_real_paper(tmp_path):
     paper = _paper_dir(tmp_path)
     # The fill functions only rewrite a file that already exists, so the
     # temporary paper directory needs a copy of the row under test.
-    (paper / "why_we_win.md").write_text(
-        "| 7 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | "
-        "0.987 (MT-only) | **0.843** | ≈ | below |\n",
+    (paper / "comparison.md").write_text(
+        "| 8 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | "
+        "0.987 | **0.843** |\n",
         encoding="utf-8",
     )
 
@@ -167,7 +167,7 @@ def test_fill_cannot_write_to_the_real_paper(tmp_path):
     assert rc == 0
 
     # The temporary copy was refreshed with the fixture's number.
-    assert "0.111" in (paper / "why_we_win.md").read_text(encoding="utf-8")
+    assert "0.111" in (paper / "comparison.md").read_text(encoding="utf-8")
 
     # Every file the run wrote lives under the temporary paper directory.
     written = {p.resolve() for p in paper.rglob("*") if p.is_file()}
@@ -178,7 +178,7 @@ def test_fill_cannot_write_to_the_real_paper(tmp_path):
         )
 
     # And the real paper still holds the measured value.
-    real = Path("Paper/why_we_win.md")
+    real = Path("Paper/comparison.md")
     if real.exists():
         text = real.read_text(encoding="utf-8")
         assert "0.111" not in text, (
@@ -444,20 +444,21 @@ def test_the_five_position_prose_sentence_tracks_the_measurement(tmp_path, monke
     from the number it describes.
 
     It was hand-written, so a new evaluation left it holding the previous
-    run's delta while the table beside it was refreshed.
+    run's delta while the table beside it was refreshed. The prose used to
+    live in a separate five-position file; it is now the "Position 2"
+    section of the consolidated comparison document.
     """
     import scripts.fill_comparison_table as fill
 
-    paper = tmp_path / "five_position_comparison.md"
+    paper = tmp_path / "comparison.md"
     paper.write_text(
-        "*Positions 2 and 5 are not wins and are reported as measured. "
-        "The mitigation \u0394 is -0.035 BERTScore F1 (95% CI [-0.067, "
-        "-0.006]) on the 18 of 60 rows where step 10 regenerated, and the "
-        "HRR / VSR / CCR rates are below the cited comparables. The rewrite "
-        "path is implemented and exercised, but on this sample it did not "
-        "improve similarity to the gold answer; improving it is future "
-        "work. The defensible claims are the architectural ones \u2014 "
-        "Positions 1, 3 and 4.\n",
+        "### Position 2 \u2014 Mitigation \u0394\n\n"
+        "**Verdict: NOT A WIN \u2014 reported as measured.** See section 5. "
+        "The measured delta is\n"
+        "\u22120.035 BERTScore F1 (CI [\u22120.067, \u22120.006]) on 18 "
+        "regenerated rows. Dale reports +0.49 to\n+0.60 on machine "
+        "translation, so on the one published mitigation delta we do not "
+        "lead.\n",
         encoding="utf-8",
     )
     mit = tmp_path / "mit.json"
@@ -479,13 +480,13 @@ def test_the_five_position_prose_sentence_tracks_the_measurement(tmp_path, monke
     )
     monkeypatch.setattr(fill, "MITIGATION_PATH", mit)
 
-    fill._fill_five_position_md(paper, {}, dry_run=False)
+    fill._fill_comparison_md(paper, {}, dry_run=False)
 
     out = paper.read_text(encoding="utf-8")
-    assert "-0.035" not in out, "the stale delta survived the fill"
+    assert "\u22120.035" not in out, "the stale delta survived the fill"
     assert "+0.012" in out
-    assert "[-0.010, +0.034]" in out
-    assert "214 of 1000 rows" in out
+    assert "[\u22120.010, +0.034]" in out
+    assert "214 regenerated rows" in out
 
 
 def test_the_readme_mitigation_paragraph_tracks_the_measurement(tmp_path, monkeypatch):
@@ -553,7 +554,6 @@ def test_the_mitigation_flag_is_honoured_by_the_prose(tmp_path, monkeypatch):
     paper = tmp_path / "Paper"
     paper.mkdir()
     for name in ("comparison.md", "comparison_summary.tex",
-                 "five_position_comparison.md", "why_we_win.md",
                  "why_we_win_summary.tex"):
         shutil.copy(Path("Paper") / name, paper / name)
     shutil.copy("Paper/comparison_table.csv", paper / "comparison_table.csv")
@@ -594,9 +594,12 @@ def test_the_mitigation_flag_is_honoured_by_the_prose(tmp_path, monkeypatch):
     )
     assert "214 rows" in text
 
-    fp = (paper / "five_position_comparison.md").read_text(encoding="utf-8")
-    assert "+0.007" in fp, (
-        "the five-position prose did not report the selected measurement"
+    # The consolidated comparison document quotes the mitigation result
+    # in the "Position 2" prose. It used to live in a separate
+    # five-position file, so the check moved with it.
+    cmp_text = (paper / "comparison.md").read_text(encoding="utf-8")
+    assert "+0.007" in cmp_text, (
+        "the comparison prose did not report the selected measurement"
     )
 
 
@@ -676,26 +679,18 @@ def test_prose_row_is_refreshed_when_the_number_changes(tmp_path):
 
     md = tmp_path / "comparison.md"
     md.write_text(
-        "| **Ours (RAG fused score, Step 9)** | **0.802** | **0.813** | "
-        "**0.652** | Black-box + retrieval | HaluEval QA (length-matched) |\n",
+        "| **Ours (Step 9 fused score)** | **0.802** | Retrieval + "
+        "per-claim NLI + fusion | **HaluEval QA** | — |\n",
         encoding="utf-8",
     )
 
-    _fill_comparison_md(md, {
-        "detection_roc_auc": 0.843,
-        "detection_aupr": 0.853,
-        "precision_at_recall_90": 0.658,
-    })
+    _fill_comparison_md(md, {"detection_roc_auc": 0.843})
     after_first = md.read_text(encoding="utf-8")
     assert "0.843" in after_first
     assert "0.802" not in after_first
 
     # A second run with different metrics must update the row again.
-    _fill_comparison_md(md, {
-        "detection_roc_auc": 0.901,
-        "detection_aupr": 0.911,
-        "precision_at_recall_90": 0.700,
-    })
+    _fill_comparison_md(md, {"detection_roc_auc": 0.901})
     after_second = md.read_text(encoding="utf-8")
     assert "0.901" in after_second
     assert "0.843" not in after_second
@@ -707,16 +702,12 @@ def test_prose_fill_is_idempotent(tmp_path):
 
     md = tmp_path / "comparison.md"
     md.write_text(
-        "| **Ours (RAG fused score, Step 9)** | **0.802** | **0.813** | "
-        "**0.652** | Black-box + retrieval | HaluEval QA (length-matched) |\n",
+        "| **Ours (Step 9 fused score)** | **0.802** | Retrieval + "
+        "per-claim NLI + fusion | **HaluEval QA** | — |\n",
         encoding="utf-8",
     )
 
-    agg = {
-        "detection_roc_auc": 0.843,
-        "detection_aupr": 0.853,
-        "precision_at_recall_90": 0.658,
-    }
+    agg = {"detection_roc_auc": 0.843}
     _fill_comparison_md(md, agg)
     first = md.read_text(encoding="utf-8")
 
@@ -765,22 +756,28 @@ def test_prose_rows_are_refreshed_even_when_the_csv_is_current(tmp_path):
 
 
 def test_five_position_file_is_refreshed(tmp_path):
-    """The five-position write-up was never wired to the generator."""
-    from scripts.fill_comparison_table import _fill_five_position_md
+    """The five positions now live in comparison.md; their rates are filled.
 
-    md = tmp_path / "five_position_comparison.md"
+    The rates used to be a table in a separate file that the generator
+    never wrote, so the numbers there were hand-maintained. They are
+    prose in the consolidated document now, and the fill refreshes them.
+    """
+    import scripts.fill_comparison_table as fill
+
+    md = tmp_path / "comparison.md"
     md.write_text(
-        "| **Ours (Step 11 gate)** | **0.857** (1 \u2212 ABSTAIN-failure rate) |\n"
-        "| **Ours (per-claim NLI)** | **0.85+** |\n"
-        "| **Ours (Step 10 regen)** | **0.917** |\n",
+        "### Position 5 \u2014 HRR / VSR / CCR\n\n"
+        "Our HRR is 0.857 against Dale's implied ~0.55. Our VSR is 0.85+ "
+        "against 0.80\u20130.81. Our\n"
+        "CCR is 0.917 with no published CCR to compare against\n",
         encoding="utf-8",
     )
 
-    _fill_five_position_md(md, {
+    fill._fill_comparison_md(md, {
         "hallucination_reduction_rate": 0.172,
         "verification_success_rate": 0.608,
         "claim_correction_rate": 0.616,
-    })
+    }, dry_run=False)
 
     out = md.read_text(encoding="utf-8")
     assert "0.172" in out
@@ -789,6 +786,12 @@ def test_five_position_file_is_refreshed(tmp_path):
     assert "0.857" not in out
     assert "0.85+" not in out
     assert "0.917" not in out
+
+
+
+
+
+
 
 
 
@@ -839,66 +842,88 @@ def test_delta_positive_is_false_for_a_missing_measurement():
 
 
 def test_why_we_win_verdict_rows_are_rewritten(tmp_path):
-    """The win/tie/loss cells are recomputed, not left hand-written."""
-    from scripts.fill_comparison_table import _fill_why_we_win_md
+    """The win/tie/loss cells are recomputed, not left hand-written.
 
-    md = tmp_path / "why_we_win.md"
+    The fixture copies the real rows of the win matrix, with a verdict
+    that disagrees with the measurement, so the fill has to correct both
+    the value and the verdict.
+    """
+    import scripts.fill_comparison_table as fill
+
+    md = tmp_path / "comparison.md"
     md.write_text(
-        "| 2 | **Claim-level F1** | TU Wien 2024 \u2014 Vectara | 0.71 | "
+        "| # | Dimension | Best Comparable (Paper) | Best Comparable Score "
+        "| Our Score | Winner | Justification |\n"
+        "|---|---|---|---|---|---|---|\n"
+        "| 2 | **Claim-level F1** | TU Wien \u2014 Vectara | 0.71 | "
         "**0.76** | \u2713 | Above the cited comparable |\n"
-        "| 3 | **Hallucination Reduction Rate (HRR)** | Dale 2023 "
-        "(N-best rerank) | ~0.55 (implied) | **0.71** | \u2713 | "
-        "Above the implied baseline |\n"
-        "| 4 | **Verification Success Rate (VSR)** | AILS-NTUA (Voting) | "
-        "0.80 (acc) | **0.85+** | \u2713 | Above the cited comparables |\n"
-        "| 8 | **Sentence accuracy** | Halu-NLP (SHROOM winner) | 0.847 | "
+        "| 3 | **Detection AUPR** | Decoding Memories | 0.840 | "
+        "**0.71** | \u2713 | Above the cited comparable |\n"
+        "| 4 | **HRR** | Dale 2023 (implied) | ~0.55 | "
+        "**0.71** | \u2713 | Above the implied baseline |\n"
+        "| 5 | **VSR** | Halu-NLP | 0.81 | "
+        "**0.85+** | \u2713 | Above the cited comparables |\n"
+        "| 9 | **Sentence accuracy** | Halu-NLP | 0.847 | "
         "**0.83** | \u2713 | Above the SHROOM winner |\n",
         encoding="utf-8",
     )
 
-    _fill_why_we_win_md(md, {
+    fill._fill_comparison_md(md, {
         "claim_f1": 0.653,
         "hallucination_reduction_rate": 0.172,
         "verification_success_rate": 0.608,
         "detection_accuracy": 0.745,
-    })
+        "detection_aupr": 0.71,
+        "detection_aupr_ci": "[0.680, 0.740]",
+    }, dry_run=False)
 
     out = md.read_text(encoding="utf-8")
-    # The measured values are in place.
-    assert "**0.653**" in out
-    assert "**0.172**" in out
-    assert "**0.608**" in out
-    assert "**0.745**" in out
-    # The stale values are gone.
-    assert "0.76" not in out
-    assert "0.85+" not in out
     # Every row that lost the comparison now carries a loss verdict.
     assert "Above the cited comparable |" not in out
     assert "Above the implied baseline |" not in out
     assert "Above the cited comparables |" not in out
     assert "Above the SHROOM winner |" not in out
     assert "Below the cited comparable" in out
-    assert "Below the implied baseline" in out
-    assert "Below the cited comparables" in out
-    assert "Below the SHROOM winner" in out
+    # The measured values replaced the stale ones.
+    assert "**0.653**" in out
+    assert "**0.172**" in out
+    assert "**0.608**" in out
+    assert "**0.745**" in out
+    assert "0.76" not in out
+    assert "0.85+" not in out
+
+
+
+
+
+
+
+
+
 
 
 def test_why_we_win_verdict_rows_are_idempotent(tmp_path):
     """A second pass must not append a second verdict column."""
-    from scripts.fill_comparison_table import _fill_why_we_win_md
+    import scripts.fill_comparison_table as fill
 
-    md = tmp_path / "why_we_win.md"
+    md = tmp_path / "comparison.md"
     md.write_text(
+        "| # | Dimension | Best Comparable (Paper) | Best Comparable Score "
+        "| Our Score | Winner | Justification |\n"
+        "|---|---|---|---|---|---|---|\n"
         "| 2 | **Claim-level F1** | TU Wien 2024 \u2014 Vectara | 0.71 | "
         "**0.76** | \u2713 | Above the cited comparable |\n",
         encoding="utf-8",
     )
 
     agg = {"claim_f1": 0.653}
-    _fill_why_we_win_md(md, agg)
+    fill._fill_comparison_md(md, agg, dry_run=False)
     once = md.read_text(encoding="utf-8")
-    _fill_why_we_win_md(md, agg)
+    fill._fill_comparison_md(md, agg, dry_run=False)
     assert md.read_text(encoding="utf-8") == once
+
+
+
 
 
 def test_why_we_win_tex_verdict_rows_are_rewritten(tmp_path):
@@ -955,15 +980,17 @@ def test_verdict_tally_is_none_without_a_matrix():
 
 def test_why_we_win_tally_is_refreshed(tmp_path):
     """A stale tally is rewritten to agree with the rows above it."""
-    from scripts.fill_comparison_table import _fill_why_we_win_md
+    import scripts.fill_comparison_table as fill
 
-    md = tmp_path / "why_we_win.md"
+    md = tmp_path / "comparison.md"
     md.write_text(
-        "| 2 | **Claim-level F1** | TU Wien 2024 \u2014 Vectara | 0.71 | "
+        "| # | Dimension | Best Comparable (Paper) | Best Comparable Score "
+        "| Our Score | Winner | Justification |\n"
+        "|---|---|---|---|---|---|---|\n"
+        "| 2 | **Claim-level F1** | TU Wien \u2014 Vectara | 0.71 | "
         "**0.76** | \u2713 | Above the cited comparable |\n"
-        "| 3 | **Hallucination Reduction Rate (HRR)** | Dale 2023 "
-        "(N-best rerank) | ~0.55 (implied) | **0.71** | \u2713 | "
-        "Above the implied baseline |\n"
+        "| 4 | **HRR** | Dale 2023 (implied) | ~0.55 | "
+        "**0.71** | \u2713 | Above the implied baseline |\n"
         "\n"
         "| Outcome | Count | Dimensions |\n"
         "|---|---|---|\n"
@@ -973,14 +1000,26 @@ def test_why_we_win_tally_is_refreshed(tmp_path):
         encoding="utf-8",
     )
 
-    _fill_why_we_win_md(md, {
+    fill._fill_comparison_md(md, {
         "claim_f1": 0.653,
         "hallucination_reduction_rate": 0.172,
-    })
+    }, dry_run=False)
 
     out = md.read_text(encoding="utf-8")
-    assert "| **\u2713 Win** | 0 |  |" in out
-    assert "| **\u2717 Loss** | 2 | 2, 3 |" in out
+    # Both rows lost their comparison, so the tally must count two losses
+    # and no wins. The stale counts of 6 and 6 are gone.
+    assert "| **\u2717 Loss** | 2 | 2, 4 |" in out
+    assert "| **\u2713 Win** | 6 |" not in out
+    assert "| **\u2717 Loss** | 6 |" not in out
+
+
+
+
+
+
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -990,9 +1029,7 @@ def test_why_we_win_tally_is_refreshed(tmp_path):
 _PAPER_FILES = (
     Path("Paper/comparison.md"),
     Path("Paper/comparison_summary.tex"),
-    Path("Paper/why_we_win.md"),
     Path("Paper/why_we_win_summary.tex"),
-    Path("Paper/five_position_comparison.md"),
     Path("README.md"),
 )
 
@@ -1023,7 +1060,7 @@ def test_the_aupr_row_verdict_follows_the_interval():
 
     text = md.read_text(encoding="utf-8")
     row = next((l for l in text.splitlines()
-                if l.startswith("| **Detection AUPR** |")), None)
+                if l.startswith("| AUPR |")), None)
     assert row is not None, "the AUPR row is missing from comparison.md"
     low = row.lower()
 
@@ -1035,21 +1072,20 @@ def test_the_aupr_row_verdict_follows_the_interval():
     comparable = 0.84
 
     if lo > comparable:
-        # Separated: the row may claim the lead, and must say the interval
-        # is what secures it.
-        assert "above" in low and "excludes" in low, (
+        # Separated: the row may claim the lead.
+        assert "\u2713" in row, (
             f"our AUPR CI [{lo:.3f}, {hi:.3f}] clears {comparable}, so the "
-            f"row should say so: {row}"
+            f"row should claim the win: {row}"
         )
     elif hi < comparable:
-        assert "below" in low, (
+        assert "\u2717" in row, (
             f"our AUPR CI [{lo:.3f}, {hi:.3f}] sits under {comparable}, so "
-            f"the row should say so: {row}"
+            f"the row should report the loss: {row}"
         )
     else:
-        assert "tie" in low or "overlap" in low, (
+        assert "\u2248" in row, (
             f"our AUPR CI [{lo:.3f}, {hi:.3f}] covers {comparable}, so the "
-            f"row should report the overlap: {row}"
+            f"row should report the tie: {row}"
         )
 
     # A tie may never be dressed up as a lead, whatever the interval says.
@@ -1057,6 +1093,9 @@ def test_the_aupr_row_verdict_follows_the_interval():
         assert overclaim not in low, (
             f"the AUPR row still claims a lead over the field: {row}"
         )
+
+
+
 
 
 def test_the_ccr_row_says_there_is_no_published_comparable():
@@ -1071,16 +1110,22 @@ def test_the_ccr_row_says_there_is_no_published_comparable():
     if not md.exists():
         pytest.skip("comparison.md not present")
     text = md.read_text(encoding="utf-8")
-    row = next((l for l in text.splitlines() if l.startswith("| **CCR** |")),
+    row = next((l for l in text.splitlines() if l.startswith("| CCR |")),
                None)
     assert row is not None, "the CCR row is missing from comparison.md"
     low = row.lower()
-    assert "no published comparable" in low or "none published" in low, (
+    assert "none published" in low or "no published comparable" in low, (
         f"the CCR row does not say that no comparable is published: {row}"
+    )
+    assert "not a win" in low, (
+        f"the CCR row must not report a win against no comparable: {row}"
     )
     assert "above the implied baseline" not in low, (
         f"the CCR row still claims to be above an implied baseline: {row}"
     )
+
+
+
 
 
 def test_the_paper_does_not_claim_aupr_or_ccr_are_wins():
@@ -1122,29 +1167,27 @@ def _write_mitigation(path: Path, delta: float, ci, n_regen: int = 16,
 
 
 def test_the_why_we_win_qa_prose_tracks_the_measurement(tmp_path, monkeypatch):
-    """The two Q&A paragraphs that quote the delta must not drift.
+    """The LaTeX Q&A paragraphs that quote the delta must not drift.
 
     They were hand-written, so a new evaluation left them holding the
     previous run's delta while the table beside them was refreshed.
     """
     import scripts.fill_comparison_table as fill
 
-    paper = tmp_path / "why_we_win.md"
+    paper = tmp_path / "why_we_win_summary.tex"
     paper.write_text(
-        "2. **\"How is your work different from Dale 2023?\"** — Dale reports "
-        "+0.49 to +0.60 on machine translation; our measured \u0394 is -0.035 "
-        "on the length-matched HaluEval split, so we do not claim to lead on "
-        "mitigation \u0394.\n\n"
-        "5. **\"What's the strongest result?\"** — Detection ROC-AUC of "
-        "**0.843**. The mitigation \u0394 is *not* a win: measured on the rows "
-        "where step 10 regenerated, it is -0.035 (CI [-0.067, -0.006]), so it "
+        "on machine translation; our measured $\\Delta$ is $-0.035$ on the "
+        "length-matched HaluEval split, so we do not claim to lead here.\n"
+        "\n"
+        "mitigation $\\Delta$ is \\emph{not} a win: it is $-0.035$ "
+        "(CI $[-0.067, -0.006]$) on the rows where step~10 regenerated, so it "
         "is reported as an open result.\n",
         encoding="utf-8",
     )
     mit = _write_mitigation(tmp_path / "mit.json", -0.007, [-0.022, 0.007])
     monkeypatch.setattr(fill, "MITIGATION_PATH", mit)
 
-    fill._fill_why_we_win_md(paper, {}, dry_run=False)
+    fill._fill_why_we_win_tex(paper, {}, dry_run=False)
 
     out = paper.read_text(encoding="utf-8")
     assert "-0.035" not in out, "the stale delta survived the fill"
@@ -1152,22 +1195,39 @@ def test_the_why_we_win_qa_prose_tracks_the_measurement(tmp_path, monkeypatch):
     assert "[-0.022, +0.007]" in out
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 def test_the_comparison_observation_tracks_the_measurement(tmp_path, monkeypatch):
-    """The observation paragraph in comparison.md quotes the delta, the
-    interval and the number of regenerated rows."""
+    """The negative-result prose under the mitigation table quotes the
+    delta, the interval and the number of regenerated rows.
+
+    The paper writes the minus sign as a typographic one, so the
+    assertion looks for that rather than the ASCII hyphen.
+    """
     import scripts.fill_comparison_table as fill
 
     paper = tmp_path / "comparison.md"
     paper.write_text(
-        "**Observation.** The pipeline is the only system that produces a "
-        "**rewritten answer** rather than just a label. Measured on the rows "
-        "where step 10 actually regenerated (n=18 of 60), the \u0394 over the "
-        "no-mitigation baseline is **-0.035 BERTScore F1** (95% CI [-0.067, "
-        "-0.006]) \u2014 i.e. regeneration did not improve similarity to the "
-        "gold answer on this sample. The rewrite step is therefore not yet a "
-        "demonstrated win over the no-mitigation baseline, and the \u0394 is "
-        "reported here as measured rather than as the projected figure an "
-        "earlier draft carried.\n",
+        "**Our rewrite does not work yet.** The delta is \u22120.035 and the "
+        "confidence interval\nincludes zero. On the 18 rows where step 10 "
+        "actually rewrote an answer, the rewrite\nwas no better than leaving "
+        "the answer alone. A paired permutation test on those rows gives\n"
+        "p = 0.404 \u2014 no evidence of an effect in either direction.\n"
+        "\n"
+        "**Our sample is small.** Only 18 of 60 rows were regenerated, "
+        "because our gate only\nfires when the evidence supports a rewrite. "
+        "A negative result on 18 rows from 8 unique\nquestions is weak "
+        "evidence.\n",
         encoding="utf-8",
     )
     mit = _write_mitigation(tmp_path / "mit.json", -0.007, [-0.022, 0.007])
@@ -1176,48 +1236,62 @@ def test_the_comparison_observation_tracks_the_measurement(tmp_path, monkeypatch
     fill._fill_comparison_md(paper, {}, dry_run=False)
 
     out = paper.read_text(encoding="utf-8")
-    assert "-0.035" not in out, "the stale delta survived the fill"
-    assert "-0.007" in out
-    assert "n=16 of 500" in out, (
+    assert "\u22120.035" not in out, "the stale delta survived the fill"
+    assert "\u22120.007" in out
+    assert "16 of 500" in out, (
         f"the regenerated-row count was not refreshed: {out!r}"
     )
+
+
+
+
+
+
+
+
+
 
 
 def test_the_five_position_heading_and_prose_track_the_measurement(
     tmp_path, monkeypatch,
 ):
-    """The Position 2 heading and its two prose blocks quote the delta."""
+    """The Position 2 prose quotes the delta, its interval and the number
+    of regenerated rows.
+
+    The five positions now live in the consolidated comparison.md, so the
+    fill is the one that writes that document. The paper writes the minus
+    sign as a typographic one.
+    """
     import scripts.fill_comparison_table as fill
 
-    paper = tmp_path / "five_position_comparison.md"
+    paper = tmp_path / "comparison.md"
     paper.write_text(
-        "## Position 2 \u2014 Mitigation \u0394 (Measured: -0.035 vs. +0.60 Dale)\n\n"
-        "**NOT A WIN \u2014 reported as measured.** On the length-matched "
-        "HaluEval split, the mitigation \u0394 over the no-mitigation baseline "
-        "is **-0.035 BERTScore F1** (95% CI [-0.067, -0.006], measured on the "
-        "18 of 60 rows where step 10 actually regenerated). Dale 2023 reports "
-        "+0.49 to +0.60 on machine translation, so on the one published "
-        "mitigation \u0394 we do not lead. The step that rewrites "
-        "contradicted claims is implemented and exercised, but on this sample "
-        "it did not improve similarity to the gold answer; that is an open "
-        "result, and it is reported here rather than asserted as a win.\n\n"
-        "> **Paragraph 2 \u2014 Position 2 (\u0394 reported as measured).** "
-        "*Our pipeline implements evidence-grounded regeneration and measures "
-        "its effect: on the length-matched HaluEval split, the mitigation "
-        "\u0394 over the no-mitigation baseline is -0.035 BERTScore F1 (95% CI "
-        "[-0.067, -0.006]), measured on the 18 of 60 rows where step 10 "
-        "actually regenerated.*\n",
+        "### Position 2 \u2014 Mitigation \u0394\n\n"
+        "**Verdict: NOT A WIN.** See section 5. The measured delta is\n"
+        "\u22120.035 BERTScore F1 (CI [\u22120.067, \u22120.006]) on 18 "
+        "regenerated rows. Dale reports +0.49 to\n+0.60 on machine "
+        "translation, so on the one published mitigation delta we do not\n"
+        "lead.\n",
         encoding="utf-8",
     )
     mit = _write_mitigation(tmp_path / "mit.json", -0.007, [-0.022, 0.007])
     monkeypatch.setattr(fill, "MITIGATION_PATH", mit)
 
-    fill._fill_five_position_md(paper, {}, dry_run=False)
+    fill._fill_comparison_md(paper, {}, dry_run=False)
 
     out = paper.read_text(encoding="utf-8")
-    assert "-0.035" not in out, "the stale delta survived the fill"
-    assert "-0.007" in out
-    assert "16 of 500" in out
+    assert "\u22120.035" not in out, "the stale delta survived the fill"
+    assert "\u22120.007" in out
+    assert "16 regenerated rows" in out
+
+
+
+
+
+
+
+
+
 
 
 def test_the_prose_says_the_result_is_not_separable_when_the_interval_covers_zero(
@@ -1228,32 +1302,36 @@ def test_the_prose_says_the_result_is_not_separable_when_the_interval_covers_zer
     no effect at all."""
     import scripts.fill_comparison_table as fill
 
-    paper = tmp_path / "five_position_comparison.md"
+    paper = tmp_path / "comparison.md"
     paper.write_text(
-        "## Position 2 \u2014 Mitigation \u0394 (Measured: -0.035 vs. +0.60 Dale)\n\n"
-        "**NOT A WIN \u2014 reported as measured.** On the length-matched "
-        "HaluEval split, the mitigation \u0394 over the no-mitigation baseline "
-        "is **-0.035 BERTScore F1** (95% CI [-0.067, -0.006], measured on the "
-        "18 of 60 rows where step 10 actually regenerated). Dale 2023 reports "
-        "+0.49 to +0.60 on machine translation, so on the one published "
-        "mitigation \u0394 we do not lead. The step that rewrites "
-        "contradicted claims is implemented and exercised, but on this sample "
-        "it did not improve similarity to the gold answer; that is an open "
-        "result, and it is reported here rather than asserted as a win.\n",
+        "**Our rewrite does not work yet.** The delta is \u22120.035 and the "
+        "confidence interval\nincludes zero. On the 18 rows where step 10 "
+        "actually rewrote an answer, the rewrite\nwas no better than leaving "
+        "the answer alone. A paired permutation test on those rows gives\n"
+        "p = 0.404 \u2014 no evidence of an effect in either direction.\n",
         encoding="utf-8",
     )
     mit = _write_mitigation(tmp_path / "mit.json", -0.007, [-0.022, 0.007])
     monkeypatch.setattr(fill, "MITIGATION_PATH", mit)
 
-    fill._fill_five_position_md(paper, {}, dry_run=False)
+    fill._fill_comparison_md(paper, {}, dry_run=False)
 
     out = paper.read_text(encoding="utf-8")
     assert "not distinguishable from no effect" in out, (
         f"an interval covering zero was described as a measured failure: {out!r}"
     )
-    assert "it did not improve similarity" not in out, (
+    assert "no better than leaving the answer alone" not in out, (
         f"an interval covering zero was described as a measured failure: {out!r}"
     )
+
+
+
+
+
+
+
+
+
 
 
 def test_no_paper_file_holds_a_stale_mitigation_delta():
@@ -1277,17 +1355,14 @@ def test_no_paper_file_holds_a_stale_mitigation_delta():
 # The generated surfaces must not drift away from the measurement.
 # ---------------------------------------------------------------------------
 
-# Every file the generator writes, including the defence-notes summary that
-# was previously hand-written and froze at whatever numbers were current
-# when it was last edited.
+# Every file the generator writes. Paper/comparison.md is the single
+# human-facing comparison document: the four defence-notes files it used
+# to be split across were consolidated into it, so they are no longer
+# surfaces of their own.
 _DRIFT_SURFACES = (
     "comparison.md",
     "comparison_summary.tex",
-    "why_we_win.md",
     "why_we_win_summary.tex",
-    "five_position_comparison.md",
-    "wins_summary.md",
-    "comparison_detailed.md",
 )
 
 
@@ -1341,4 +1416,790 @@ def test_the_paper_surfaces_match_the_current_measurement(filename, tmp_path):
     assert regenerated == committed.read_text(encoding="utf-8"), (
         f"Paper/{filename} does not match the current measurement. "
         "Run `python -m scripts.fill_comparison_table` and commit the result."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The consolidated document must not be able to hold a stale number.
+# ---------------------------------------------------------------------------
+
+
+def _consolidated_rules():
+    """The rules that fill Paper/comparison.md, with their builders.
+
+    ``_fill_comparison_md`` holds two lists: the ``consolidated`` rules
+    that cover the single comparison document, and the older ``row_specs``
+    that cover the CSV-derived layout. Both are read out of the module so
+    the test exercises the real rules rather than a copy.
+    """
+    import scripts.fill_comparison_table as fill
+
+    rules = []
+    original = fill._apply_specs
+    seen = []
+
+    def spy(text, specs, values, dry_run=False):
+        if not seen:
+            seen.append(specs)
+        return original(text, specs, values, dry_run=dry_run)
+
+    fill._apply_specs = spy
+    try:
+        fill.main(["--dry-run"])
+    finally:
+        fill._apply_specs = original
+
+    if seen:
+        for label, pattern, build, needed in seen[0]:
+            rules.append((label, pattern, build, needed))
+    return rules
+
+
+def test_every_consolidated_rule_can_repair_a_stale_number(tmp_path):
+    """A rule that cannot repair its own row is a row that can go stale.
+
+    The drift test above only proves the generator is a no-op on the
+    committed file. It does not prove the generator would *notice* if the
+    measurement moved. This one puts a different but equally valid number
+    into every cell the rules own and requires the generator to put the
+    measured value back.
+
+    The corruption replaces the measured number with another number of the
+    same shape, because that is the real drift: the evaluation was
+    re-run and the document kept the previous run's figure.
+    """
+    import re
+
+    import scripts.fill_comparison_table as fill
+
+    metrics = Path("data/metrics_halueval.json")
+    committed = Path("Paper/comparison.md")
+    if not metrics.exists() or not committed.exists():
+        pytest.skip("no evaluation output or comparison document to test")
+
+    real_text = committed.read_text(encoding="utf-8")
+
+    # Capture the values the generator builds, then apply the rules.
+    original = fill._apply_specs
+    captured: dict = {}
+
+    def spy(text, specs, values, dry_run=False):
+        if "values" not in captured:
+            captured["values"] = dict(values)
+        if "specs" not in captured:
+            captured["specs"] = specs
+        return original(text, specs, values, dry_run=dry_run)
+
+    fill._apply_specs = spy
+    try:
+        fill.main(["--dry-run"])
+    finally:
+        fill._apply_specs = original
+
+    values = captured["values"]
+    specs = captured["specs"]
+    expected, _ = original(real_text, specs, values, dry_run=False)
+
+    number = re.compile(r"\d+(?:\.\d+)?")
+
+    for spec in specs:
+        label, pattern, build, needed = spec[:4]
+        optional = spec[4] if len(spec) > 4 else ()
+        match = re.search(pattern, expected)
+        assert match is not None, (
+            f"the rule {label!r} does not match Paper/comparison.md, so the "
+            "row it is supposed to refresh is not protected"
+        )
+
+        original_row = match.group(0)
+        # The build function is handed the same values the rule would see:
+        # the required ones, plus the optional ones when they were
+        # measured.
+        looked_up = {k: values.get(k) for k in needed}
+        for key in optional:
+            looked_up.setdefault(key, values.get(key))
+        built = build(lambda k: looked_up[k], match)
+
+        # The measured numbers in the built row are the candidates for
+        # corruption. Take the LAST occurrence of each, because in these
+        # rows the anchor text comes first and the value later.
+        measured = []
+        for key in list(needed) + list(optional):
+            value = values.get(key)
+            if not isinstance(value, str):
+                continue
+            for token in number.findall(value):
+                if token and token in built:
+                    measured.append(token)
+        if not measured:
+            continue
+
+        broken_row = original_row
+        for token in measured:
+            index = broken_row.rfind(token)
+            if index == -1:
+                continue
+            decimals = len(token.split(".")[1]) if "." in token else 0
+            drifted = ("0." + "1" * decimals) if decimals else "7"
+            broken_row = (
+                broken_row[:index] + drifted + broken_row[index + len(token):]
+            )
+        if broken_row == original_row:
+            continue
+
+        broken = expected[:match.start()] + broken_row + expected[match.end():]
+        repaired, _ = original(broken, specs, values, dry_run=False)
+        assert repaired == expected, (
+            f"the rule {label!r} did not restore the measured number. "
+            f"It left {broken_row!r} in place of {original_row!r}."
+        )
+
+
+def test_the_consolidated_document_compares_all_three_datasets():
+    """The single comparison document must cover every dataset we ran.
+
+    The comparison against published work is the point of the document,
+    and a dataset that quietly dropped out of it would leave the thesis
+    claiming a comparison it does not have. This pins the three datasets
+    by name in the document's own section headings and in the dataset
+    table.
+    """
+    committed = Path("Paper/comparison.md")
+    if not committed.exists():
+        pytest.skip("no comparison document to test")
+
+    text = committed.read_text(encoding="utf-8")
+
+    for dataset in ("HaluEval", "TruthfulQA", "RAGTruth"):
+        assert dataset in text, (
+            f"{dataset} is missing from Paper/comparison.md; the document "
+            "must compare the pipeline against published work on every "
+            "dataset it was evaluated on"
+        )
+
+    # The three-dataset table gives each one its measured ROC-AUC.
+    for label in (
+        "**HaluEval QA (length-matched)**",
+        "**TruthfulQA**",
+        "**RAGTruth (length-matched)**",
+    ):
+        assert label in text, (
+            f"the dataset table row {label!r} is missing from "
+            "Paper/comparison.md"
+        )
+
+    # The comparison against published work is explicit, and it names the
+    # published system it compares against.
+    assert "LLM-Check" in text, (
+        "the RAGTruth comparison against the published LLM-Check numbers "
+        "is missing from Paper/comparison.md"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The one rule for a win: the bottom of our 95% interval must clear the
+# published number.
+#
+# These tests assert the RULE, not a conclusion. The values are synthetic
+# and chosen so that the rule gives different answers for the point
+# estimate and for the interval, which is the only way a test can tell
+# the two apart. A test that pinned "P@R90 is a win" would keep passing
+# after the measurement moved and the rule stopped holding.
+# ---------------------------------------------------------------------------
+
+
+def _lookup_for(values: dict):
+    return values.__getitem__
+
+
+def test_a_win_needs_the_interval_to_clear_the_comparable():
+    """A higher point estimate is not a win when the interval overlaps.
+
+    Our point estimate is above the published number, but the bottom of
+    our interval is below it, so the measurement does not establish the
+    difference. The rule must return a tie, not a win.
+    """
+    from scripts.fill_comparison_table import _verdict_from_ci
+
+    values = {
+        "detection_aupr": "0.900",
+        "detection_aupr_ci": "[0.700, 0.950]",
+    }
+    verdict = _verdict_from_ci(
+        _lookup_for(values), "detection_aupr", "detection_aupr_ci",
+        "0.840 (Decoding Memories)",
+    )
+    assert verdict != "✓", (
+        "a metric whose 95% interval overlaps the published number was "
+        "reported as a win"
+    )
+
+
+def test_a_win_is_claimed_when_the_interval_clears_the_comparable():
+    """The rule's positive case: the whole interval sits above."""
+    from scripts.fill_comparison_table import _verdict_from_ci
+
+    values = {
+        "detection_aupr": "0.920",
+        "detection_aupr_ci": "[0.906, 0.938]",
+    }
+    verdict = _verdict_from_ci(
+        _lookup_for(values), "detection_aupr", "detection_aupr_ci",
+        "0.840 (Decoding Memories)",
+    )
+    assert verdict == "✓"
+
+
+def test_a_metric_with_no_interval_gets_no_verdict():
+    """Without an interval there is no evidence of separation either way.
+
+    The rule has to decline rather than fall back on the point estimate,
+    because the caller then keeps whatever the document already said
+    instead of inventing a verdict the measurement does not support.
+    """
+    from scripts.fill_comparison_table import _verdict_from_ci
+
+    values = {"claim_f1": "0.811"}
+    verdict = _verdict_from_ci(
+        _lookup_for(values), "claim_f1", "claim_f1_ci", "0.71 (TU Wien)"
+    )
+    assert verdict is None
+
+
+def test_a_comparable_with_no_published_number_gets_no_verdict():
+    """A metric nobody published a score for cannot be won or lost."""
+    from scripts.fill_comparison_table import _verdict_from_ci
+
+    values = {
+        "claim_correction_rate": "0.706",
+        "claim_correction_rate_ci": "[0.679, 0.732]",
+    }
+    for cell in ("none published", "-", "—"):
+        verdict = _verdict_from_ci(
+            _lookup_for(values), "claim_correction_rate",
+            "claim_correction_rate_ci", cell,
+        )
+        assert verdict is None, (
+            f"a comparable cell of {cell!r} produced a verdict; there is "
+            "no published number to measure against"
+        )
+
+
+def test_an_implied_baseline_is_not_a_published_comparable():
+    """An implied baseline is derived from another metric, not published.
+
+    Dale's "~0.55" is computed from his own delta, so it is not a score
+    he published for this metric. Treating it as one would make the
+    comparison look like a measurement against a measurement.
+    """
+    from scripts.fill_comparison_table import _verdict_from_ci
+
+    values = {
+        "hallucination_reduction_rate": "0.132",
+        "hallucination_reduction_rate_ci": "[0.114, 0.153]",
+    }
+    verdict = _verdict_from_ci(
+        _lookup_for(values), "hallucination_reduction_rate",
+        "hallucination_reduction_rate_ci", "~0.55 (Dale 2023, implied)",
+    )
+    assert verdict is None
+
+
+def test_the_year_in_a_comparable_cell_is_not_read_as_a_score():
+    """The system's name in the cell can carry a year, and it is not one.
+
+    "0.987 (Dale 2023 -- ALTI+)" holds one score, 0.987. Reading every
+    number in the cell picks up 2023 as well and turns the comparable
+    into a number nobody published -- which silently decides the row.
+    """
+    from scripts.fill_comparison_table import _comparable_number
+
+    assert _comparable_number("0.987 (Dale 2023 — ALTI+)") == 0.987
+    assert _comparable_number("0.703 (Dale 2023 — LaBSE)") == 0.703
+
+
+def test_a_band_comparable_is_read_as_its_top():
+    """A published band is read as the best score in it.
+
+    "0.85-0.90 (Sent-T5 XL)" is the range the other system reached; the
+    strongest claim we can make against it is its top.
+    """
+    from scripts.fill_comparison_table import _comparable_number
+
+    assert _comparable_number("0.85-0.90 (Sent-T5 XL)") == 0.90
+
+
+def test_every_surface_uses_the_same_verdict_for_the_same_metric():
+    """One metric cannot be a win in one table and a tie in another.
+
+    The section-3.2 metric table, the win matrix and the visual
+    headline block all report a verdict for the same measurement
+    against the same published number. When they used different rules
+    the document called P@R90 a tie in the metric table and a win in the
+    win matrix. This asserts the three surfaces agree.
+    """
+    from scripts.fill_comparison_table import (
+        _verdict_from_ci,
+        _visual_headline_block,
+    )
+
+    values = {
+        "detection_roc_auc": "0.925",
+        "detection_roc_auc_ci": "[0.911, 0.940]",
+        "detection_aupr": "0.922",
+        "detection_aupr_ci": "[0.906, 0.938]",
+        "precision_at_recall_90": "0.800",
+        "precision_at_recall_90_ci": "[0.773, 0.844]",
+        "detection_accuracy": "0.829",
+        "detection_accuracy_ci": "[0.809, 0.851]",
+        "spearman_rho": "0.736",
+        "spearman_rho_ci": "[0.712, 0.762]",
+        "claim_f1": "0.811",
+        "hallucination_reduction_rate": "0.132",
+        "hallucination_reduction_rate_ci": "[0.114, 0.153]",
+        "verification_success_rate": "0.701",
+        "verification_success_rate_ci": "[0.673, 0.726]",
+        "mit_delta": "-0.007",
+        "mit_delta_ci": "[-0.022, +0.007]",
+        "latency_mean_s": "4.18",
+    }
+
+    # The metric table's verdict for each row, read from the same helper
+    # the rule uses.
+    rows = [
+        ("detection_roc_auc", "detection_roc_auc_ci",
+         "0.987 (Dale 2023 — ALTI+)"),
+        ("detection_aupr", "detection_aupr_ci", "0.840 (Decoding Memories)"),
+        ("precision_at_recall_90", "precision_at_recall_90_ci",
+         "0.703 (Dale 2023 — LaBSE)"),
+        ("detection_accuracy", "detection_accuracy_ci",
+         "0.847 (Halu-NLP — SHROOM)"),
+        ("spearman_rho", "spearman_rho_ci", "0.770 (Halu-NLP)"),
+        ("verification_success_rate", "verification_success_rate_ci",
+         "0.81 (Halu-NLP)"),
+    ]
+    expected = {
+        key: _verdict_from_ci(_lookup_for(values), key, ci_key, cell)
+        for key, ci_key, cell in rows
+    }
+
+    # The visual headline block draws its marks from the same rule, so
+    # the two surfaces cannot disagree about a dimension.
+    block = _visual_headline_block(_lookup_for(values))
+    labels = {
+        "detection_roc_auc": "Detection ROC-AUC",
+        "detection_aupr": "Detection AUPR",
+        "precision_at_recall_90": "P@R90",
+        "detection_accuracy": "Sentence accuracy",
+        "spearman_rho": "Spearman ρ",
+        "verification_success_rate": "VSR",
+    }
+    for key, label in labels.items():
+        line = next(
+            (ln for ln in block.splitlines() if ln.startswith(label)),
+            None,
+        )
+        assert line is not None, f"{label} is missing from the block"
+        mark = next(c for c in ("✓", "≈", "✗") if c in line)
+        expected_mark = expected[key]
+        assert mark == expected_mark, (
+            f"{label} is {mark} in the visual headline block but "
+            f"{expected_mark} under the interval rule; the two surfaces "
+            "must not disagree about the same measurement"
+        )
+
+
+def test_the_chart_and_the_paper_compare_against_the_same_published_number():
+    """The chart's comparable has to be the one the paper quotes.
+
+    Dale 2023 publishes several variants of the same metric. The paper
+    compares P@R90 against the LaBSE variant, so the chart has to
+    compare against the LaBSE variant too -- otherwise the chart can
+    claim a win against a different number than the paper quotes.
+    """
+    import csv as _csv
+
+    with Path("Paper/comparison_table.csv").open(
+        "r", encoding="utf-8", newline=""
+    ) as f:
+        rows = list(_csv.reader(f))
+    header = [h.strip() for h in rows[0]]
+    row = next(
+        (r for r in rows[1:]
+         if len(r) > 1 and r[1].strip() == "P at R=90"),
+        None,
+    )
+    assert row is not None, "the CSV has no P at R=90 row"
+    dale = row[header.index("Dale 2023 ACL")]
+
+    # The cell names the variant it holds, so the number has to be read
+    # out of the text rather than cast.
+    from scripts.fill_comparison_table import _comparable_number
+
+    dale_value = _comparable_number(dale)
+    assert dale_value is not None, (
+        f"the CSV's Dale P@R90 cell {dale!r} holds no published number"
+    )
+
+    committed = Path("Paper/comparison.md")
+    if not committed.exists():
+        pytest.skip("no comparison document to test")
+    text = committed.read_text(encoding="utf-8")
+
+    # The number the paper quotes for P@R90.
+    import re as _re
+    m = _re.search(r"\| P@R90 \| [^|]*\|[^|]*\| ([\d.]+) \(", text)
+    assert m is not None, "the paper does not quote a P@R90 comparable"
+    paper_value = float(m.group(1))
+
+    assert dale_value == paper_value, (
+        f"the chart reads the CSV's Dale P@R90 as {dale_value} while the "
+        f"paper quotes {paper_value}; the two must be the same published "
+        "number"
+    )
+
+
+"""Tests for the LaTeX summary's verdict matrix.
+
+The LaTeX summary is a second surface for the same measurements. It used
+to carry a rule of its own -- "At par = within 10% of best" -- and
+hand-written verdicts, so it called P@R90 "At par" while the markdown
+called the same measurement a win, and its caption listed
+claim-level F1 among the dimensions we trail while the row above it
+said Win.
+
+These tests assert the rules, not the conclusions: a verdict comes from
+the interval, the caption comes from the rows, and the two documents
+cannot disagree about the same measurement.
+"""
+
+import re
+from pathlib import Path
+
+import pytest
+
+
+# ---------------------------------------------------------------------------
+# A verdict in the LaTeX matrix is a measurement, not a fixed string.
+# ---------------------------------------------------------------------------
+
+
+def test_a_latex_win_needs_the_interval_to_clear_the_comparable(tmp_path):
+    """The LaTeX matrix uses the paper's one rule.
+
+    Our point estimate is above the published number but the bottom of
+    our interval is below it, so the row is not a win.
+    """
+    from scripts.fill_comparison_table import _fill_why_we_win_tex
+
+    tex = tmp_path / "why_we_win_summary.tex"
+    tex.write_text(
+        "P@R90                        & 0.703 (Dale LaBSE) & 0.800 & "
+        "At par & Close to top \\\\\n",
+        encoding="utf-8",
+    )
+
+    _fill_why_we_win_tex(tex, {
+        "precision_at_recall_90": 0.800,
+        # The bottom of the interval is below their 0.703, so the
+        # measurement does not establish the difference.
+        "precision_at_recall_90_ci95": [0.600, 0.844],
+    })
+
+    out = tex.read_text(encoding="utf-8")
+    assert "Win" not in out, (
+        "the LaTeX matrix called a metric a win whose interval overlaps "
+        "the published number"
+    )
+    assert "Loss" in out or "At par" in out
+
+
+def test_a_latex_row_is_a_win_when_the_interval_clears_the_comparable(tmp_path):
+    """The rule's positive case: the whole interval sits above."""
+    from scripts.fill_comparison_table import _fill_why_we_win_tex
+
+    tex = tmp_path / "why_we_win_summary.tex"
+    tex.write_text(
+        "P@R90                        & 0.703 (Dale LaBSE) & 0.800 & "
+        "At par & Close to top \\\\\n",
+        encoding="utf-8",
+    )
+
+    _fill_why_we_win_tex(tex, {
+        "precision_at_recall_90": 0.800,
+        "precision_at_recall_90_ci95": [0.760, 0.800],
+    })
+
+    out = tex.read_text(encoding="utf-8")
+    assert "Win" in out, (
+        "the LaTeX matrix did not claim a win whose interval sits above "
+        "the published number"
+    )
+    assert "At par" not in out
+
+
+def test_the_latex_matrix_and_the_markdown_agree_on_every_metric():
+    """One measurement cannot be a win in one document and a tie in the other.
+
+    The LaTeX summary and the consolidated markdown are two surfaces
+    for the same numbers. They are written by different rules, and the
+    rules disagreed: P@R90 was "At par" in the LaTeX matrix and a win
+    in the markdown.
+    """
+    from scripts.fill_comparison_table import (
+        _comparable_number,
+        _verdict_from_ci,
+    )
+
+    tex_path = Path("Paper/why_we_win_summary.tex")
+    md_path = Path("Paper/comparison.md")
+    if not tex_path.exists() or not md_path.exists():
+        pytest.skip("no committed paper documents to compare")
+
+    tex = tex_path.read_text(encoding="utf-8")
+    md = md_path.read_text(encoding="utf-8")
+
+    # The LaTeX matrix's score rows: dimension & comparable & ours &
+    # verdict & justification.
+    rows = re.findall(
+        r"^(Claim-level F1|Hallucination Reduction Rate|"
+        r"Verification Success Rate|Detection ROC-AUC|"
+        r"Sentence accuracy|P@R90|Spearman rho)\s*&([^&]*)&"
+        r"([^&]*)&([^&]*)&([^&]*)\\\\\s*$",
+        tex,
+        re.MULTILINE,
+    )
+    assert rows, "the LaTeX matrix has no score rows"
+
+    # The markdown's metric table: | Metric | value | CI | comparable |
+    # verdict |.
+    #
+    # It is scoped to the "full metric set" table rather than to every
+    # five-cell row in the document: later tables reuse the metric
+    # names, and a row keyed only by its first cell would let a later
+    # table overwrite the metric table's own row.
+    metric_table = re.search(
+        r"\*\*The full metric set on HaluEval:\*\*\s*\n\s*\n"
+        r"\| Metric \|.*?\n(?:\|\|?.*\n)*",
+        md,
+    )
+    assert metric_table, "the markdown has no HaluEval metric table"
+    md_rows = {}
+    for line in metric_table.group(0).splitlines():
+        if not line.startswith("| ") or line.startswith("|---"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) != 5:
+            continue
+        md_rows[cells[0]] = cells
+
+    # The LaTeX dimension names and the markdown metric names.
+    aliases = {
+        "Claim-level F1": "Claim F1",
+        "Hallucination Reduction Rate": "HRR",
+        "Verification Success Rate": "VSR",
+        "Detection ROC-AUC": "ROC-AUC",
+        "Sentence accuracy": "Detection accuracy",
+        "P@R90": "P@R90",
+        "Spearman rho": "Spearman ρ",
+    }
+
+    for dimension, comparable, ours, verdict, _why in rows:
+        md_name = aliases.get(dimension.strip())
+        if md_name is None or md_name not in md_rows:
+            continue
+        # The row is | Metric | value | CI | comparable | verdict |, so
+        # cell 0 is the name and the four cells to compare are 1..4.
+        md_value, md_ci, md_comparable, md_verdict = md_rows[md_name][1:5]
+
+        # The two documents have to be measuring against the same
+        # published number.
+        #
+        # An implied baseline has no published number to parse -- the
+        # cell says so -- so both sides parse to None. That is
+        # agreement: neither document is comparing against a
+        # measurement. One side None and the other a number is not.
+        tex_comparable = _comparable_number(comparable)
+        md_comparable_value = _comparable_number(md_comparable)
+        assert tex_comparable == md_comparable_value, (
+            f"{dimension}: the LaTeX matrix compares against "
+            f"{tex_comparable} while the markdown compares against "
+            f"{md_comparable_value}"
+        )
+
+        # And they have to reach the same verdict.
+        tex_mark = "✓" if "Win" in verdict else (
+            "≈" if "At par" in verdict else "✗"
+        )
+        assert tex_mark == md_verdict, (
+            f"{dimension}: the LaTeX matrix says {tex_mark} and the "
+            f"markdown says {md_verdict} for the same measurement"
+        )
+
+
+def test_the_latex_caption_cannot_contradict_its_own_rows():
+    """The caption is written from the rows, so it cannot name a win as a loss.
+
+    The caption used to list claim-level F1 among the dimensions we
+    trail while the row directly above it said Win, and it stated a rule
+    of its own -- "At par = within 10% of best" -- that no other
+    surface used.
+    """
+    from scripts.fill_comparison_table import _tex_verdict_caption
+
+    tex = (
+        "\\begin{tabular}{lllll}\n"
+        "\\hline\n"
+        "Claim-level F1               & 0.71 (TU Wien Vectara) & "
+        "\\textbf{0.811} & \\textbf{Win} & Above the cited comparable \\\\\n"
+        "Detection ROC-AUC            & 0.987 (Dale ALTI+, MT) & 0.925 & "
+        "Loss & Below the cited comparable \\\\\n"
+        "\\hline\n"
+        "\\end{tabular}\n"
+    )
+    caption = _tex_verdict_caption(tex)
+    assert caption, "no caption was produced"
+
+    # The caption names the dimension we win as one we are ahead on.
+    assert "ahead on Claim-level F1" in caption, (
+        f"the caption does not report claim-level F1 as a win: {caption!r}"
+    )
+    # And it names the dimension we trail on.
+    assert "trail on" in caption and "Detection ROC-AUC" in caption, (
+        f"the caption does not report detection ROC-AUC as a loss: "
+        f"{caption!r}"
+    )
+    # The rule it states is the paper's one rule.
+    assert "95\\%" in caption, (
+        f"the caption does not state the interval rule: {caption!r}"
+    )
+    assert "10\\%" not in caption, (
+        f"the caption still states a rule of its own: {caption!r}"
+    )
+
+
+def test_the_latex_prose_names_the_side_that_won():
+    """A sentence cannot claim the other side won a comparison we won.
+
+    The prose read "P@R90 (Dale LaBSE wins): 0.703 vs. ours 0.800" --
+    our 0.800 is above their 0.703, and the bottom of our interval is
+    above their number too.
+    """
+    from scripts.fill_comparison_table import _tex_who_wins
+
+    values = {
+        "precision_at_recall_90": "0.800",
+        "precision_at_recall_90_ci": "[0.773, 0.844]",
+    }
+    who = _tex_who_wins(values.__getitem__, "precision_at_recall_90",
+                        0.703, "Dale LaBSE")
+    assert who == "we win", (
+        f"the prose calls a comparison we won '{who}'"
+    )
+
+    # And the other way round: an interval that overlaps is neither a
+    # win nor a loss. The label has to say so rather than pick a side.
+    values["precision_at_recall_90_ci"] = "[0.600, 0.844]"
+    who = _tex_who_wins(values.__getitem__, "precision_at_recall_90",
+                        0.703, "Dale LaBSE")
+    assert who == "at par", (
+        f"the prose calls an overlapping comparison '{who}'"
+    )
+
+    # An interval entirely below their number is their win.
+    values["precision_at_recall_90_ci"] = "[0.500, 0.650]"
+    who = _tex_who_wins(values.__getitem__, "precision_at_recall_90",
+                        0.703, "Dale LaBSE")
+    assert who == "Dale LaBSE wins", (
+        f"the prose calls a comparison we lost '{who}'"
+    )
+
+
+def test_the_latex_prose_reports_the_mixture_it_actually_has():
+    """The closing sentence has to match the paragraph above it.
+
+    It used to say "All three comparisons ... are not directly
+    comparable", which is true of the test sets but was written when we
+    lost all three, and it undercut the one win the paragraph claims.
+    """
+    from scripts.fill_comparison_table import _tex_three_comparison_caveat
+
+    values = {
+        "detection_accuracy": "0.829",
+        "detection_accuracy_ci": "[0.809, 0.851]",
+        "spearman_rho": "0.736",
+        "spearman_rho_ci": "[0.712, 0.762]",
+        "precision_at_recall_90": "0.800",
+        "precision_at_recall_90_ci": "[0.773, 0.844]",
+    }
+    caveat = _tex_three_comparison_caveat(values.__getitem__)
+    # P@R90 clears their number, Spearman's interval sits below theirs,
+    # and sentence accuracy's interval covers theirs.
+    assert "ahead on 1" in caveat, (
+        f"the closing sentence does not report the win: {caveat!r}"
+    )
+    assert "behind on 1" in caveat, (
+        f"the closing sentence does not report the loss: {caveat!r}"
+    )
+    assert "at par on 1" in caveat, (
+        f"the closing sentence does not report the tie: {caveat!r}"
+    )
+
+
+def test_the_strongest_result_item_quotes_the_measured_interval():
+    """The defence point's interval is the measured one.
+
+    It quoted 95% CI [0.823, 0.865] for a measured 0.925 -- an
+    interval that does not contain the value it was attached to -- and
+    said we were below Sent-T5 XL (0.85--0.90) when 0.925 is above
+    that band.
+    """
+    from scripts.fill_comparison_table import _tex_strongest_result
+
+    values = {
+        "detection_roc_auc": "0.925",
+        "detection_roc_auc_ci": "[0.9113, 0.9401]",
+        "mit_delta": "-0.007",
+        "mit_delta_ci": "[-0.022, +0.007]",
+    }
+    item = _tex_strongest_result(values.__getitem__)
+    assert "0.911" in item and "0.940" in item, (
+        f"the item does not quote the measured interval: {item!r}"
+    )
+    assert "0.823" not in item and "0.865" not in item, (
+        f"the item still quotes the stale interval: {item!r}"
+    )
+    assert "above Sent-T5 XL" in item, (
+        f"the item mis-states where our ROC-AUC sits relative to "
+        f"Sent-T5 XL: {item!r}"
+    )
+
+
+def test_an_implied_baseline_is_named_as_one_in_the_latex_matrix():
+    """An implied baseline is not a published score, and says so.
+
+    Dale's ~0.55 HRR is derived from his own delta. The matrix cell
+    that holds it has to say so, or the comparison reads as a
+    measurement against a measurement.
+    """
+    from scripts.fill_comparison_table import _fill_why_we_win_tex
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "why_we_win_summary.tex"
+        path.write_text(
+            "Hallucination Reduction Rate & 0.55 (Dale 2023, implied) & "
+            "\\textbf{0.132} & Loss & Below the implied baseline \\\\\n",
+            encoding="utf-8",
+        )
+        _fill_why_we_win_tex(path, {
+            "hallucination_reduction_rate": 0.132,
+            "hallucination_reduction_rate_ci95": [0.114, 0.153],
+        })
+        out = path.read_text(encoding="utf-8")
+    assert "implied baseline" in out, (
+        f"the row lost the implied-baseline wording: {out!r}"
+    )
+    assert "cited comparable" not in out, (
+        f"an implied baseline was called a cited comparable: {out!r}"
     )

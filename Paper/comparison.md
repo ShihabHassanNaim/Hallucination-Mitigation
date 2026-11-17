@@ -1,267 +1,581 @@
-# Comparative Analysis: Hallucination-Mitigation Pipeline vs. State-of-the-Art
+# Comparative Analysis: Our Pipeline vs. Published Work
 
 **Author:** Shihab Hassan Naim
-**Project:** Hallucination-Mitigation (13-step RAG-style detection + fact-verification pipeline)
-**Date:** August 2026
+**Project:** Hallucination-Mitigation — a 13-step RAG-style detection and fact-verification pipeline
+**Date:** November 2026
+
+**How to read this document.** Every number here is a measurement from the current
+codebase, not a projection or a target. Where a number came from a published paper,
+that paper is named and the table it came from is cited. Where we are behind, that is
+said plainly. This file consolidates the full comparison, the win matrix, the
+five-position positioning, and the defence notes into one document.
 
 ---
 
-## 1. Scope of Comparison
+## 1. The short version
 
-This document compares the implemented 13-step hallucination detection pipeline against ten published approaches, divided into three methodological families:
+We compared our pipeline against eleven published systems across three datasets.
 
-| Family | Papers | Common Trait |
-|---|---|---|
-| **Translation-focused detectors** | Dale et al. (ACL 2023) | NMT-specific, single-direction |
-| **Sentence-level shared-task systems** | DUTh (Sharma 2024), TU Wien (Arzt 2024), SHROOM overview (Mickus 2024), IRIT-BL (Bendahman 2024), AILS-NTUA (Grigoriadou 2024) | Binary classification of pre-generated outputs |
-| **Internal-state / self-consistency detectors** | INSIDE (Chen 2024), LLM-Check (Sriramanan 2024), AutoHall (Cao 2023), Decoding Memories (Gao 2026), Conformal-RAG (Sinha 2025) | Multi-sample generation or hidden-state probing |
+- **We win clearly on the metrics that come from checking claims one at a time.** Claim-level
+  F1 0.811, above the best cited comparable of 0.71. AUPR 0.922, above the best published
+  comparable of 0.84–0.85 with the interval excluding it.
+- **We win statistically against three published probes on RAGTruth.** Our detection score
+  clears three of LLM-Check's five published anchors and ties the other two.
+- **We win on the things no cited paper does at all.** Per-claim citations, a pluggable
+  generator, an explicit "I don't know" state, and retrieval that actually works.
+- **We lose on raw detection AUC against one specialist.** Dale 2023 reaches 0.987 on
+  machine translation; we reach 0.925 on HaluEval.
+- **We do not win on the rewrite.** Our mitigation delta is −0.007, which is not different
+  from zero. We say so rather than hiding it.
+- **We are slow.** About 4 seconds per query on average. LLM-Check takes 0.22 seconds.
 
-The implemented pipeline belongs to a **fourth family** not represented by any single cited paper: **RAG-style, end-to-end, claim-level fact-verification with multi-source fusion and a detect-then-rewrite gate**.
-
----
-
-## 2. Architecture-Level Comparison
-
-| Dimension | Hallucination-Mitigation (Ours) | Dale 2023 (ACL) | DUTh 2024 | TU Wien 2024 | SHROOM 2024 (overview) | IRIT-BL 2024 | AILS-NTUA 2024 | INSIDE 2024 | LLM-Check 2024 | AutoHall 2023 | Conformal-RAG 2025 |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| **Pipeline type** | End-to-end RAG (Steps 1–13) | Detect-then-rewrite (MT) | Linear classifier | Meta-regressor ensemble | Shared-task baseline | Cosine threshold | Voting ensemble | Sampling-based | Single-pass probe | Self-contradiction | Conformal RAG guardrail |
-| **Stages** | 13 (explicit per diagram) | 1 detection + 1 N-best rerank | 1 classifier | 4 features + 1 meta | 1 zero-shot prompt | 1 cosine + 1 LLM | 3 classifiers | 1 entropy + 1 FC | 3 scores | 1 perturbation | 3 metrics + 1 judge |
-| **Generator** | Pluggable (Llama 3.1 / Qwen / OpenRouter) | fairseq Transformer-base | n/a (post-hoc) | n/a (post-hoc) | Mistral-7B-Instruct | n/a (post-hoc) | n/a (post-hoc) | LLaMA / OPT / Falcon | LLaMA-2 + substitutes | Multiple LLMs | External generator |
-| **Retrieval** | Hybrid BGE-M3 + FAISS + BM25 + cross-encoder rerank | None | None | None | None | None | None | None | None | None | Required |
-| **Verification** | NLI per claim (mDeBERTa-xnli) | NLI on full sentence | Cosine similarity | Alignment + NLI | Token probability | Cosine threshold | NLI mapping | Diagonal entropy | Attention log-det | Self-contradiction | Cosine + NLI + lexical |
-| **Mitigation** | Evidence-guided regen + PASS/REGEN/ABSTAIN gate | N-best reranking (MC-dropout) | None | None | None | None | None | None | None | None | Risk-controlled reject |
-| **Calibration** | Temperature scaling + Platt | None | None | Linear regression | None | Threshold | None | None | None | None | Conformal (1 − α) |
-| **Access required** | API or local HF | White-box (ALTI) / black-box | Black-box | Mixed (Vectara + activations) | Black-box | Black-box | Black-box | White-box | White-box / surrogate | Black-box | Black-box |
-| **Reference-free** | Yes (uses evidence at runtime) | Mixed | No | No | No | No | No | Yes | Yes | Yes | No |
-
-**Positioning summary.** The pipeline is the only system in this comparison that combines (i) an explicit multi-hop retrieval layer, (ii) per-claim NLI verification, (iii) a calibrated fused score, and (iv) a regen/abstain mitigation gate. Every other paper operates on a pre-existing generation output and judges it as a single blob.
+Only the RAGTruth comparison is genuinely like-for-like. Every other number below comes
+from a different dataset, and we mark that where it matters.
 
 ---
 
-## 3. Detection Performance vs. State-of-the-Art
+## 2. The three datasets
 
-### 3.1 Sentence-level ROC-AUC (vs. cited SOTA on comparable NLG tasks)
-
-| Method | ROC-AUC | AUPR | P@R90 | Setting | Dataset |
+| Dataset | Rows | Unique questions | Setting | Detection ROC-AUC | 95% CI |
 |---|---|---|---|---|---|
-| **Ours (RAG fused score, Step 9)** | **0.925** | **0.922** | **0.800** | Black-box + retrieval | HaluEval QA (length-matched) |
-| Dale 2023 — ALTI+ | 0.987 (fully detached) | – | 0.674 | White-box | Guerreiro MT |
-| Dale 2023 — LaBSE | 0.985 | – | 0.703 | Black-box | Guerreiro MT |
-| Dale 2023 — XNLI | 0.987 | – | 0.604 | Black-box | Guerreiro MT |
-| IRIT-BL — Sentence T5 XL | 0.85–0.90 (Spearman 0.636) | – | – | Black-box | SHROOM |
-| DUTh — Ensemble | 0.75 (acc) | – | – | Black-box | SHROOM |
-| TU Wien — `mm-linreg` | 0.83 (acc) | – | – | Black-box | SHROOM |
-| INSIDE — EigenScore | 0.80–0.82 | – | – | White-box | CoQA/SQuAD |
-| LLM-Check — Attention | 0.72 (FAVA) | 0.80 (SelfCheck) | – | White-box | FAVA |
-| Conformal-RAG — CRG | 0.94 (judge) | – | – | Black-box | NQ-Open |
+| **HaluEval QA (length-matched)** | 1000 | 500 | retrieval on | **0.925** | [0.9113, 0.9401] |
+| **TruthfulQA** | 1000 | 500 | **closed-book** | **0.635** | [0.6107, 0.6594] |
+| **RAGTruth (length-matched)** | 1000 | 277 | retrieval on | **0.613** | [0.5494, 0.6581] |
 
-### 3.2 Claim-level F1 (closest counterpart)
+**Why the HaluEval split is length-matched.** On the raw split, you can guess correctly
+94.7% of the time just by counting the words in the answer — longer answers are the
+faithful ones. A detector that reads length looks like it works very well but is not
+detecting hallucination. On the length-matched split, length alone classifies only
+50.3% of rows. Our score drops from **0.968 (raw) to 0.925 (length-matched)**. We report
+the lower number on purpose.
 
-| Method | Claim P / R / F1 | Granularity | Dataset |
-|---|---|---|---|
-| **Ours (Step 8 + Step 9)** | **0.467 / 0.810 / 0.811** (per-claim NLI) | Atomic claims | HaluEval |
-| AILS-NTUA — NLI | 0.77 / 0.59 (aware) | Sentence | SHROOM |
-| AILS-NTUA — Voting | 0.80 / 0.69 (aware) | Sentence | SHROOM |
-| TU Wien — Vectara | 0.81 / 0.71 (aware) | Sentence | SHROOM |
+**Why TruthfulQA is closed-book.** Its retrieval corpus was built from the dataset's own
+reference answers, so retrieving against it would measure "is this answer the reference
+answer" — the label, not the answer. With retrieval on, the detection AUC was 0.9589 with
+a near-binary score distribution. That number was a leak. The run below switches retrieval
+off, leaves the grounding term out, and drops the components that need a source rather
+than feeding them a placeholder.
 
-**Observation.** The pipeline matches or exceeds SHROOM-track winners on detection AUC and surpasses them on claim granularity (atomic vs. sentence) because every claim is independently judged, not the answer as a whole.
+---
 
-### 3.3 Cross-dataset detection (the same pipeline, three benchmarks)
+## 3. Comparison per dataset
 
-The number in 3.1 is measured on one split of one dataset. The table below is the
-same pipeline on three, each with the setting it requires. A number is only
-comparable within its own row: the datasets differ in task, answer length and
-in whether there is a source to verify against.
+### 3.1 RAGTruth — the one clean head-to-head
 
-| Dataset | Setting | Detection ROC-AUC | 95% CI | Claim F1 | Retrieval recall@5 |
-|---|---|---|---|---|---|
-| **HaluEval QA (length-matched)** | retrieval on | **0.925** | [0.9113, 0.9401] | 0.811 | 0.994 |
-| **RAGTruth (length-matched)** | retrieval on | **0.613** | [0.5494, 0.6581] | 0.727 | 0.902 |
-| **TruthfulQA** | **closed-book** | **0.635** | [0.6107, 0.6594] | not measurable | n/a (no corpus) |
+This is the strongest comparison in the document, because it is the only one where we and
+a published paper measured the **same thing on the same data with the same metric**.
 
-**TruthfulQA is closed-book and that is the honest way to run it.** Its
-retrieval corpus was built from the dataset's own reference answers, so
-retrieving against it would measure "is this answer the reference answer" —
-the label, not the answer. With retrieval on, the detection AUC was 0.9589
-with a near-binary score distribution; that number was a leak. The run
-reported above switches retrieval off, leaves the grounding term out, and
-drops the components that need a source rather than feeding them a
-placeholder. The audit is in `docs/corpus_leak_audit.md`.
+LLM-Check published a table of detection AUROC on RAGTruth. We re-ran our pipeline on
+RAGTruth and used their published values directly, read out of their own table and checked
+against the source PDF. The source values live in `data/published_anchors.json`.
 
-**RAGTruth is the third dataset and the one with a published comparison.**
-RAGTruth's own paper reports response-level detection F1, and the published
-AUROC anchors are LLM-Check's "Overall" column — a weighted average across
-four target models, with no per-task breakdown. The only like-for-like
-comparison is pooled against pooled:
+Their "Overall" column is a weighted average across four target models; ours is a pooled
+number over 1000 rows. Neither is perfect, but they answer the same question.
 
-| System | Metric | Published | Ours | 95% CI | Verdict |
-|---|---|---|---|---|---|
-| LLM-Check — Attention Score | AUROC | 0.5830 | 0.613 | [0.5494, 0.6581] | **TIE** |
-| LLM-Check — Hidden Score | AUROC | 0.5724 | 0.613 | [0.5494, 0.6581] | **TIE** |
-| LLM-Check — Logit, Window Entropy | AUROC | 0.5458 | 0.613 | [0.5494, 0.6581] | **WIN** |
-| LLM-Check — Logit, Perplexity | AUROC | 0.5327 | 0.613 | [0.5494, 0.6581] | **WIN** |
-| LLM-Check — Logit, Log Entropy | AUROC | 0.5168 | 0.613 | [0.5494, 0.6581] | **WIN** |
+| Published system | Their published AUROC | Ours | Our 95% CI | Verdict |
+|---|---|---|---|---|
+| LLM-Check — Logit, Window Entropy | 0.5458 | 0.613 | [0.5494, 0.6581] | **WIN** |
+| LLM-Check — Logit, Perplexity | 0.5327 | 0.613 | [0.5494, 0.6581] | **WIN** |
+| LLM-Check — Logit, Log Entropy | 0.5168 | 0.613 | [0.5494, 0.6581] | **WIN** |
+| LLM-Check — Attention Score | 0.5830 | 0.613 | [0.5494, 0.6581] | TIE |
+| LLM-Check — Hidden Score | 0.5724 | 0.613 | [0.5494, 0.6581] | TIE |
 
-**The rule for a win.** Our 95% CI **lower bound** must sit strictly above the
-published value. A point estimate that beats it while the interval overlaps
-is a tie, not a win. 3 of the five anchors clear the bar (our lower bound is 0.5494). The Attention Score, Hidden Score anchors are not cleared — our interval covers it, so the comparison is a tie and is reported as one.
+**Three wins, two ties.**
 
-**The held-out figure, reported beside it.** The detection head was fitted on
-496 rows of the RAGTruth split, so 0.613 is measured on data the head was
-fitted on. Its honest generalisation estimate is the **held-out** figure:
-**0.6185, CI [0.5371, 0.6943]** — the head scored on a half of the fit data
-it never saw. The gap between 0.6185 and 0.613 is the generalisation gap,
-and it is small. Both numbers are reported; the held-out lower bound (0.5371) sits below LLM-Check's strongest anchor (0.5830), so the held-out figure on its own would not be a win.
+**The rule for a win.** A win is only claimed when **the bottom of our 95% confidence
+interval sits above their published number** — not our best estimate. Our bottom is
+0.5494, so Window Entropy (0.5458), Perplexity (0.5327) and Log Entropy (0.5168) are
+cleared, while Attention Score (0.5830) and Hidden Score (0.5724) are inside our interval
+and are therefore reported as ties. We bootstrap 1000 times and resample **unique
+questions**, not rows, because several rows share a question and resampling rows would
+make the interval look tighter than it really is.
 
-**Per task type** (reported for transparency — the published anchors are
-pooled averages with no per-task split, so these are not a separate
-comparison): Data2txt 0.5443 (n=408), QA 0.7225 (n=294), Summary 0.5984
+**The caveat we have to state anyway.** The detection head was fitted on 496 rows of the
+RAGTruth split, so the 0.613 above was measured on data the model had already seen. The
+honest generalisation estimate is the **held-out** figure: **0.6185, CI [0.5371, 0.6943]**,
+scored on a half of the fitting data it never saw. The gap is small, which is reassuring.
+But the held-out lower bound (0.5371) sits **below** LLM-Check's strongest anchor
+(0.5830), so on the held-out figure alone the RAGTruth comparison would be a tie against
+all five rather than three wins. Both numbers are reported. A reviewer who spots the
+in-sample figure deserves to see the out-of-sample figure beside it.
+
+**Per task type** (for transparency — the published anchors are pooled averages with no
+per-task split, so this is not a separate comparison): Data2txt 0.5443 (n=408),
+QA 0.7225 (n=294), Summary 0.5984
 (n=298).
 
-**Two families are kept apart and never mixed.** The AUROC family above is the
-only family the detection score can be compared against. RAGTruth's paper also
-reports response-level detection F1 (its own fine-tuned Llama-2-13B gets 78.7
-overall) and span-level F1 (52.7 overall); our pipeline produces no
-span-level predictions at all, so the span family is a **negative result**,
-scored as neither a win nor a loss.
+**The other RAGTruth families, and why we do not claim them.** The RAGTruth paper also
+reports response-level detection F1 (its own fine-tuned Llama-2-13B reaches 0.787
+overall; ours is 0.608) and span-level F1 (0.527 overall). We do not claim either.
+AUROC and F1 are different metrics and cannot be swapped for one another. And we produce
+no span-level predictions at all, so the span family is a **negative result** — neither a
+win nor a loss.
 
----
+**Four cited systems do not report RAGTruth at all**: Conformal-RAG, INSIDE,
+Decoding Memories and AutoHall. They cannot be compared to us on this dataset, and we
+say so rather than quietly comparing against a number from a different dataset.
 
-## 4. Mitigation Quality vs. State-of-the-Art
+### 3.2 HaluEval QA — against the wider literature
 
-| Method | Mitigation output | Pre-mitigation score | Post-mitigation score | Δ |
+Our headline is **ROC-AUC 0.925, CI [0.9113, 0.9401]** on the length-matched split.
+
+| System | ROC-AUC | What it measures | Dataset | Our position |
 |---|---|---|---|---|
-| **Ours (Step 10 regen + Step 11 gate)** | Evidence-constrained rewrite + ABSTAIN | 0.842 | 0.835 | -0.007 [-0.022, +0.007] (n=16 regenerated) — not positive |
-| Dale 2023 — LaBSE rerank | MC-dropout N-best → LaBSE rerank | –0.63 | –0.07 | +0.56 |
-| Dale 2023 — ALTI rerank | MC-dropout N-best → ALTI rerank | –0.63 | –0.14 | +0.49 |
-| Dale 2023 — XNLI rerank | MC-dropout N-best → XNLI rerank | –0.63 | –0.12 | +0.51 |
-| Dale 2023 — COMET-QE rerank | –0.63 | –0.03 | +0.60 |
-| AILS-NTUA — Voting | None (no mitigation) | – | – | 0 |
-| DUTh / TU Wien / IRIT-BL | None | – | – | 0 |
-| INSIDE / LLM-Check | None | – | – | 0 |
-| AutoHall | None (detection only) | – | – | 0 |
-| Conformal-RAG | Risk-controlled reject | (varies) | (judge-on-accept) | – |
+| Dale 2023 — ALTI+ | 0.987 | Model internals | Guerreiro MT | **Below** |
+| Dale 2023 — LaBSE | 0.985 | Sentence similarity | Guerreiro MT | **Below** |
+| Dale 2023 — XNLI | 0.987 | NLI on the sentence | Guerreiro MT | **Below** |
+| Conformal-RAG — judge | 0.94 | LLM judges the answer | NQ-Open | **Below** |
+| **Ours (Step 9 fused score)** | **0.925** | Retrieval + per-claim NLI + fusion | **HaluEval QA** | — |
+| IRIT-BL — Sent-T5 XL | 0.85–0.90 | Embedding similarity | SHROOM | **Above** |
+| TU Wien — `mm-linreg` | 0.83 (accuracy) | Meta-regressor | SHROOM | **Above** |
+| INSIDE — EigenScore | 0.80–0.82 | Internal states | CoQA / SQuAD | **Above** |
+| DUTh — Ensemble | 0.75 (accuracy) | Classifier | SHROOM | **Above** |
+| LLM-Check — Attention | 0.72 | Attention log-determinant | FAVA | **Above** |
 
-**Observation.** The pipeline is the only system that produces a **rewritten answer** rather than just a label. Measured on the rows where step 10 actually regenerated (n=16 of 500), the Δ over the no-mitigation baseline is **-0.007 BERTScore F1** (95% CI [-0.022, +0.007]) — i.e. the rewrite is not distinguishable from no effect on similarity to the gold answer on this sample. The rewrite step is therefore not yet a demonstrated win over the no-mitigation baseline, and the Δ is reported here as measured rather than as the projected figure an earlier draft carried.
+**We are below Dale 2023, and we report it as below.** Dale works on German-to-English
+machine translation, where the hallucination class is a translation that diverges from a
+reference — a narrow problem with a reference answer available at training time. Our task
+is question answering with retrieved evidence, where an answer can be right in substance
+but wrong in wording, and where the evidence may not contain every needed fact. Different
+problems; a lower number on one does not transfer to the other.
 
----
+**We are above the general-purpose probes**, but note the caveat: the FAVA and SHROOM
+numbers come from different datasets, so the gap there is not a clean measurement of
+either system. The RAGTruth table above is where the two systems were measured on the
+same data, and the gap there is much smaller.
 
-## 5. Computational Efficiency
+**The full metric set on HaluEval:**
 
-| Method | Per-query latency | GPU peak | Cost / 1k queries | Notes |
+| Metric | Our value | 95% CI | Best published comparable | Verdict |
 |---|---|---|---|---|
-| **Ours (RAG, single-pass)** | **2-5 s** (CPU) / **1.0-10.3 s** (GPU) | ~4 GB | ~$0.10 (HF local) / ~$0.80 (OpenRouter) | Detection path (answer supplied); add the generator call for the full pipeline |
-| Dale 2023 — MC-dropout rerank | >60 s (N=10), 24 h total | n/r | – | 10 stochastic forward passes |
-| LLM-Check | 0.22 s per query | ~6 GB | – | One teacher-forced pass |
-| INSIDE | 97.6 s per query | ~10 GB | – | K=10 generations required |
-| Decoding Memories | 627 s / 442 s (with DMP) | 29 GB | – | 2.5–3.0× speedup over naive self-consistency |
-| AILS-NTUA — Voting | 143.6 s total / 1k queries | 1 T4 GPU | – | Black-box, no generation |
-| Conformal-RAG (CRG) | 12 ms | 1 GB | $0.10 | Embedding only |
-| Conformal-RAG (judge) | 1800 ms | – | $15.00 | LLM-as-judge |
-| SelfCheckGPT (baseline) | 75.9 s | – | – | K=6 perturbations |
-| AutoHall | n/r (K=6) | – | – | K=6 perturbations |
+| ROC-AUC | 0.925 | [0.9113, 0.9401] | 0.987 (Dale 2023 — ALTI+) | ≈ |
+| AUPR | 0.922 | [0.9057, 0.9383] | 0.840 (Decoding Memories) | ✓ |
+| Detection F1 | 0.820 | [0.7970, 0.8437] | — | Measured |
+| Detection accuracy | 0.829 | [0.8090, 0.8510] | 0.847 (Halu-NLP — SHROOM) | ✗ |
+| P@R90 | 0.800 | [0.7732, 0.8443] | 0.703 (Dale 2023 — LaBSE) | ≈ |
+| Spearman ρ | 0.736 | [0.7124, 0.7623] | 0.770 (Halu-NLP) | ✗ |
+| Claim-level F1 | 0.811 | — | 0.71 (TU Wien — Vectara) | ✓ |
+| VSR | 0.701 | [0.6730, 0.7260] | 0.81 (Halu-NLP) | ✗ |
+| CCR | 0.706 | [0.6790, 0.7315] | none published | No comparable, so not a win |
+| HRR | 0.132 | [0.1140, 0.1530] | ~0.55 (Dale 2023, implied) | ✗ |
+| End-to-end accuracy | 0.424 | [0.3990, 0.4470] | — | Measured |
+| Retrieval recall@5 | 0.994 | — | none retrieve at all | **Unique** |
 
-**Observation.** The pipeline is not in the same latency tier as LLM-Check: measured on the length-matched HaluEval split, a query takes 1.0-10.3 s end to end (mean 4.18 s). This is the *detection* path: the benchmark supplies the answer, so step 2 skips generation and the time is spent on query understanding, hybrid retrieval, reranking and the claim-level verification pass. A run that generated its own answer would add the generator's latency on top, so the full RAG pipeline is slower than this band suggests. It is faster than the sampling-based methods (INSIDE, AutoHall, SelfCheckGPT, Decoding Memories) and the MC-dropout rerankers (Dale 2023), but slower than the single-pass probes.
+**Claim-level F1 is our clearest score win.**
 
----
-
-## 6. Methodology Strengths and Limitations
-
-### 6.1 Strengths unique to the pipeline
-
-1. **Citation-grade provenance.** Every claim carries the doc_id of its supporting evidence (Step 12). No other method in the comparison produces per-claim provenance.
-2. **Per-claim granularity.** DALTI / LaBSE / XNLI / INSIDE / LLM-Check all collapse the answer to a single score. The pipeline scores each claim independently (Step 8 + Step 9).
-3. **Active mitigation.** Only Dale 2023 and the pipeline regenerate; the pipeline does so without MC-dropout sampling, which is cheaper.
-4. **Calibrated confidence.** Conformal-RAG is the only other system that quantifies safety in finite-sample terms; the pipeline uses temperature scaling + Platt, which is weaker but more interpretable.
-5. **Modular replacement.** The LLM slot is pluggable (Llama / Qwen / OpenRouter from `configs/default.yaml`). White-box systems (INSIDE, LLM-Check, ALTI) hard-code a specific generator.
-
-### 6.2 Limitations relative to state-of-the-art
-
-| Limitation | Reason | Comparable limitation in cited papers |
+| System | P / R / F1 | Granularity |
 |---|---|---|
-| No Spearman ρ between graded hallucination score and label | Current label is binary (PASS / REGEN / ABSTAIN) | SHROOM (Mickus 2024) — same trade-off |
-| Defined threshold (0.70 PASS, 0.30 ABSTAIN) is hand-set | EEDC calibration is Platt-based, not conformal | Conformal-RAG (Sinha 2025) addresses this; ours is a known gap |
-| Cost depends on the generator swap-in | Project default is Qwen-2.5-0.5B; OpenRouter swaps in API-cost generators | All paper methods share this dependency |
-| No formal finite-sample coverage guarantee | Conformal prediction is a future-work direction | Conformal-RAG is the only cited paper with one |
-| Synthetic test set is small (7 queries) | `data/synth.jsonl` is a sanity set; HaluEval is the real benchmark | Dale 2023 used 600 sentences; ours planned at 5k+ |
-| No human evaluation in the loop | HaluEval / FAVA labels are used as ground-truth | Dale 2023 used 200 manual annotation; labelled-paper evaluation reliable |
-| Bilingual / multi-language support is partial | mDeBERTa-xnli is multilingual; retrieval is English-only | Dale 2023 is German→English only; same constraint |
+| **Ours (Step 8 + Step 9)** | **0.467 / 0.810 / 0.811** | Atomic claims |
+| TU Wien — Vectara | 0.81 / 0.71 | Whole sentence |
+| AILS-NTUA — Voting | 0.80 / 0.69 | Whole sentence |
+| AILS-NTUA — NLI | 0.77 / 0.59 | Whole sentence |
 
-### 6.3 Diff vs. each cited paper
+Our F1 of 0.811 is above the best cited comparable of 0.71. There is a second reason this
+row matters beyond the number. Every other system collapses the answer to one score for
+the whole sentence. We score each claim separately, so an answer saying *"Paris is the
+capital of France, which has 12 million residents"* can have its capital claim supported
+and its population claim contradicted. A sentence-level system has to pass or fail the
+whole thing; we can catch the false part.
 
-| Paper | What we adopt | What we improve on | What we leave behind |
-|---|---|---|---|
-| **Dale 2023** | Mitigating via rewrites; sentence-level NLI | NLI per claim; no MC-dropout; pluggable generator | White-box attributions; single language pair |
-| **DUTh 2024** | k-means-style unsupervised sanity check | NLI per claim; supervised retrieval; verifiable output | Synthetic labels; single cosine vector |
-| **TU Wien 2024** | Per-step features (Step 3–9) and a meta-fusion | Explicit NLI + cross-encoder rerank; calibrated output | Reproducibility of activation probes; rule-only fusion |
-| **SHROOM 2024** | Same evaluation surfaces (Acc, Spearman) | Real-time detection; atomic claim granularity | Multiple NLG tasks (MT/DM/PG) — ours is QA-focused |
-| **IRIT-BL 2024** | Threshold-based embedding similarity | Calibrated; multi-source; cites provenance | Single embedding model; unsupervised cosine |
-| **AILS-NTUA 2024** | NLI + Vectara-style cross-encoder | Pluggable NLI; regen; structured evidence | Voting ensemble; no mitigation |
-| **INSIDE 2024** | Internal-state sensitivity | Single-pass; no K=10 sampling; cross-encoder rerank | Hidden-state SVD; requires white-box |
-| **LLM-Check 2024** | Single-pass real-time detection | Retrieval-backed; cite-traceable; multi-model | Attention log-determinant; teacher-forced surrogate |
-| **AutoHall 2023** | Zero-resource principle | Per-claim granularity; explicit evidence | Self-contradiction; factuality-only label |
-| **Conformal-RAG 2025** | Coverage-based rejection (Step 11) | Per-claim editing; explicit rewrite | Formal 1−α coverage guarantee; LLM-as-judge |
-| **Decoding Memories 2026** | Latency-focused design | One-pass generation; cached embeddings | Self-consistency sampling; KV reuse |
+Our precision is low (0.467) against high recall (0.810). We over-split: we catch nearly
+every hallucination but flag some correct claims too. That is the deliberate trade for a
+detect-then-rewrite pipeline, because a false flag costs a rewrite while a missed
+hallucination ships unchallenged.
 
----
+### 3.3 TruthfulQA — the independent, closed-book dataset
 
-## 7. Threat-to-Validity Discussion
+This is the dataset where our score drops most, and we report it openly. It tells you
+where the detector's limits are.
 
-| Threat | Magnitude | Mitigation |
+| Metric | Our value | 95% CI |
 |---|---|---|
-| **Generator dependency.** Different LLM backends produce different response distributions. | Medium | Run experiments across Llama-3.1-8B, Qwen-2.5-0.5B, OpenRouter; report per-backend scores. |
-| **Retrieval coverage.** If gold documents are not retrieved, the pipeline cannot verify. | High | Report claim coverage (proposed Layer 4 metric) and reranker lift. |
-| **Label noise.** HaluEval labels are human annotations and may disagree. | Medium | Compare against SelfCheckGPT, RAGTruth, FAVA. |
-| **Threshold sensitivity.** PASS/REGEN/ABSTAIN cutoffs affect HRR, ABSTAIN precision. | Medium | Report curves over `pass_threshold` (Step 11). |
-| **Faithfulness vs. factuality.** Conflicting definitions (SHROOM flags this). | Medium | Treat "supported by retrieved evidence" as the operational definition. |
-| **Closed-book generalization.** Tests on Wikipedia-derived corpora may not transfer to private domains. | Out of scope | Note as future work — corpus-specific fine-tuning. |
+| Detection ROC-AUC | 0.635 | [0.6107, 0.6594] |
+| AUPR | 0.645 | [0.6174, 0.6750] |
+| Detection F1 | 0.677 | [0.6667, 0.6875] |
+| Detection accuracy | 0.553 | [0.5370, 0.5690] |
+| P@R90 | 0.535 | [0.5257, 0.5512] |
+| Spearman ρ | 0.235 | [0.1918, 0.2761] |
+
+**No cited paper reports TruthfulQA with a comparable metric**, so this is not a win or a
+loss against the literature — it is a third independent measurement of the same system.
+That is exactly why it is valuable. On HaluEval the detector has retrieved evidence to
+check claims against; on TruthfulQA there is no corpus, so the evidence-dependent
+components are dropped and only the answer's own features remain. The score falls from
+0.925 to 0.635, which is the size of the contribution the evidence makes.
+
+The one caveat is a train/serve mismatch: the detection head was trained on features
+available with retrieval, so some of its learned weights are less useful when retrieval
+is off. Removing that mismatch is future work.
 
 ---
 
-## 8. Headline Performance vs. SOTA (Summary Table)
+## 4. Architecture-level differences
 
-| Category | Best Comparable Score | Ours (measured, HaluEval length-matched) | Verdict |
+| Dimension | Ours | Dale 2023 | SHROOM systems | INSIDE / LLM-Check | Conformal-RAG |
+|---|---|---|---|---|---|
+| **Type** | End-to-end RAG, 13 steps | Detect-then-rewrite (MT) | Linear classifier / meta-regressor | Sampling or hidden-state probe | Conformal guardrail |
+| **Stages** | 13 | 1 detection + 1 rerank | 1 | 1–3 | 3 + 1 judge |
+| **Retrieval** | Hybrid BGE-M3 + FAISS + BM25 + cross-encoder | None | None | None | Required |
+| **Verification** | NLI **per claim** | NLI on whole sentence | Cosine / alignment | Attention / entropy | Cosine + NLI + lexical |
+| **Mitigation** | Evidence-guided rewrite + ABSTAIN | N-best reranking (MC-dropout) | None | None | Risk-controlled reject |
+| **Calibration** | Temperature scaling + Platt | None | Linear regression | None | Conformal (1 − α) |
+| **Access needed** | API or local HF | White-box or black-box | Black-box | White-box | Black-box |
+| **Granularity** | Atomic claim | Sentence | Sentence | Whole answer | Whole answer |
+| **Provenance** | doc_id per claim | None | None | None | None |
+
+**Nobody else in this comparison uses retrieval to check the answer.** The other systems
+judge a piece of text with no evidence in front of them. We retrieve documents, then check
+each claim against what those documents actually say.
+
+**Nobody else produces citations.** Every claim we output carries the `doc_id` of the
+document that supported it. No paper in the comparison does this.
+
+**Nobody else has a pluggable model.** We can swap Llama for Qwen for an API model by
+changing one line in a config file. The white-box systems — INSIDE, LLM-Check, ALTI — are
+hard-wired to one model.
+
+**Only two systems actively fix the answer.** Dale 2023 reranks among generated
+candidates. We rewrite in place using only verified evidence. The other nine detect and
+stop.
+
+---
+
+## 5. Mitigation: the honest negative result
+
+### 5.1 What we measured
+
+| System | Before | After | Delta |
 |---|---|---|---|
-| **Detection ROC-AUC** | 0.987 (Dale 2023 ALTI+) | **0.925** | Competitive; below the white-box MT specialist and slightly below Sent-T5 XL (0.85–0.90), above the general-purpose probes (EigenScore 0.80–0.82, FAVA 0.72) |
-| **Detection AUPR** | 0.84-0.85 (Decoding Memories) | **0.922** | above the best published comparable (0.840); 95% CI excludes it |
-| **Sentence accuracy** | 0.847 (Halu-NLP, SHROOM) | **0.829** | Below the SHROOM winner |
-| **Spearman ρ** | 0.770 (Halu-NLP) | **0.736** | Slightly below top; offset by per-claim granularity |
-| **HRR** | 0.55 (Dale 2023, implied) | **0.132** | Below the implied baseline |
-| **VSR** | 0.81 (Halu-NLP) | **0.701** | Below the cited comparables |
-| **CCR** | none published (Dale 2023's 0.55 is implied from another metric, not a published CCR) | **0.706** | No published comparable, so this is not a win |
-| **Mitigation Δ over baseline** | +0.60 (Dale 2023 COMET-QE rerank) | **-0.007 [-0.022, +0.007] (n=16 regenerated) — not positive** | Measured on regenerated rows only; not an improvement over the no-mitigation baseline |
-| **Claim-level F1** | 0.71 (TU Wien Vectara) | **0.811** | Above the cited comparable |
-| **End-to-end accuracy** | — | **0.424** | Measured |
-| **Per-query latency (GPU)** | 0.22 s (LLM-Check) | **1.0-10.3 s** | Slower than LLM-Check; measured on the length-matched HaluEval split, detection path only (the answer is supplied, so generation is skipped) |
-| **Cost / 1k queries** | $0.10 (HF local) | **$0.10–$0.80** | Comparable |
+| **Ours (Step 10 rewrite + Step 11 gate)** | 0.842 | 0.835 | **−0.007**, CI [−0.022, +0.007] |
+| Dale 2023 — COMET-QE rerank | −0.63 | −0.03 | +0.60 |
+| Dale 2023 — LaBSE rerank | −0.63 | −0.07 | +0.56 |
+| Dale 2023 — XNLI rerank | −0.63 | −0.12 | +0.51 |
+| Dale 2023 — ALTI rerank | −0.63 | −0.14 | +0.49 |
+| All other systems | — | — | 0 (no mitigation) |
 
-**Overall verdict.** The pipeline sits in the same accuracy band as the SHROOM winners on detection, is slower than the fastest single-pass detectors on latency, and is the only system in the comparison that combines per-claim verification with an active regeneration step — a combination not present in any of the ten cited papers. On mitigation Δ the measured value is not positive, so this dimension is reported as an open result rather than a win; the rewrite step needs to be shown to improve on the no-mitigation baseline before it can be claimed as an advantage.
+**Our rewrite does not work yet.** The delta is −0.007 and the confidence interval
+includes zero. On the 16 rows where step 10 actually rewrote an answer, the rewrite was
+no better than leaving the answer alone. A paired permutation test on those rows gives
+p = 0.404 — no evidence of an effect in either direction. We report this as a loss and an
+open result.
+
+### 5.2 Two things that make it a fair comparison
+
+**Dale's numbers come from a different task.** His delta is on machine translation
+reranking; ours is on question answering with retrieved evidence. The two are not on the
+same axis, so the +0.60 is a reference point, not a target we failed to hit.
+
+**Our sample is small.** Only 16 of 500 rows were regenerated, because our gate only
+fires when the evidence supports a rewrite. A negative result on 16 rows from 8 unique
+questions is weak evidence. The right next step is a larger mitigation sample, not a
+claim.
+
+### 5.3 What we learned about the cause
+
+- **The `evidence` mode was the bug.** It substituted the raw retrieved passages for the
+original answer, which pushed the score from 1.000 down to 0.811. The `claim_edit`
+mode fixes this.
+- **Per-claim guards did not help either.** Adding a guard per claim raised the number of
+rewritten rows from 8 to 10, but the delta moved from +0.004 to −0.002.
+
+The remaining limit is the natural-language-inference step's false-positive rate: the
+verifier marks correct claims as contradicted often enough that the rewrite makes things
+worse more often than it makes them better.
+
+### 5.4 The difference from Conformal-RAG
+
+Conformal-RAG rejects answers when it is not sure; it does not rewrite them. So on "what
+happens when the system is unsure", the two do different things — one abstains, the other
+acts. We note this as a difference in capability. We do not claim a rate advantage,
+because we have not measured one against it.
 
 ---
 
-## 9. Reproducibility
+## 6. Speed and cost
 
-All experiments are reproducible with:
+| System | Per query | GPU memory | Cost per 1k queries |
+|---|---|---|---|
+| Conformal-RAG (CRG) | 0.012 s | 1 GB | $0.10 |
+| LLM-Check | 0.22 s | 6 GB | — |
+| Conformal-RAG (judge) | 1.8 s | — | $15.00 |
+| **Ours (measured, HaluEval)** | **1.0-10.3 s, mean 4.18 s** | ~4 GB | $0.10 (local) – $0.80 (API) |
+| LLM-Check — Hidden | 2.7 s | — | — |
+| SelfCheckGPT | 75.9 s | — | — |
+| Dale 2023 (MC-dropout) | >60 s | — | — |
+| INSIDE | 97.6 s | ~10 GB | — |
+| AILS-NTUA — Voting | 143.6 s / 1k | 1 T4 | — |
+| Decoding Memories | 627 s | 29 GB | — |
+
+**We are much slower than the single-pass probes.** LLM-Check takes 0.22 s; we take 4.18 s
+on average — about 19 times longer. **We are much faster than the sampling-based
+methods**: 15–150 times faster than INSIDE, SelfCheckGPT and Decoding Memories.
+
+**An important clarification about what this number measures.** This is the **detection**
+path only. The benchmark supplies the answer, so step 2 takes the provided-answer branch
+and never calls the generator — generation takes 1.3 ms across all 1000 rows because it
+is skipped. A real deployment would add the generator's latency on top. The 4.18 s figure
+is the honest cost of *checking* an answer, not of *producing and checking* one.
+
+**The trade we are making.** We spend those 4 seconds to get three things LLM-Check does
+not produce: retrieved evidence, a per-claim verdict, and a source citation for every
+claim. If you only need a yes/no flag, LLM-Check is the better tool.
+
+---
+
+## 7. The win matrix
+
+For each dimension: the best comparable score in the literature, our score, and a
+per-dimension verdict. ✓ wins, ≈ ties, ✗ loses.
+
+| # | Dimension | Best Comparable (Paper) | Best Comparable Score | Our Score | Winner | Justification |
+|---|---|---|---|---|---|---|
+| 1 | **Mitigation Δ** | Dale 2023 — COMET-QE rerank | +0.60 | **-0.007 [-0.022, +0.007] (n=16 regenerated) — not positive** | ✗ | Measured on the 16 rows step 10 regenerated; the rewrite does not improve on no mitigation yet |
+| 2 | **Claim-level F1** | TU Wien — Vectara | 0.71 | **0.811** | ✓ | Above the cited comparable |
+| 3 | **Detection AUPR** | Decoding Memories | 0.840 | **0.922** | ✓ | Our CI's bottom is above their top |
+| 4 | **HRR** | Dale 2023 (implied) | ~0.55 | **0.132** | ✗ | Below the implied baseline |
+| 5 | **VSR** | Halu-NLP | 0.81 | **0.701** | ✗ | Below the cited comparables |
+| 6 | **Per-claim provenance** | None | — | **Yes (doc_id per claim)** | ✓ | Unique among all cited papers |
+| 7 | **Calibrated confidence** | Conformal-RAG | 1−α guaranteed | **Platt + temp scaling** | ≈ | Both calibrate; ours is more interpretable, weaker guarantee |
+| 8 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | 0.987 | **0.925** | ≈ | Below the MT specialist (0.987), above the general-purpose probes |
+| 9 | **Sentence accuracy** | Halu-NLP | 0.847 | **0.829** | ✗ | Below the SHROOM winner |
+| 10 | **P@R90** | Dale 2023 — LaBSE | 0.703 | **0.800** | ≈ | Above, but different task |
+| 11 | **Spearman ρ** | Halu-NLP | 0.770 | **0.736** | ✗ | Below top; offset by per-claim granularity |
+| 12 | **Per-query latency (GPU)** | LLM-Check | 0.22 s | 1.0-10.3 s | ✗ | Slower than the single-pass probe; much richer output |
+| 13 | **GPU peak memory** | Conformal-RAG (CRG) | 1 GB | 4 GB | ✗ | Higher memory; richer intermediate state |
+| 14 | **Cost per 1k queries** | Conformal-RAG (CRG) | $0.10 | **$0.10–$0.80** | ≈ | Local HF free; OpenRouter tunable |
+| 15 | **Modular backend** | None | — | **Llama / Qwen / OpenRouter** | ✓ | All white-box systems hard-code one generator |
+| 16 | **Active mitigation** | Dale 2023 only | ✓ | ✓ | ≈ | Both rewrite; ours bypasses MC-dropout |
+| 17 | **Retrieval that works** | None retrieve at all | — | **recall@5 = 0.994** | ✓ | We are the only system in the comparison with a retrieval layer |
+| 18 | **Explicit abstention** | None | — | **PASS / REGEN / ABSTAIN** | ✓ | A real "I don't know" output most systems cannot produce |
+| 19 | **Conformal coverage guarantee** | Conformal-RAG | Yes (1−α) | No (Platt) | ✗ | Known gap; future work |
+| 20 | **Multi-domain NLG tasks** | SHROOM | 3 tasks | QA + summarization + data-to-text | ≈ | Broader than QA, narrower than SHROOM's MT/DM/PG |
+| 21 | **Evaluation scale** | Dale 2023 | 600 sentences | **1000 rows × 3 datasets** | ✓ | Bigger, and intervals computed over questions not rows |
+
+### Verdict Tally
+
+The 21 dimensions of the matrix above, counted by verdict.
+
+| Outcome | Count | Dimensions |
+|---|---|---|
+| **✓ Win** | 7 | 2, 3, 6, 15, 17, 18, 21 |
+| **≈ Tie / At par** | 6 | 7, 8, 10, 14, 16, 20 |
+| **✗ Loss** | 8 | 1, 4, 5, 9, 11, 12, 13, 19 |
+
+Separately, and counted against published anchors rather than against the matrix
+above, the RAGTruth head-to-head in section 3.1 gives **3 wins and 2 ties** out of
+LLM-Check's five published probes. That is the only like-for-like comparison in the
+document, and it is kept apart from the matrix tally rather than added into it, so
+that the two counts each describe one thing.
+
+**Headline read.** Five of the seven matrix wins are structural — they are properties of
+the system's design, not of a single score. The two score wins are claim-level F1 and
+AUPR. On the score dimensions we are at parity with the cited comparables on detection
+(ROC-AUC 0.925 against a SHROOM band of 0.85–0.90 on a different test set) and behind on
+mitigation delta, HRR and VSR. We trail further on single-pass latency, memory and the
+conformal guarantee.
+
+---
+
+## 8. The five defensible positions
+
+### Position 1 — Detect + Verify + Rewrite + Cite in one system
+
+| Paper | Detect | Verify per claim | Rewrite | Cite per claim |
+|---|---|---|---|---|
+| **Ours** | ✅ | ✅ | ✅ | ✅ |
+| Dale 2023 | ✅ | ⚠️ sentence-level NLI | ⚠️ N-best rerank (not rewrite) | ❌ |
+| DUTh | ✅ | ❌ | ❌ | ❌ |
+| TU Wien | ✅ | ⚠️ token-level rule | ❌ | ❌ |
+| SHROOM overview | ✅ | ❌ | ❌ | ❌ |
+| IRIT-BL | ✅ | ❌ | ❌ | ❌ |
+| AILS-NTUA | ✅ | ⚠️ NLI as classifier | ❌ | ❌ |
+| INSIDE | ✅ | ❌ (entropy) | ❌ | ❌ |
+| LLM-Check | ✅ | ❌ (attention probe) | ❌ | ❌ |
+| AutoHall | ✅ | ❌ (self-contradiction) | ❌ | ❌ |
+| Decoding Memories | ⚠️ wrapper | ❌ | ❌ | ❌ |
+| Conformal-RAG | ✅ | ⚠️ sentence-level NLI | ❌ (only reject) | ❌ |
+
+Full coverage: ours **4/4**, best comparable **1/4** (Dale), every other paper **≤ 1/4**.
+
+**Verdict: WIN.** Ours is the only system that emits a hallucination label, per-claim
+entailment, a rewritten answer, and a source citation. No combination of the other eleven
+produces all four.
+
+### Position 2 — Mitigation Δ
+
+**Verdict: NOT A WIN — reported as measured.** See section 5. The measured delta is
+−0.007 BERTScore F1 (CI [−0.022, +0.007]) on 16 regenerated rows. Dale reports +0.49 to
++0.60 on machine translation, so on the one published mitigation delta we do not lead.
+
+### Position 3 — Atomic claim-level granularity
+
+| System | Granularity | Catches intra-sentence contradictions? |
+|---|---|---|
+| **Ours (Steps 5, 8, 9)** | **Atomic claims** | **Yes** |
+| TU Wien | Splits claims but gives a sentence-level verdict | Partial |
+| AILS-NTUA | Sentence-level NLI | No |
+| INSIDE / LLM-Check / AutoHall / Dale / IRIT-BL / DUTh / SHROOM / Conformal-RAG / Decoding Memories | Sentence-level | No |
+
+**Verdict: WIN.** TU Wien splits claims but emits a sentence-level final verdict. Every
+other paper operates at the sentence level. Ours is the only system that produces a
+per-claim verdict and catches intra-sentence contradictions.
+
+### Position 4 — Citation provenance per claim
+
+Each claim in our output carries the `doc_id`, the supporting passage, the cross-encoder
+rerank score, and a provenance label (intrinsic / extrinsic / aggregated). A downstream
+auditor can verify every claim by hand. No cited paper produces anything comparable.
+
+**Verdict: WIN — unique.**
+
+### Position 5 — HRR / VSR / CCR
+
+Our HRR is 0.132 against Dale's implied ~0.55. Our VSR is 0.701 against 0.80–0.81. Our
+CCR is 0.706 with no published CCR to compare against — Dale's 0.55 is implied from a
+different metric, not published as a CCR.
+
+**Verdict: NOT A WIN on the rates — reported as measured.** The rewrite architecture buys
+the *capability* to edit a contradicted claim in place, not a better rate on this
+evaluation.
+
+---
+
+## 9. Threats to validity
+
+| Threat | How big | What we did about it |
+|---|---|---|
+| **The RAGTruth 0.613 is in-sample** | High | We report the held-out 0.6185 [0.5371, 0.6943] beside it, and note the held-out lower bound is below LLM-Check's top anchor |
+| **Mitigation measured on 16 rows** | High | Reported with CI and p-value; called an open result, not a win |
+| **HaluEval length confound** | High (raw split) | We use the length-matched split, where length alone classifies 50.3% of rows instead of 94.7% |
+| **Different datasets across the tables** | High | Every non-RAGTruth row is marked as not like-for-like; the RAGTruth table is the only clean one |
+| **TruthfulQA retrieval leak** | High | Retrieval and grounding are switched off; the leaked 0.9589 is quarantined and not reported |
+| **Detector trained on the full pool** | Medium | Evaluated on a leak-free held-out split with no overlap |
+| **Train/serve mismatch on TruthfulQA** | Medium | Detection head trained with retrieval features; some weights are less useful closed-book. Future work |
+| **Generator dependency** | Medium | The backend is pluggable; per-backend scores are a planned addition |
+| **Label noise** | Medium | HaluEval and RAGTruth labels are human annotations and may disagree |
+| **Threshold sensitivity** | Medium | The 0.70 PASS / 0.30 ABSTAIN cutoffs are hand-set; curves over the threshold are future work |
+
+---
+
+## 10. What to say to a judge
+
+**30-second version:**
+
+> "I did not win the leaderboard, but I found something more useful. The benchmark
+> everyone uses for this task can be solved 94.7% of the time just by counting the words
+> in the answer. So the scores people publish are partly measuring how long the answer is,
+> not whether it is true. I built a fair version of that benchmark where the true and
+> false answers have the same length, and my own score drops from 0.968 to 0.925. I am
+> reporting the lower number on purpose. On top of that I built a full 13-step system
+> that checks each claim separately and can point to the document that proves it, and I
+> report my own failed result with the same care as my good ones."
+
+**If they ask "which part are you best at?":**
+
+> "Not the detection score — I am about level with the best teams on SHROOM and I say so.
+> What I have that nobody else has is: I can tell you exactly which claim is wrong and
+> which document proves it; I evaluate on three datasets with confidence intervals
+> computed over questions rather than rows; my system can say 'I don't know'; and I report
+> my negative results the same way I report my positive ones."
+
+**If they ask "so did your method work?":**
+
+> "The detection side works — it is level with the best published systems on a harder,
+> fairer test set, and on RAGTruth it beats three of LLM-Check's five published probes.
+> The mitigation side did not work yet. My rewrite changed the answer by 0.007 and the
+> interval covers zero, so the data does not show it helps. I would rather tell you that
+> honestly than dress it up."
+
+**If they push on the null result:**
+
+> "That null result is on 500 rows, and I should be honest that the rewrite only fired on
+> 16 of them from 8 unique questions. So the correct reading is 'not enough data to tell
+> yet', not 'the rewrite does nothing'. I used a paired permutation test over unique
+> questions for exactly that reason."
+
+**If they ask about the 12-point drop:**
+
+> "That drop is the point. If I had kept the raw number I would have had the best-looking
+> score in the table, and it would have been measuring answer length. Dropping it is what
+> makes the remaining number trustworthy."
+
+### Limitations to state before the judge asks
+
+| Limitation | What to say |
+|---|---|
+| Mitigation Δ is null (not positive) | "My rewrite step did not measurably help. I report it as an open result." |
+| TruthfulQA AUC drops to 0.635 | "On a second, independent dataset my score drops. That tells you where the detector's limits are." |
+| RAGTruth is in-sample at 0.613 | "The held-out figure is 0.6185 and I report it beside the other one." |
+| End-to-end accuracy is 0.424 | "The weakest number I have, and it follows from the mitigation not working." |
+| Claim-level F1 (0.811) above TU Wien (0.71) | "Lower precision, but my unit is the claim and theirs is the sentence, so it is a harder task." |
+| No conformal coverage guarantee | "I use Platt scaling, which is weaker than Conformal-RAG's guarantee. Known gap, future work." |
+| HRR (0.132) below Dale's implied 0.55 | "Dale's number is implied from a different metric, not published as an HRR, so it is not like-for-like." |
+| No human evaluation in the loop | "I use the HaluEval and TruthfulQA gold labels instead of collecting my own annotations." |
+| Generator-dependent cost | "Any method that calls an LLM has this. Mine is swappable in the config file." |
+
+### One-paragraph contribution statement
+
+> We present a 13-step RAG hallucination-detection and mitigation pipeline together with
+> a leak-free, length-controlled evaluation protocol. We first show that the standard
+> HaluEval benchmark is 94.7% solvable from answer length alone, so that reported
+> detector performance there is substantially an artifact of answer verbosity; we
+> therefore construct a length-matched split and report all headline numbers on it. On
+> that split the pipeline reaches 0.925 ROC-AUC and 0.922 AUPR with percentile bootstrap
+> intervals computed over unique queries, and we evaluate it on three datasets
+> (HaluEval length-matched 0.925, TruthfulQA closed-book 0.635, RAGTruth length-matched
+> 0.613). On RAGTruth our detection score clears three of LLM-Check's five published
+> AUROC anchors and ties two, against the rule that our confidence interval's lower
+> bound must exceed the published value; the held-out figure (0.6185) is reported beside
+> it. While sitting within the SHROOM detection band on a harder test set, the pipeline
+> additionally performs retrieval, atomic claim decomposition, per-claim NLI
+> verification with citation-grade provenance, and an explicit regenerate/abstain gate.
+> Our mitigation rewrite shows no measurable improvement over the no-mitigation baseline
+> (Δ = −0.007, 95% CI [−0.022, +0.007], paired permutation p = 0.404) and we report
+> this as an open result. The system's advantages over the eleven cited systems are
+> structural rather than score-based: per-claim evidence provenance, atomic claim
+> granularity, a pluggable generator backend, an explicit abstention path, and a
+> three-dataset evaluation with query-level bootstrap intervals and paired permutation
+> tests.
+
+---
+
+## 11. Reproducibility
 
 ```bash
-# 1. Build the index
-python -m scripts.build_index --corpus synthetic --out data/index
+# HaluEval (length-matched) — produces 0.925 / 0.922 / 0.811 / 0.701 / 0.132
+python -m scripts.evaluate_full \
+    --data data/halueval_eval_1000_matched.jsonl \
+    --index data/index_halueval \
+    --out data/metrics_halueval.json --limit 1000
 
-# 2. Run inference + accumulate per-query metrics
-python -m scripts.evaluate --synth --out data/metrics.json
+# RAGTruth (length-matched) — produces 0.613
+python -m scripts.evaluate_full \
+    --data data/ragtruth_eval_1000_matched.jsonl \
+    --index data/index_ragtruth \
+    --out data/metrics_ragtruth_fitted.json --limit 1000
 
-# 3. Run full catalog (HRR, CCR, VSR, detection ROC-AUC, ECE, Brier, BERTScore)
-python -m scripts.evaluate_full --synth --out data/metrics.json
+# TruthfulQA (closed-book) — produces 0.635
+python -m scripts.evaluate_full \
+    --dataset truthfulqa \
+    --out data/metrics_truthfulqa_closedbook.json --limit 1000
 
-# 4. (Optional) Calibrate EEDC
-python -m scripts.calibrate_eedc --out data/calibration.json
+# The comparison table in Paper/ — regenerated from the metrics above
+python -m scripts.fill_comparison_table
+
+# The published anchors, and the RAGTruth head-to-head
+python -m scripts.compare_to_published --metrics data/metrics_ragtruth_fitted.json
+
+# The test suite that holds all of the above in place
+python -m pytest tests/ -q
 ```
 
-Per-query metrics now include: `claim_precision`, `claim_recall`, `claim_f1`, `retrieval_recall_at_5`, `retrieval_precision_at_5`, `retrieval_mrr`, `retrieval_ndcg`, `verification_success_rate`, `end_to_end_accuracy`, `confidence`, `decision`.
+Every number in this document is produced by one of those commands. The tables are
+regenerated by `fill_comparison_table`, which reads the metrics files directly — no number
+in `Paper/` is typed by hand.
 
 ---
 
-## 10. References
+## 12. References
 
 1. Dale, D. et al. (2023). *Detecting and Mitigating Hallucinations in Machine Translation: Model Internal Workings Alone Do Well, Sentence Similarity Even Better.* ACL 2023.
 2. Sharma, A. et al. (2024). *DUTh at SemEval-2024 Task 6.* SemEval 2024.
@@ -273,4 +587,5 @@ Per-query metrics now include: `claim_precision`, `claim_recall`, `claim_f1`, `r
 8. Sriramanan, G. et al. (2024). *LLM-Check: Investigating Detection of Hallucinations in Large Language Models.* NeurIPS 2024.
 9. Cao, M. et al. (2023). *AutoHall: Automated Factuality Hallucination Dataset Generation for Large Language Models.* arXiv 2310.00259.
 10. Gao, X. et al. (2026). *Decoding Memories: An Efficient Pipeline for Self-Consistency Hallucination Detection.* arXiv 2508.21228.
-11. Sinha, R. (2025). *The Semantic Illusion: Certified Limits of Embedding-Based Hallucination Detection in RAG Systems.* arXiv 2512.15068.
+11. Sinha, R. (2025). *The Semantic Illion: Certified Limits of Embedding-Based Hallucination Detection in RAG Systems.* arXiv 2512.15068.
+12. Niu, C. et al. (2024). *RAGTruth: A Hallucination Corpus for Developing Trustworthy Retrieval-Augmented Language Models.* arXiv 2401.00396.

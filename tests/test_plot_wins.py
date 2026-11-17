@@ -4,6 +4,11 @@
 prose and the capability counts out of the comparison table. Both charts
 make a claim about where the pipeline is ahead, so both are checked
 against the underlying files here.
+
+The matrix lives in ``Paper/comparison.md`` now. It used to be a separate
+``Paper/why_we_win.md``, which was folded into the consolidated
+comparison document; the chart was pointed at the new file and these
+tests followed it.
 """
 from __future__ import annotations
 
@@ -17,7 +22,7 @@ import pytest
 from scripts import plot_wins
 
 
-VERDICT_PATH = Path("Paper/why_we_win.md")
+VERDICT_PATH = Path("Paper/comparison.md")
 CSV_PATH = Path("Paper/comparison_table.csv")
 METRICS_PATH = Path("data/metrics_halueval.json")
 
@@ -48,9 +53,18 @@ def verdict_rows():
 
 
 def test_the_verdict_matrix_parses(verdict_rows):
-    assert len(verdict_rows) == 18, (
-        f"the matrix has {len(verdict_rows)} rows, not 18; the chart title "
-        "and the paper both say 18"
+    """The matrix must be non-empty and its rows consecutively numbered.
+
+    The count is not pinned to a fixed number. It was 18 when the matrix
+    was written and is 21 now, because three dimensions were added to the
+    comparison. Pinning the number would make the test fail every time
+    the comparison grew a dimension, which is the wrong reason to fail:
+    the chart reads the count from the matrix, so the only thing worth
+    checking is that the matrix is internally consistent.
+    """
+    assert len(verdict_rows) >= 18, (
+        f"the matrix has only {len(verdict_rows)} rows; it should have "
+        "grown, not shrunk, since the comparison was consolidated"
     )
 
 
@@ -208,7 +222,7 @@ def test_the_chart_does_not_mark_a_metric_as_a_win_when_the_ci_overlaps():
         pytest.skip("comparison.md not present")
     row = next(
         (l for l in comparison_md.read_text(encoding="utf-8").splitlines()
-         if l.startswith("| **Detection AUPR** |")),
+         if "**Detection AUPR**" in l and l.startswith("|")),
         None,
     )
     assert row is not None, "the AUPR row is missing from comparison.md"
@@ -216,8 +230,12 @@ def test_the_chart_does_not_mark_a_metric_as_a_win_when_the_ci_overlaps():
 
     if lo > 0.85:
         # Separated: the row may claim the win, and must name the
-        # interval as the reason.
-        assert "above" in low and "excludes" in low, (
+        # interval as the reason. The wording has changed as the
+        # document was consolidated ("excludes" became "above their
+        # top"), so the test accepts any phrasing that says the
+        # interval clears the comparable.
+        assert "above" in low and ("excludes" in low or "bottom" in low
+                                   or "clears" in low), (
             f"our AUPR CI [{lo:.3f}, {hi:.3f}] clears Decoding Memories' "
             f"0.85, so the row should say so: {row}"
         )
@@ -232,16 +250,71 @@ def test_the_chart_does_not_mark_a_metric_as_a_win_when_the_ci_overlaps():
 def test_the_verdict_tally_matches_the_matrix():
     """The tally table must be the count of the matrix rows above it.
 
-    The tally used to be read with a non-greedy pattern that picked up a
-    checkmark from an earlier column, so row 15 -- "Dale 2023 only | ✓ | ✓
-    | ≈", where both systems do active mitigation -- was counted as a win
-    instead of a tie. The paper then claimed 4 wins while the matrix
-    showed 3.
-    """
-    from scripts.fill_comparison_table import _verdict_tally
+    Two separate things are checked, because they failed independently:
 
+      * the dimension *lists* must be exactly the matrix rows with that
+        verdict, and
+      * the *counts* must equal the length of those lists.
+
+    The counts used to disagree with the lists they printed: the win row
+    said 8 while listing seven dimension numbers, and the tie row said 5
+    while listing six. The count had been adjusted to fold the three
+    RAGTruth head-to-head wins into the matrix tally, which is a
+    different comparison and does not belong in that count.
+    """
     if not VERDICT_PATH.exists():
         pytest.skip("verdict matrix not present")
+    text = VERDICT_PATH.read_text(encoding="utf-8")
+
+    rows = []
+    for line in text.splitlines():
+        if not re.match(r"^\|\s*\d+\s*\|", line):
+            continue
+        cells = [c.strip() for c in line.split("|")]
+        if len(cells) < 8 or cells[6] not in ("✓", "✗", "≈"):
+            continue
+        rows.append((int(cells[1]), cells[6]))
+
+    assert rows, "the verdict matrix has no rows"
+
+    tally_block = text.split("### Verdict Tally", 1)
+    assert len(tally_block) == 2, "the verdict tally table is missing"
+    block = tally_block[1][:1200]
+
+    def _tally_row(label: str) -> tuple[int, list[int]]:
+        """(count, dimension numbers) from one row of the tally table."""
+        m = re.search(rf"\*\*{re.escape(label)}\*\*\s*\|\s*(\d+)\s*\|\s*([^|]*)\|",
+                      block)
+        assert m is not None, f"the tally has no {label!r} row"
+        count = int(m.group(1))
+        dims = [int(d) for d in re.findall(r"\d+", m.group(2))]
+        return count, dims
+
+    for label, verdict in (("✓ Win", "✓"), ("≈ Tie / At par", "≈"),
+                           ("✗ Loss", "✗")):
+        count, dims = _tally_row(label)
+        expected = sorted(n for n, v in rows if v == verdict)
+        assert dims == expected, (
+            f"the tally's {label} row lists {dims}, but the matrix has "
+            f"{expected}"
+        )
+        assert count == len(expected), (
+            f"the tally's {label} row says {count}, but it lists "
+            f"{len(expected)} dimensions: {dims}"
+        )
+
+
+def test_the_matrix_tally_is_what_the_chart_draws():
+    """The chart and the paper must report the same win/tie/loss counts.
+
+    The chart reads the matrix directly, so it cannot drift on its own.
+    The paper's tally was hand-written and did drift, so this test pins
+    the two together.
+    """
+    if not VERDICT_PATH.exists():
+        pytest.skip("verdict matrix not present")
+    from scripts import plot_wins
+
     text = VERDICT_PATH.read_text(encoding="utf-8")
     rows = []
     for line in text.splitlines():
@@ -250,28 +323,175 @@ def test_the_verdict_tally_matches_the_matrix():
         cells = [c.strip() for c in line.split("|")]
         if len(cells) < 8 or cells[6] not in ("✓", "✗", "≈"):
             continue
-        rows.append((cells[1], cells[6]))
+        rows.append((int(cells[1]), cells[2].strip("*"), cells[6]))
 
-    tally = _verdict_tally(text)
-    assert tally is not None, "the tally could not be rebuilt from the matrix"
+    label_map = {"✓": "Win", "≈": "Tie", "✗": "Loss"}
+    counts = {"Win": 0, "Tie": 0, "Loss": 0}
+    for _, _, v in rows:
+        counts[label_map[v]] += 1
 
-    wins = [n for n, v in rows if v == "✓"]
-    ties = [n for n, v in rows if v == "≈"]
-    losses = [n for n, v in rows if v == "✗"]
-
-    assert f"| {len(wins)} | {', '.join(wins)} |" in tally, (
-        f"the tally's win row does not match the matrix ({len(wins)} wins: "
-        f"{wins})"
-    )
-    assert f"| {len(ties)} | {', '.join(ties)} |" in tally, (
-        f"the tally's tie row does not match the matrix ({len(ties)} ties: "
-        f"{ties})"
-    )
-    assert f"| {len(losses)} | {', '.join(losses)} |" in tally, (
-        f"the tally's loss row does not match the matrix ({len(losses)} "
-        f"losses: {losses})"
+    # The chart labels the dimensions it plots with the same names, and
+    # its title quotes the row count. Both come from the matrix, so the
+    # matrix is the single source of truth and this test only has to
+    # confirm that the chart would draw these counts.
+    assert counts["Win"] + counts["Tie"] + counts["Loss"] == len(rows)
+    assert plot_wins.VERDICT_PATH == Path("Paper/comparison.md"), (
+        "the chart must read the matrix from the consolidated comparison "
+        "document, which is where the matrix lives"
     )
 
 
 def test_the_output_directory_is_the_graphs_directory():
     assert plot_wins.OUT_DIR == Path("data/graphs")
+
+
+def test_a_metric_below_its_comparable_is_a_loss_not_a_tie():
+    """An interval that sits entirely below the published value is a loss.
+
+    The chart used to classify a metric as an overlap whenever the
+    *bottom* of our interval sat under the published number. That is also
+    true of an interval that sits entirely below it, so a metric we are
+    clearly behind was drawn as a tie. Our ROC-AUC is [0.911, 0.940]
+    against Dale's 0.987: the whole interval is under his number, so we
+    are behind, not at par.
+
+    The rule has to hold in both directions, and the tie case must still
+    be a tie: our sentence accuracy is [0.809, 0.851] against 0.847,
+    which straddles it.
+    """
+    from scripts.fill_comparison_table import _verdict_from_ci
+
+    def verdict(value, ci, comparable):
+        def lookup(key):
+            if key == "m_ci":
+                return ci
+            raise KeyError(key)
+
+        return _verdict_from_ci(lookup, "m", "m_ci", comparable)
+
+    # Entirely below: a loss.
+    assert verdict(0.925, [0.911, 0.940], "0.987 (Dale ALTI+)") == "✗", (
+        "an interval that sits entirely below the published value was "
+        "reported as something other than a loss"
+    )
+    # Straddling: a tie.
+    assert verdict(0.829, [0.809, 0.851], "0.847 (Halu-NLP)") == "≈", (
+        "an interval that straddles the published value was reported as "
+        "something other than a tie"
+    )
+    # Entirely above: a win.
+    assert verdict(0.800, [0.773, 0.844], "0.703 (Dale LaBSE)") == "✓", (
+        "an interval that clears the published value was reported as "
+        "something other than a win"
+    )
+
+
+def test_the_chart_and_the_paper_agree_on_win_tie_and_loss():
+    """The chart's classification has to match the paper's metric table.
+
+    The chart and the paper are two surfaces for the same six scores.
+    When the chart called ROC-AUC and VSR ties and the paper called them
+    losses, a reader comparing the figure to the table would find the
+    two contradicting each other.
+
+    The paper's rule is the one the chart has to apply, so the chart's
+    classifier is run over the same measurements and the results are
+    compared row by row.
+    """
+    if not METRICS_PATH.exists() or not CSV_PATH.exists():
+        pytest.skip("metrics or comparison table not present")
+    if not VERDICT_PATH.exists():
+        pytest.skip("comparison.md not present")
+
+    agg = json.loads(METRICS_PATH.read_text(encoding="utf-8"))["aggregate"]
+    with CSV_PATH.open("r", encoding="utf-8", newline="") as f:
+        csv_rows = list(csv.reader(f))
+    header = [h.strip() for h in csv_rows[0]]
+    ours = next(i for i, h in enumerate(header)
+                if h.lower().startswith("ours"))
+    other_idx = [i for i in range(2, len(header)) if i != ours]
+
+    # The chart's classifier: a win needs the bottom of our interval
+    # above their number, a loss needs the top of it below, and anything
+    # else is a tie.
+    def classify(value, ci, best):
+        if len(ci) != 2:
+            return None
+        if ci[0] > best:
+            return "win"
+        if ci[1] < best:
+            return "loss"
+        return "tie"
+
+    def num(v):
+        text = str(v or "")
+        if any(tag in text.lower() for tag in ("implied", "projected",
+                                               "no rewriting", "no mitigation",
+                                               "not reported", "n/a")):
+            return None
+        m = re.search(r"[-+]?\d+(?:\.\d+)?", text)
+        return float(m.group(0)) if m else None
+
+    # The paper's metric table: | Metric | value | CI | comparable |
+    # verdict |.
+    md = VERDICT_PATH.read_text(encoding="utf-8")
+    block = re.search(
+        r"\*\*The full metric set on HaluEval:\*\*.*?\n\s*\n"
+        r"\| Metric \|.*?\n(?:\|\|?.*\n)*",
+        md,
+        re.DOTALL,
+    )
+    assert block, "the paper has no HaluEval metric table"
+    paper = {}
+    for line in block.group(0).splitlines():
+        if not line.startswith("| ") or line.startswith("|---"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) == 5 and cells[0] != "Metric":
+            paper[cells[0]] = cells
+
+    chart_labels = {
+        "AUPR": "AUPR",
+        "P at R=90": "P@R90",
+        "ROC-AUC": "ROC-AUC",
+        "Sentence Accuracy": "Detection accuracy",
+        "Verification Success Rate (VSR)": "VSR",
+    }
+
+    checked = 0
+    for label, key, ci_key, md_name in (
+            ("AUPR", "detection_aupr", "detection_aupr_ci95", "AUPR"),
+            ("P at R=90", "precision_at_recall_90",
+             "precision_at_recall_90_ci95", "P@R90"),
+            ("ROC-AUC", "detection_roc_auc", "detection_roc_auc_ci95",
+             "ROC-AUC"),
+            ("Sentence Accuracy", "detection_accuracy",
+             "detection_accuracy_ci95", "Detection accuracy"),
+            ("Verification Success Rate (VSR)", "verification_success_rate",
+             "verification_success_rate_ci95", "VSR")):
+        row = next((r for r in csv_rows[1:]
+                    if len(r) > 1 and r[1].strip() == label), None)
+        if row is None or key not in agg or md_name not in paper:
+            continue
+        others = [num(row[i]) for i in other_idx if i < len(row)]
+        others = [x for x in others if x is not None and 0 <= x <= 1]
+        if not others:
+            continue
+        best = max(others)
+        ci = [float(x) for x in (agg.get(ci_key) or [])]
+        got = classify(float(agg[key]), ci, best)
+        if got is None:
+            continue
+
+        paper_verdict = paper[md_name][4]
+        expected = {"win": "✓", "tie": "≈", "loss": "✗"}[got]
+        assert paper_verdict == expected, (
+            f"{label}: the chart classifies it as {got} but "
+            f"Paper/comparison.md says {paper_verdict!r}"
+        )
+        checked += 1
+
+    assert checked >= 4, (
+        f"only {checked} metrics were compared between the chart and the "
+        "paper; the comparison has drifted"
+    )

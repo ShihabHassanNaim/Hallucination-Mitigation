@@ -38,6 +38,10 @@ from pathlib import Path
 CSV_PATH = Path("Paper/comparison_table.csv")
 METRICS_PATH = Path("data/metrics_halueval.json")
 MITIGATION_PATH = Path("data/mitigation_results.json")
+# The diagnostic runs that explain WHY the rewrite fails. They are not
+# the headline mitigation result and are kept in their own file so the
+# two can never be confused.
+MITIGATION_INVESTIGATION_PATH = Path("data/mitigation_investigation.json")
 
 # Metric row label in the CSV -> (aggregate key, CI key)
 DETECTION_ROWS = {
@@ -96,7 +100,12 @@ def _apply_specs(
 
     Each spec is ``(label, pattern, build, needed)`` where ``pattern`` is a
     regular expression that matches the row by its *stable* text and captures
-    the cell(s) that hold a measured value.
+    the cell(s) that hold a measured value. A spec may carry a fifth
+    element, a tuple of *optional* value names: those do not have to be
+    present for the rule to run, and the build function is given None for
+    the ones that are missing. A rule that owns several rows at once needs
+    this, because a run that measured one metric but not another must still
+    refresh the row it can.
 
     The patterns are deliberately written so that a row is matched no matter
     what number it currently holds. An earlier version anchored on the exact
@@ -106,12 +115,16 @@ def _apply_specs(
     after a new evaluation always refreshes the row.
     """
     replacements: list[tuple[str, str, str]] = []
-    for label, pattern, build, needed in specs:
+    for spec in specs:
+        label, pattern, build, needed = spec[:4]
+        optional = spec[4] if len(spec) > 4 else ()
         values_needed = {k: values.get(k) for k in needed}
         if any(val is None for val in values_needed.values()):
             # The metric was not measured — leave the row untouched rather
             # than substituting a number that does not exist.
             continue
+        for key in optional:
+            values_needed.setdefault(key, values.get(key))
 
         def _sub(match: re.Match) -> str:
             return build(lambda k: values_needed[k], match)
@@ -601,7 +614,69 @@ def _mitigation_prose_values(path: Path | None = None) -> dict:
             "readme_delta_lead": lead, "readme_delta_body": body,
             "readme_verdict": readme_verdict,
             "mitigation_sentence": sentence,
-            "delta_tex_prose": delta_tex_prose}
+            "delta_tex_prose": delta_tex_prose,
+            # The three numbers the mitigation table quotes as separate
+            # cells: the score before the rewrite, the score after it,
+            # and the interval around their difference. The bare delta
+            # is separate from ``delta``, which is a sentence carrying
+            # the verdict and cannot go in a numeric table cell.
+            "mit_pre": f"{regen.get('pre_bertscore'):.3f}",
+            "mit_post": f"{regen.get('post_bertscore'):.3f}",
+            "mit_delta": f"{float(delta):+.3f}",
+            "mit_delta_ci": (
+                f"[{float(ci[0]):+.3f}, {float(ci[1]):+.3f}]" if ci else ""
+            ),
+            # How many rows the rewrite was measured on. Prose that
+            # quotes the delta has to say how many rows it is based on,
+            # otherwise a number with no scope reads as a general result.
+            "mit_n_regen": str(n_regen) if n_regen else "",
+            "mit_n_rows": str(n_rows) if n_rows else ""}
+
+
+def _mitigation_investigation_values(
+    path: Path | None = None,
+) -> dict[str, str]:
+    """The numbers from the step-10 rewrite investigation.
+
+    Section 5.3 of the comparison document explains *why* the rewrite does
+    not work: one mode substituted raw passages for a correct answer, and
+    a second change made the rewrite fire on more rows without improving
+    the delta. Both are measurements, but from short diagnostic runs
+    rather than the committed 500-row split, so they are kept in their own
+    file and never mixed with the headline result.
+
+    A missing file yields an empty dict, which leaves the prose rules
+    unmatched rather than filling them with a guess.
+    """
+    src = Path(path) if path is not None else MITIGATION_INVESTIGATION_PATH
+    if not src.exists():
+        return {}
+    try:
+        data = json.loads(src.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+    out: dict[str, str] = {}
+    guard = data.get("evidence_mode_guards") or {}
+    before = guard.get("score_before_guard")
+    after = guard.get("score_after_guard")
+    if isinstance(before, (int, float)) and isinstance(after, (int, float)):
+        out["inv_guard_before"] = f"{float(before):.3f}"
+        out["inv_guard_after"] = f"{float(after):.3f}"
+
+    ab = data.get("per_claim_guards") or {}
+    old = ab.get("old") or {}
+    new = ab.get("new") or {}
+    for suffix, src_map in (("old", old), ("new", new)):
+        rows = src_map.get("regenerated_rows")
+        delta = src_map.get("delta_on_regenerated_rows")
+        if isinstance(rows, int):
+            out[f"inv_guards_{suffix}_rows"] = str(rows)
+        if isinstance(delta, (int, float)):
+            out[f"inv_guards_{suffix}_delta"] = (
+                f"{float(delta):+.3f}".replace("-", "−")
+            )
+    return out
 
 
 def _delta_positive(lookup) -> bool:
@@ -625,6 +700,28 @@ def _delta_positive(lookup) -> bool:
     # The formatter appends "— not positive" whenever the interval does
     # not clear zero, so its presence is the authoritative signal.
     return "not positive" not in text
+
+
+def _mitigation_mark(lookup) -> tuple[str, str]:
+    """Return the mark and tag for the mitigation row of a chart.
+
+    A mitigation delta is a win only when the measurement is positive
+    and its interval excludes zero. An interval that covers zero means
+    the rewrite did not measurably help, so the row reads as a loss even
+    when the point estimate is positive.
+    """
+    try:
+        delta = float(str(lookup("mit_delta")).replace("−", "-"))
+    except (KeyError, TypeError, ValueError):
+        return "✗", "Behind"
+    try:
+        raw = str(lookup("mit_delta_ci")).strip("[]")
+        low, high = (float(p.replace("−", "-")) for p in raw.split(","))
+    except (KeyError, TypeError, ValueError):
+        return ("✓", "Ahead") if delta > 0 else ("✗", "Behind")
+    if delta > 0 and low > 0:
+        return "✓", "Ahead"
+    return "✗", "Behind"
 
 
 def _latency_band(lookup) -> str:
@@ -656,6 +753,411 @@ def _latency_mean(lookup) -> float:
     return float(value)
 
 
+# The fastest detector in the comparison, as reported by LLM-Check. The
+# win-matrix verdict for the latency row is derived from this, so a
+# faster pipeline would flip the mark without anyone editing prose.
+_LATENCY_COMPARABLE_S = 0.22
+
+
+def _latency_verdict(lookup) -> tuple[str, str]:
+    """Return the win-matrix mark and comment for the latency row.
+
+    The comment used to assert that the pipeline was "faster than every
+    sampling baseline", which rested on a band that was never measured.
+    It is derived from the measurement instead: the pipeline is slower
+    than the single-pass probe whenever its slowest query is slower
+    than that probe's reported latency.
+    """
+    try:
+        hi = lookup("latency_max_s")
+    except KeyError:
+        hi = None
+    if hi is None:
+        return "✗", "Slower than the single-pass probe; much richer output"
+    if float(hi) <= _LATENCY_COMPARABLE_S:
+        return "✓", "Faster than the single-pass probe"
+    return "✗", "Slower than the single-pass probe; much richer output"
+
+
+# The published comparable for each charted dimension, with the paper it
+# came from. These are constants because they are claims made by other
+# authors; only the "ours" column is measured here.
+#
+# The fourth element is the key the metric's confidence interval lives
+# under, so the block can apply the paper's one rule -- a win needs the
+# bottom of our 95% interval above the published number -- instead of
+# comparing point estimates. A metric with no interval (Claim F1) has
+# none, so its mark falls back to the point estimate and says so.
+_VISUAL_COMPARABLES = [
+    # (row label, our metric key, published comparable, published value)
+    ("Claim F1", "claim_f1", 0.710, None),
+    ("Detection AUPR", "detection_aupr", 0.840, "detection_aupr_ci"),
+    ("Detection ROC-AUC", "detection_roc_auc", 0.987, "detection_roc_auc_ci"),
+    ("Sentence accuracy", "detection_accuracy", 0.847,
+     "detection_accuracy_ci"),
+    ("P@R90", "precision_at_recall_90", 0.703, "precision_at_recall_90_ci"),
+    ("Spearman ρ", "spearman_rho", 0.770, "spearman_rho_ci"),
+    ("Mitigation Δ", "mit_delta", 0.60, None),
+    ("HRR", "hallucination_reduction_rate", 0.550,
+     "hallucination_reduction_rate_ci"),
+    ("VSR", "verification_success_rate", 0.810,
+     "verification_success_rate_ci"),
+]
+
+
+def _visual_headline_block(lookup) -> str:
+    """Render the bar-chart block the demo page reads.
+
+    Each row is one score dimension: the best published comparable, our
+    measured value and the gap between them, plus a mark that says
+    whether we are ahead, at par or behind. The mark is derived from the
+    same numbers rather than written by hand, so a measurement that
+    moves cannot leave a stale verdict behind.
+
+    The marks come from the same comparison the win matrix uses -- our
+    score against the row's own published comparable -- so the chart and
+    the matrix can never disagree about a dimension.
+    """
+    lines = [
+        "Metric                    Best-Cited   Ours    Gap",
+        "─" * 61,
+    ]
+    for label, key, best, ci_key in _VISUAL_COMPARABLES:
+        try:
+            ours = lookup(key)
+        except KeyError:
+            ours = None
+        if ours is None:
+            continue
+        ours = float(ours)
+        gap = ours - best
+        if key == "mit_delta":
+            # A mitigation delta is a win only when it is positive and
+            # its interval excludes zero.
+            mark, tag = _mitigation_mark(lookup)
+        else:
+            # The paper's one rule: a win needs the bottom of our 95%
+            # interval above the published number. When the metric has
+            # no interval there is no evidence of separation, so the
+            # mark falls back to the point estimate and the tag says
+            # which rule was applied.
+            verdict = None
+            if ci_key:
+                verdict = _verdict_from_ci(
+                    lookup, key, ci_key, f"{best:.3f}"
+                )
+            if verdict == "✓":
+                mark, tag = "✓", "Ahead"
+            elif verdict == "≈":
+                mark, tag = "≈", "At par"
+            elif verdict == "✗":
+                mark, tag = "✗", "Behind"
+            elif _above(lookup, key, best):
+                mark, tag = "✓", "Ahead (no CI)"
+            else:
+                mark, tag = "✗", "Behind (no CI)"
+        lines.append(
+            f"{label:<25} {best:>10.3f} {ours:>7.3f} {gap:>+8.3f}  {mark} {tag}"
+        )
+
+    # Latency is a cost rather than a score, so it is charted against
+    # the fastest cited probe and always reads as a loss when we are
+    # slower.
+    try:
+        latency = lookup("latency_mean_s")
+    except KeyError:
+        latency = None
+    if latency is not None:
+        latency = float(latency)
+        gap = latency - _LATENCY_COMPARABLE_S
+        mark, tag = ("✗", "Slower") if gap > 0 else ("✓", "Faster")
+        lines.append(
+            f"{'Latency (s, GPU)':<25} {_LATENCY_COMPARABLE_S:>10.2f} "
+            f"{latency:>7.2f} {gap:>+8.2f}  {mark} {tag}"
+        )
+
+    return "\n".join(lines) + "\n```"
+
+
+def _win_matrix_rows(text: str) -> list[tuple[str, str, str]]:
+    """The win matrix's rows as (number, dimension, verdict).
+
+    Read by column position, the same way the tally reads the verdict:
+    the matrix has seven columns and the verdict is the sixth.
+    """
+    rows: list[tuple[str, str, str]] = []
+    for line in text.splitlines():
+        if not re.match(r"^\| \d+ \|", line):
+            continue
+        cells = [c.strip() for c in line.split("|")]
+        if len(cells) < 8:
+            continue
+        verdict = cells[6]
+        if verdict not in ("✓", "✗", "≈"):
+            continue
+        dimension = cells[2].replace("**", "")
+        rows.append((cells[1], dimension, verdict))
+    return rows
+
+
+# The win-matrix dimensions whose verdict is a property of the system's
+# design rather than of a number. A structural win is a different kind
+# of claim from a score win, and the document says which is which.
+_STRUCTURAL_DIMENSIONS = {
+    "Per-claim provenance", "Modular backend", "Retrieval that works",
+    "Explicit abstention", "Evaluation scale", "Per-claim provenance",
+    "Active mitigation",
+}
+
+
+def _headline_read(text: str) -> str:
+    """The paragraph that reads the matrix aloud.
+
+    It used to say "the two score wins are claim-level F1 and AUPR"
+    while the matrix above it showed three score wins, because the
+    paragraph was written by hand and P@R90 became a win after it was
+    written. The counts come from the rows, so the reading cannot
+    disagree with the table it reads.
+    """
+    rows = _win_matrix_rows(text)
+    if not rows:
+        return ""
+
+    wins = [d for _n, d, v in rows if v == "✓"]
+    ties = [d for _n, d, v in rows if v == "≈"]
+    losses = [d for _n, d, v in rows if v == "✗"]
+
+    score_wins = [d for d in wins if d not in _STRUCTURAL_DIMENSIONS]
+    structural_wins = [d for d in wins if d in _STRUCTURAL_DIMENSIONS]
+    score_losses = [d for d in losses if d not in _STRUCTURAL_DIMENSIONS]
+
+    def _names(items: list[str]) -> str:
+        if not items:
+            return "none"
+        if len(items) == 1:
+            return items[0]
+        return ", ".join(items[:-1]) + " and " + items[-1]
+
+    parts = [
+        f"**Headline read.** Of the {len(wins)} matrix wins, "
+        f"{len(structural_wins)} are structural "
+        f"({_names(structural_wins)}) -- properties of the system's design "
+        f"rather than of a single score. The score wins are "
+        f"{_names(score_wins)}.",
+    ]
+    if score_losses:
+        parts.append(
+            f"We trail on {_names(score_losses)}, and we are at parity on "
+            f"{_names(ties)}."
+        )
+    body = " ".join(parts)
+    # The paragraph is wrapped to keep the document's source readable.
+    words = body.split(" ")
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}" if current else word
+        if len(candidate) > 86 and current:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return "\n".join(lines)
+
+
+def _verdict_tally(text: str) -> str | None:
+    """Rebuild the verdict tally from the win-matrix rows.
+
+    The tally summarises the rows above it, so it is computed from those
+    rows rather than maintained by hand. Returns None when the matrix is
+    not present or a row cannot be classified.
+
+    The winner mark is read by *column position*, not by "the first mark
+    on the line". Some rows carry a checkmark in an earlier column -- the
+    "Active mitigation" row reads "Dale 2023 only | ✓ | ✓ | ≈", because
+    both systems do active mitigation -- and a non-greedy pattern would
+    pick up the comparable's mark and count a tie as a win. The matrix
+    has seven columns, so the verdict is the sixth.
+    """
+    rows: list[tuple[str, str]] = []
+    for line in text.splitlines():
+        if not re.match(r"^\| \d+ \|", line):
+            continue
+        cells = [c.strip() for c in line.split("|")]
+        # cells[0] is empty (the line starts with "|"), so the columns
+        # are 1..7 and the verdict is column 6.
+        if len(cells) < 8:
+            continue
+        verdict = cells[6]
+        if verdict not in ("✓", "✗", "≈"):
+            continue
+        rows.append((cells[1], verdict))
+    if not rows:
+        return None
+
+    wins, ties, losses = [], [], []
+    for number, verdict in rows:
+        if verdict == "✓":
+            wins.append(number)
+        elif verdict == "≈":
+            ties.append(number)
+        else:
+            losses.append(number)
+
+    def _fmt(label: str, numbers: list[str]) -> str:
+        return f"| **{label}** | {len(numbers)} | {', '.join(numbers)} |"
+
+    return "\n".join([
+        _fmt("✓ Win", wins),
+        _fmt("≈ Tie / At par", ties),
+        _fmt("✗ Loss", losses),
+    ])
+
+
+# The win-matrix rows whose verdict is a measurement rather than a
+# property of the system's design. The value is the comparable the row
+# is measured against; the key is the metric that holds our score.
+_WIN_MATRIX_SCORES = {
+    "Claim-level F1": ("claim_f1", 0.71),
+    "Detection AUPR": ("detection_aupr", 0.840),
+    "Detection ROC-AUC": ("detection_roc_auc", 0.987),
+    "Sentence accuracy": ("detection_accuracy", 0.847),
+    "P@R90": ("precision_at_recall_90", 0.703),
+    "Spearman ρ": ("spearman_rho", 0.770),
+    "HRR": ("hallucination_reduction_rate", 0.550),
+    "VSR": ("verification_success_rate", 0.810),
+    # The mitigation row is scored on the sign of the delta rather than
+    # on its size: a delta whose interval covers zero is not a win even
+    # when it is positive.
+    "Mitigation Δ": ("__mitigation__", 0.60),
+}
+
+
+def _win_matrix_row(v, m) -> str:
+    """Rebuild one win-matrix row's value, verdict and justification.
+
+    Only the score rows are rewritten. The other rows compare a design
+    property -- does the system cite its claims, does it abstain -- and
+    their verdicts do not follow from a number, so they are left alone.
+
+    The verdict is computed against the comparable printed in the row
+    itself, never against a different row's comparable: an earlier
+    version compared our ROC-AUC against the Sent-T5 XL band of
+    0.85-0.90, so a row whose own comparable was 0.987 wrote "Above
+    the cited comparables" while claiming a lead over a number
+    printed two cells to its left.
+    """
+    number, dimension, best_paper, best_score, ours, verdict, why = m.groups()
+
+    key_and_threshold = _WIN_MATRIX_SCORES.get(dimension)
+    if key_and_threshold is None:
+        # A structural row: keep every cell as it is.
+        return m.group(0)
+
+    key, threshold = key_and_threshold
+    if key == "__mitigation__":
+        # The mitigation delta is a win only when the measurement is
+        # positive and its interval excludes zero. The helper is the
+        # same one the prose uses, so the table and the sentence cannot
+        # disagree.
+        if _delta_positive(v):
+            mark, comment = "✓", "Above the cited comparable"
+        else:
+            try:
+                n_regen = v("mit_n_regen")
+            except KeyError:
+                n_regen = None
+            if n_regen:
+                comment = (
+                    f"Measured on the {n_regen} rows step 10 regenerated; the "
+                    "rewrite does not improve on no mitigation yet"
+                )
+            else:
+                comment = (
+                    "Measured on the regenerated rows; not an improvement over "
+                    "the no-mitigation baseline"
+                )
+            mark = "✗"
+        return (
+            f"| {number} | **{dimension}** | {best_paper} | {best_score} | "
+            f"{ours} | {mark} | {comment} |"
+        )
+
+    # The row's own metric is what the verdict is computed from, so a
+    # row whose metric was not measured keeps the verdict it had. The
+    # rule spans every score row, so a run that measured one metric but
+    # not another must still refresh the row it can.
+    try:
+        measured = v(key)
+    except KeyError:
+        return m.group(0)
+    if measured is None:
+        return m.group(0)
+
+    # The paper states one rule for a win: the bottom of our 95%
+    # confidence interval has to sit above their published number, not
+    # our best estimate. Every score row uses that rule, so the matrix
+    # cannot call a metric a win that the section-3.2 table calls a tie
+    # -- which is what happened when P@R90 was a tie in one table and a
+    # win in the other.
+    #
+    # The comparable is the row's own score cell, so the verdict is
+    # always measured against the number printed beside it.
+    verdict = _verdict_from_ci(v, key, f"{key}_ci", best_score)
+    if verdict == "✓":
+        mark, comment = "✓", "Our CI's bottom is above their top"
+    elif verdict == "≈":
+        mark, comment = "≈", "Our CI overlaps their published value"
+    elif verdict == "✗":
+        mark, comment = "✗", _below_note(f"{best_paper} {best_score}")
+    elif _above(v, key, threshold):
+        # No interval for this metric, so there is no evidence of
+        # separation either way. The point estimate is what is left, and
+        # the comment says so rather than implying a tested result.
+        mark, comment = "✓", "Above the cited comparable (no CI for this metric)"
+    else:
+        mark, comment = "✗", _below_note_with_ci(f"{best_paper} {best_score}")
+
+    return (
+        f"| {number} | **{dimension}** | {best_paper} | {best_score} | "
+        f"{ours} | {mark} | {comment} |"
+    )
+
+
+def _fill_verdict_tally(text: str, dry_run: bool = False) -> tuple[str, list]:
+    """Rewrite the win matrix's verdict tally from the matrix rows.
+
+    The tally counts the rows above it, so it is derived from them rather
+    than kept by hand. A row whose verdict flips therefore changes the
+    count without anyone editing the table.
+
+    The whole three-row block is replaced, not just the counts: a count
+    that no longer matches its own list of dimensions is as wrong as a
+    count that no longer matches the matrix.
+    """
+    tally = _verdict_tally(text)
+    if tally is None:
+        return text, []
+
+    pattern = re.compile(
+        r"\| \*\*✓ Win\*\* \| \d+ \| [^|]* \|\n"
+        r"\| \*\*≈ Tie / At par\*\* \| \d+ \| [^|]* \|\n"
+        r"\| \*\*✗ Loss\*\* \| \d+ \| [^|]* \|"
+    )
+    match = pattern.search(text)
+    if not match:
+        return text, []
+
+    new_text, count = pattern.subn(lambda _m: tally, text)
+    if not count or new_text == text:
+        return text, []
+    return new_text, [
+        ("7. verdict tally", "the win matrix rows", f"{count} row(s)")
+    ]
+
+
 def _above(lookup, key: str, threshold: float) -> bool:
     """True when the measured value beats the cited comparable.
 
@@ -674,48 +1176,11 @@ def _above(lookup, key: str, threshold: float) -> bool:
         return False
 
 
-def _ci_bracket(lookup, key: str) -> str:
-    """Render a 95% CI as ``lo, hi`` for prose, or ``--`` if absent.
-
-    The prose in the defence notes quotes the interval, so a rule that
-    rewrites the point estimate must rewrite the interval with it —
-    otherwise the sentence would mix a fresh estimate with a stale
-    interval.
-    """
-    try:
-        ci = lookup(key)
-    except KeyError:
-        return "--"
-    if not isinstance(ci, (list, tuple)) or len(ci) != 2:
-        return "--"
-    try:
-        return f"{float(ci[0]):.3f}, {float(ci[1]):.3f}"
-    except (TypeError, ValueError):
-        return "--"
-
-
-def _ci_text(agg: dict, key: str) -> str | None:
-    """Render ``[lo, hi]`` for a metric's ``_ci95`` sibling, or None.
-
-    ``None`` means "not measured", which the spec machinery treats as
-    "leave this cell alone" — the correct behaviour when a run has no
-    interval to quote.
-    """
-    ci = agg.get(f"{key}_ci95")
-    if not isinstance(ci, (list, tuple)) or len(ci) != 2:
-        return None
-    try:
-        return f"{float(ci[0]):.3f}, {float(ci[1]):.3f}"
-    except (TypeError, ValueError):
-        return None
-
-
 def _ragtruth_win_prose(lookup) -> str:
     """The sentence that reads the RAGTruth verdict table out loud.
 
-    It states how many of the five published anchors our interval clears
-    and which ones it does not, so the prose cannot claim five wins when
-    the table shows four.
+    It names the anchors our interval clears and the ones it does not, so
+    the prose cannot claim five wins when the table shows three.
     """
     try:
         ci = lookup("rag_detection_roc_auc_ci")
@@ -734,19 +1199,40 @@ def _ragtruth_win_prose(lookup) -> str:
     lower = float(ci[0])
     wins = [s for s, p in _PUBLISHED_AUROC.items() if lower > float(p)]
     ties = [s for s, p in _PUBLISHED_AUROC.items() if lower <= float(p)]
+
+    def _name(system: str) -> str:
+        # The table names them "LLM-Check — Logit, Window Entropy"; in the
+        # prose the shared "Logit," prefix is dropped so the sentence
+        # stays readable and the three Logit variants are told apart by
+        # what they read.
+        return system.split(",", 1)[-1].strip()
+
+    def _list(names: list[str]) -> str:
+        if len(names) == 1:
+            return f"{_name(names[0])} ({_PUBLISHED_AUROC[names[0]]})"
+        if len(names) == 2:
+            return (f"{_name(names[0])} ({_PUBLISHED_AUROC[names[0]]}) and "
+                    f"{_name(names[1])} ({_PUBLISHED_AUROC[names[1]]})")
+        head = ", ".join(
+            f"{_name(n)} ({_PUBLISHED_AUROC[n]})" for n in names[:-1]
+        )
+        return f"{head} and {_name(names[-1])} ({_PUBLISHED_AUROC[names[-1]]})"
+
     if not ties:
         return (
             f"All five anchors clear the bar ({lower:.4f} > "
             f"{min(float(p) for p in _PUBLISHED_AUROC.values()):.4f}), so all "
             "five are wins."
         )
-    names = ", ".join(ties)
-    verb = "is" if len(ties) == 1 else "are"
+    if not wins:
+        return (
+            f"Our bottom is {lower:.4f}, so none of the five anchors is "
+            "cleared and all five are reported as ties."
+        )
     return (
-        f"{len(wins)} of the five anchors clear the bar (our lower bound is "
-        f"{lower:.4f}). The {names} anchor{'s' if len(ties) > 1 else ''} "
-        f"{verb} not cleared — our interval covers it, so the comparison is "
-        "a tie and is reported as one."
+        f"Our bottom is\n{lower:.4f}, so {_list(wins)} are\ncleared, while "
+        f"{_list(ties)} are inside our interval\nand are therefore reported "
+        "as ties."
     )
 
 
@@ -805,37 +1291,20 @@ def _ragtruth_heldout_prose(lookup) -> str:
         except (ValueError, IndexError):
             heldout_lower = ""
     anchor = max(float(p) for p in _PUBLISHED_AUROC.values())
-    if heldout_lower:
-        comparison = (
-            f"the held-out lower bound ({heldout_lower}) "
-            + ("sits below" if float(heldout_lower) < anchor else "sits above")
-            + f" LLM-Check's strongest anchor ({anchor:.4f}), so the held-out "
-            "figure on its own would "
-            + ("not be a win" if float(heldout_lower) < anchor else "be a win")
-        )
-    else:
-        comparison = (
-            "the held-out figure on its own would need its own interval "
-            "compared against the anchor"
-        )
+    direction = (
+        "below" if (heldout_lower and float(heldout_lower) < anchor) else "above"
+    )
     return (
-        "496 rows of the RAGTruth split, so "
-        + str(fitted)
-        + " is measured on data the head was\nfitted on. Its honest "
-        "generalisation estimate is the **held-out** figure:\n**"
-        + str(holdout)
-        + ", CI ["
-        + str(holdout_ci).strip("[]")
-        + "]** — the head scored on a half of the fit data\nit never saw. "
-        "The gap between "
-        + str(holdout)
-        + " and "
-        + str(fitted)
-        + " is the generalisation gap,\nand it is "
-        + verdict
-        + ". Both numbers are reported; "
-        + comparison
-        + "."
+        "The detection head was fitted on 496 rows of the\nRAGTruth split, "
+        "so the " + str(fitted) + " above was measured on data the model "
+        "had already seen. The\nhonest generalisation estimate is the "
+        "**held-out** figure: **" + str(holdout) + ", CI ["
+        + str(holdout_ci).strip("[]") + "]**,\nscored on a half of the "
+        "fitting data it never saw. The gap is " + verdict + ", which is "
+        "reassuring.\nBut the held-out lower bound (" + (heldout_lower or "n/a")
+        + ") sits **" + direction + "** LLM-Check's strongest anchor\n("
+        + f"{anchor:.4f}" + "), so on the held-out figure alone the RAGTruth "
+        "comparison would be a tie against\nall five rather than three wins."
     )
 
 
@@ -890,94 +1359,102 @@ def _above_ci(lookup, key: str, threshold: float) -> bool:
         return False
 
 
-def _verdict_tally(text: str) -> str | None:
-    """Rebuild the verdict tally from the win-matrix rows.
+def _comparable_number(cell: str) -> float | None:
+    """The published number in a comparable cell, or None if there is none.
 
-    The tally summarises the rows above it, so it is computed from those
-    rows rather than maintained by hand. Returns None when the matrix is
-    not present or a row cannot be classified.
-
-    The winner mark is read by *column position*, not by "the first mark
-    on the line". Some rows carry a checkmark in an earlier column -- row
-    15 reads "Dale 2023 only | ✓ | ✓ | ≈", because both systems do
-    active mitigation -- and a non-greedy pattern would pick up the
-    comparable's mark and count a tie as a win. The matrix has seven
-    columns, so the verdict is the sixth.
+    A comparable cell can hold a number ("0.847 (Halu-NLP)"), a band
+    ("0.85-0.90 (Sent-T5 XL)"), a dash ("-"), a note ("none published")
+    or an implied baseline ("~0.55 (Dale 2023, implied)"). Only the
+    first two are published scores, and only a band's *top* is a
+    published score the other system reached. An implied baseline is
+    derived from another metric rather than published, so it is not a
+    comparable at all.
     """
-    rows: list[tuple[str, str]] = []
-    for line in text.splitlines():
-        if not re.match(r"^\| \d+ \|", line):
-            continue
-        cells = [c.strip() for c in line.split("|")]
-        # cells[0] is empty (the line starts with "|"), so the columns
-        # are 1..7 and the verdict is column 6.
-        if len(cells) < 8:
-            continue
-        verdict = cells[6]
-        if verdict not in ("✓", "✗", "≈"):
-            continue
-        rows.append((cells[1], verdict))
-    if not rows:
+    text = str(cell or "").strip()
+    if not text or text in {"-", "—", "none published"}:
         return None
+    low = text.lower()
+    if "implied" in low or "no published" in low or "none published" in low:
+        return None
+    # Only the part before the parenthesis holds the score. The
+    # parenthetical names the system and often the year -- "0.987 (Dale
+    # 2023 -- ALTI+)" -- and reading a number out of it picks up 2023 and
+    # turns the comparable into a number nobody published.
+    head = text.split("(", 1)[0].strip()
+    if not head:
+        return None
+    # The dash in a band ("0.85-0.90") separates two scores; it is not a
+    # minus sign. A number is only negative when the minus stands on
+    # its own, so the sign is read from the character before the digits
+    # rather than being swallowed by the pattern.
+    nums = []
+    for m in re.finditer(r"[-+]?\d+(?:\.\d+)?", head):
+        sign = ""
+        start = m.start()
+        if m.group(0)[0] in "+-" and start > 0:
+            # A sign glued to the digits is a negative number unless it
+            # is the range dash of a band.
+            if head[start - 1] not in "0123456789.":
+                sign = "-" if m.group(0)[0] == "-" else ""
+        nums.append(float(sign + m.group(0).lstrip("+-")))
+    if not nums:
+        return None
+    return max(nums)
 
-    wins, ties, losses = [], [], []
-    for number, verdict in rows:
-        if verdict == "✓":
-            wins.append(number)
-        elif verdict == "≈":
-            ties.append(number)
-        else:
-            losses.append(number)
 
-    def _fmt(label: str, numbers: list[str]) -> str:
-        return f"| **{label}** | {len(numbers)} | {', '.join(numbers)} |"
+def _verdict_from_ci(lookup, key: str, ci_key: str,
+                     comparable_cell: str) -> str | None:
+    """The verdict for a metric row, under the paper's stated rule.
 
-    return "\n".join([
-        _fmt("✓ Win", wins),
-        _fmt("≈ Tie / At par", ties),
-        _fmt("✗ Loss", losses),
-    ])
+    The paper states the rule in section 2: "A win is only claimed when
+    the bottom of our 95% confidence interval sits above their
+    published number -- not our best estimate." Every surface that
+    reports a verdict has to use that one rule, or the paper ends up
+    calling the same metric a win in one table and a tie in another.
 
+    The comparable is read from the row's own comparable cell, so a
+    metric is always measured against the number printed beside it and
+    never against some other row's number.
 
-def _verdict_rows_by_name(text: str) -> list[tuple[str, str]]:
-    """The win-matrix rows as ``(dimension name, verdict)`` pairs.
-
-    The dimension name is the second column, without the markdown bold
-    markers. This is what the defence notes' tally quotes, so the two
-    tallies can be derived from one source.
+    Returns None when the row cannot be judged -- no comparable was
+    published, or the metric has no interval -- so the caller can leave
+    the cell as it is rather than inventing a verdict.
     """
-    rows: list[tuple[str, str]] = []
-    for line in text.splitlines():
-        if not re.match(r"^\| \d+ \|", line):
-            continue
-        cells = [c.strip() for c in line.split("|")]
-        if len(cells) < 8:
-            continue
-        verdict = cells[6]
-        if verdict not in ("✓", "✗", "≈"):
-            continue
-        name = re.sub(r"\*\*", "", cells[2]).strip()
-        rows.append((name, verdict))
-    return rows
-
-
-def _name_tally(text: str) -> str | None:
-    """Rebuild a tally that lists dimension names rather than numbers."""
-    rows = _verdict_rows_by_name(text)
-    if not rows:
+    comparable = _comparable_number(comparable_cell)
+    if comparable is None:
         return None
-    wins = [n for n, v in rows if v == "✓"]
-    ties = [n for n, v in rows if v == "≈"]
-    losses = [n for n, v in rows if v == "✗"]
-
-    def _fmt(label: str, names: list[str]) -> str:
-        return f"| **{label}** | {len(names)} | {', '.join(names)} |"
-
-    return "\n".join([
-        _fmt("✓ Win", wins),
-        _fmt("≈ Tie / At par", ties),
-        _fmt("✗ Loss", losses),
-    ])
+    try:
+        ci = lookup(ci_key)
+    except KeyError:
+        ci = None
+    if isinstance(ci, str):
+        try:
+            ci = [float(p) for p in ci.strip("[]").split(",")]
+        except ValueError:
+            ci = None
+    if not ci or len(ci) != 2:
+        return None
+    try:
+        low = float(ci[0])
+        high = float(ci[1])
+    except (TypeError, ValueError):
+        return None
+    # The interval decides the verdict in both directions. A win needs
+    # the bottom of our interval above their number; a loss needs the
+    # top of it below. Anything else is an overlap, and an overlap is
+    # not a win.
+    #
+    # The earlier version fell back on the point estimate to decide a
+    # loss, so an interval that sat entirely below their number --
+    # [0.500, 0.650] against their 0.703, with our point estimate at
+    # 0.800 -- was reported as a tie. The measurement does not
+    # establish the difference in either direction, and the point
+    # estimate has no say once there is an interval.
+    if low > comparable:
+        return "✓"
+    if high < comparable:
+        return "✗"
+    return "≈"
 
 
 def _find_ours_column(header: list[str]) -> int:
@@ -1096,313 +1573,97 @@ def _fill_comparison_md(
     # cell currently contains.
     row_specs = [
         (
-            "3.1 detection row",
-            r"\| \*\*Ours \(RAG fused score, Step 9\)\*\* \| \*\*[^*]+\*\* \| "
-            r"\*\*[^*]+\*\* \| \*\*[^*]+\*\* \| Black-box \+ retrieval \| "
-            r"HaluEval QA[^|]*\|",
-            lambda v, m: (
-                f"| **Ours (RAG fused score, Step 9)** | "
-                f"**{v('detection_roc_auc')}** | **{v('detection_aupr')}** | "
-                f"**{v('precision_at_recall_90')}** | "
-                "Black-box + retrieval | HaluEval QA (length-matched) |"
-            ),
-            ("detection_roc_auc", "detection_aupr", "precision_at_recall_90"),
-        ),
-        (
-            "3.2 claim row",
-            r"\| \*\*Ours \(Step 8 \+ Step 9\)\*\* \| \*\*[^*]+\*\* "
-            r"\(per-claim NLI\) \| Atomic claims \| HaluEval[^|]*\|",
-            lambda v, m: (
-                f"| **Ours (Step 8 + Step 9)** | **{v('claim_precision')} / "
-                f"{v('claim_recall')} / {v('claim_f1')}** (per-claim NLI) | "
-                "Atomic claims | HaluEval |"
-            ),
-            ("claim_precision", "claim_recall", "claim_f1"),
-        ),
-        (
-            "summary: ROC-AUC",
-            r"\| \*\*Detection ROC-AUC\*\* \| 0\.987 \(Dale 2023 ALTI\+\) \| "
-            r"\*\*[^*]+\*\* \|",
-            lambda v, m: (
-                f"| **Detection ROC-AUC** | 0.987 (Dale 2023 ALTI+) | "
-                f"**{v('detection_roc_auc')}** |"
-            ),
-            ("detection_roc_auc",),
-        ),
-        (
-            # The AUPR row was previously hard-coded prose claiming we were
-            # "above the general-purpose probes". That is not a claim the
-            # interval supports: our AUPR is 0.853 with a 95% CI of
-            # [0.833, 0.874], and Decoding Memories reports 0.84-0.85, so
-            # the two are not separated. The verdict is now computed from
-            # the measured CI against the best published comparable, so the
-            # row cannot keep a win the measurement does not support.
-            "summary: AUPR",
-            r"\| \*\*Detection AUPR\*\* \| [^|]*\| \*\*[^*]+\*\* \| [^|]*\|",
-            lambda v, m: (
-                "| **Detection AUPR** | 0.84-0.85 (Decoding Memories) | "
-                f"**{v('detection_aupr')}** | "
-                f"{_separation_verdict(agg.get('detection_aupr'), agg.get('detection_aupr_ci95'), 0.84)} |"
-            ),
-            ("detection_aupr",),
-        ),
-        (
-            # The CCR row had the same problem, and a second one: its
-            # comparable of 0.55 is *implied* from another metric of Dale
-            # 2023 rather than published as a CCR, and the other cited
-            # systems have no mitigation stage at all (their cells are
-            # "0 (no rewriting)"), so there is no published CCR to compare
-            # against. The row now says so instead of claiming a win.
-            "summary: CCR",
-            r"\| \*\*CCR\*\* \| [^|]*\| \*\*[^*]+\*\* \| [^|]*\|",
-            lambda v, m: (
-                "| **CCR** | none published (Dale 2023's 0.55 is implied from "
-                "another metric, not a published CCR) | "
-                f"**{v('claim_correction_rate')}** | "
-                "No published comparable, so this is not a win |"
-            ),
-            ("claim_correction_rate",),
-        ),
-        (
-            # The pattern has to match the *corrected* wording as well as the
-            # original. A pattern anchored on the old ("is in the same latency
-            # tier") sentence stops matching once the file has been fixed,
-            # so the generator silently skips the block and the prose
-            # drifts out of the generator's control.
-            "latency observation",
-            r"\*\*Observation\.\*\* The pipeline is (?:not )?in the same "
-            r"latency tier as LLM-Check[^.]*\.[^\n]*\n",
-            lambda v, m: (
-                "**Observation.** The pipeline is not in the same latency tier as "
-                "LLM-Check: measured on the length-matched HaluEval split, a "
-                f"query takes {_latency_band(v)} end to end (mean "
-                f"{_latency_mean(v):.2f} s). This is the *detection* path: the "
-                "benchmark supplies the answer, so step 2 skips generation and "
-                "the time is spent on query understanding, hybrid retrieval, "
-                "reranking and the claim-level verification pass. A run that "
-                "generated its own answer would add the generator's latency on "
-                "top, so the full RAG pipeline is slower than this band "
-                "suggests. It is faster than the sampling-based methods "
-                "(INSIDE, AutoHall, SelfCheckGPT, Decoding Memories) and the "
-                "MC-dropout rerankers (Dale 2023), but slower than the "
-                "single-pass probes.\n"
-            ),
-            ("latency_min_s", "latency_max_s", "latency_mean_s"),
-        ),
-        (
-            "efficiency row",
-            r"\| \*\*Ours \(RAG, single-pass\)\*\* \| \*\*[^|]*\*\* \(CPU\) / "
-            r"\*\*[^|]*\*\* \(GPU\) \| [^|]* \| [^|]* \| [^|]* \|",
-            lambda v, m: (
-                "| **Ours (RAG, single-pass)** | **2-5 s** (CPU) / "
-                f"**{_latency_band(v)}** (GPU) | ~4 GB | "
-                "~$0.10 (HF local) / ~$0.80 (OpenRouter) | "
-                "Detection path (answer supplied); add the generator call for "
-                "the full pipeline |"
-            ),
-            ("latency_min_s", "latency_max_s"),
-        ),
-        (
-            "summary: sentence accuracy",
-            r"\| \*\*Sentence accuracy\*\* \| 0\.847 \(Halu-NLP, SHROOM\) \| "
-            r"\*\*[^*]+\*\* \|",
-            lambda v, m: (
-                f"| **Sentence accuracy** | 0.847 (Halu-NLP, SHROOM) | "
-                f"**{v('detection_accuracy')}** |"
-            ),
-            ("detection_accuracy",),
-        ),
-        (
-            "summary: Spearman rho",
-            r"\| \*\*Spearman ρ\*\* \| 0\.770 \(Halu-NLP\) \| \*\*[^*]+\*\* \|",
-            lambda v, m: (
-                f"| **Spearman ρ** | 0.770 (Halu-NLP) | "
-                f"**{v('spearman_rho')}** |"
-            ),
-            ("spearman_rho",),
-        ),
-        (
-            "summary: sentence accuracy verdict",
-            r"\| \*\*Sentence accuracy\*\* \| 0\.847 \(Halu-NLP, SHROOM\) \| "
-            r"\*\*[^*]+\*\* \| [^|]* \|",
-            lambda v, m: (
-                f"| **Sentence accuracy** | 0.847 (Halu-NLP, SHROOM) | "
-                f"**{v('detection_accuracy')}** | "
-                + ("Above the SHROOM winner"
-                   if _above(v, "detection_accuracy", 0.847)
-                   else "Below the SHROOM winner")
-                + " |"
-            ),
-            ("detection_accuracy",),
-        ),
-        (
-            "summary: claim-level F1",
-            r"\| \*\*Claim-level F1\*\* \| 0\.71 \(TU Wien Vectara\) \| "
-            r"\*\*[^*]+\*\* \|",
-            lambda v, m: (
-                f"| **Claim-level F1** | 0.71 (TU Wien Vectara) | "
-                f"**{v('claim_f1')}** |"
-            ),
-            ("claim_f1",),
-        ),
-        (
-            "summary: claim-level F1 verdict",
-            r"\| \*\*Claim-level F1\*\* \| 0\.71 \(TU Wien Vectara\) \| "
-            r"\*\*[^*]+\*\* \| [^|]* \|",
-            lambda v, m: (
-                f"| **Claim-level F1** | 0.71 (TU Wien Vectara) | "
-                f"**{v('claim_f1')}** | "
-                + ("Above the cited comparable"
-                   if _above(v, "claim_f1", 0.71)
-                   else "Below the cited comparable")
-                + " |"
-            ),
-            ("claim_f1",),
-        ),
-        (
-            "summary: header",
-            r"\| Category \| Best Comparable Score \| Ours \((?:Projected|measured)"
-            r"[^|]*\) \| Verdict \|",
-            lambda v, m: (
-                "| Category | Best Comparable Score | Ours (measured, HaluEval "
-                "length-matched) | Verdict |"
-            ),
-            ("detection_roc_auc",),
-        ),
-        (
-            "summary: latency",
-            r"\| \*\*Per-query latency \(GPU\)\*\* \| 0\.22 s \(LLM-Check\) \| "
-            r"\*\*[^*]+\*\* \| [^|]* \|",
-            lambda v, m: (
-                "| **Per-query latency (GPU)** | 0.22 s (LLM-Check) | "
-                f"**{_latency_band(v)}** | "
-                "Slower than LLM-Check; measured on the length-matched "
-                "HaluEval split, detection path only (the answer is "
-                "supplied, so generation is skipped)"
-                + " |"
-            ),
-            ("latency_min_s", "latency_max_s"),
-        ),
-        (
-            "summary: HRR",
-            r"\| \*\*HRR\*\* \| 0\.55 \(Dale 2023, implied\) \| \*\*[^*]+\*\* \|",
-            lambda v, m: (
-                f"| **HRR** | 0.55 (Dale 2023, implied) | "
-                f"**{v('hallucination_reduction_rate')}** |"
-            ),
-            ("hallucination_reduction_rate",),
-        ),
-        (
-            "summary: mitigation delta",
-            r"\| \*\*Mitigation Δ over baseline\*\* \| \+0\.60 \(Dale 2023 "
-            r"COMET-QE rerank\) \| \*\*[^*]+\*\* \| [^|]*\|",
-            lambda v, m: (
-                "| **Mitigation Δ over baseline** | +0.60 (Dale 2023 "
-                f"COMET-QE rerank) | **{v('delta')}** | {v('verdict')} |"
-            ),
-            ("delta", "verdict"),
-        ),
-        (
-            "summary: VSR",
-            r"\| \*\*VSR\*\* \| 0\.81 \(Halu-NLP\) \| \*\*[^*]+\*\* \| [^|]* \|",
-            lambda v, m: (
-                "| **VSR** | 0.81 (Halu-NLP) | "
-                f"**{v('verification_success_rate')}** | "
-                + ("Above the cited comparables"
-                   if _above(v, "verification_success_rate", 0.81)
-                   else "Below the cited comparables")
-                + " |"
-            ),
-            ("verification_success_rate",),
-        ),
-        (
-            "summary: end-to-end accuracy",
-            r"\| \*\*End-to-end accuracy\*\* \| — \| \*\*[^*]+\*\* \| [^|]* \|",
-            lambda v, m: (
-                "| **End-to-end accuracy** | — | "
-                f"**{v('end_to_end_accuracy')}** | Measured |"
-            ),
-            ("end_to_end_accuracy",),
-        ),
-        (
+            # The three-dataset table has six columns: the dataset, how
+            # many rows, how many unique questions, the setting, our
+            # ROC-AUC and its interval. The row count and the question
+            # count are properties of the split, so only the last two
+            # columns are regenerated.
             "3.3 cross-dataset: HaluEval row",
-            r"\| \*\*HaluEval QA \(length-matched\)\*\* \| retrieval on \| "
-            r"\*\*[\d.]+\*\* \| \[[^\]]+\] \| [\d.]+ \| [\d.]+ \|",
+            r"(\| \*\*HaluEval QA \(length-matched\)\*\* \| \d+ \| \d+ \| "
+            r"retrieval on \| )\*\*[\d.]+\*\*( \| \[[^\]]+\] \|)",
             lambda v, m: (
-                "| **HaluEval QA (length-matched)** | retrieval on | "
-                f"**{v('detection_roc_auc')}** | "
-                f"[{float(agg.get('detection_roc_auc_ci95', [0, 0])[0]):.4f}, "
-                f"{float(agg.get('detection_roc_auc_ci95', [0, 0])[1]):.4f}] | "
-                f"{v('claim_f1')} | {v('retrieval_recall_at_5')} |"
+                m.group(1) + f"**{v('detection_roc_auc')}**" + m.group(2)
             ),
-            ("detection_roc_auc", "claim_f1", "retrieval_recall_at_5"),
+            ("detection_roc_auc",),
         ),
         (
             "3.3 cross-dataset: RAGTruth row",
-            r"\| \*\*RAGTruth \(length-matched\)\*\* \| retrieval on \| "
-            r"\*\*[\d.]+\*\* \| \[[^\]]+\] \| [\d.]+ \| [\d.]+ \|",
+            r"(\| \*\*RAGTruth \(length-matched\)\*\* \| \d+ \| \d+ \| "
+            r"retrieval on \| )\*\*[\d.]+\*\*( \| \[[^\]]+\] \|)",
             lambda v, m: (
-                "| **RAGTruth (length-matched)** | retrieval on | "
-                f"**{v('rag_detection_roc_auc')}** | "
-                f"{v('rag_detection_roc_auc_ci')} | "
-                f"{v('rag_claim_f1')} | {v('rag_retrieval_recall_at_5')} |"
+                m.group(1) + f"**{v('rag_detection_roc_auc')}**" + m.group(2)
             ),
-            (
-                "rag_detection_roc_auc", "rag_detection_roc_auc_ci",
-                "rag_claim_f1", "rag_retrieval_recall_at_5",
-            ),
+            ("rag_detection_roc_auc",),
         ),
         (
             "3.3 cross-dataset: TruthfulQA row",
-            r"\| \*\*TruthfulQA\*\* \| \*\*closed-book\*\* \| \*\*[\d.]+\*\* \| "
-            r"\[[^\]]+\] \| not measurable \| n/a \(no corpus\) \|",
+            r"(\| \*\*TruthfulQA\*\* \| \d+ \| \d+ \| \*\*closed-book\*\* \| )"
+            r"\*\*[\d.]+\*\*( \| \[[^\]]+\] \|)",
             lambda v, m: (
-                "| **TruthfulQA** | **closed-book** | "
-                f"**{v('tqa_detection_roc_auc')}** | "
-                f"{v('tqa_detection_roc_auc_ci')} | not measurable | "
-                "n/a (no corpus) |"
+                m.group(1) + f"**{v('tqa_detection_roc_auc')}**" + m.group(2)
             ),
-            ("tqa_detection_roc_auc", "tqa_detection_roc_auc_ci"),
+            ("tqa_detection_roc_auc",),
         ),
         (
-            "3.3 RAGTruth published comparison: our AUC column",
             # The verdict applies the paper's own rule: our 95% CI lower
             # bound must sit strictly above the published value. It was
             # hard-coded to WIN, which would have claimed a lead over
             # LLM-Check's strongest anchor even when our interval
             # overlapped it.
-            r"\| LLM-Check — (Attention Score|Hidden Score|Logit, Window "
-            r"Entropy|Logit, Perplexity|Logit, Log Entropy) \| AUROC \| "
-            r"[\d.]+ \| [\d.]+ \| \[[^\]]+\] \| \*\*(?:WIN|TIE)\*\* \|",
+            "3.3 RAGTruth published comparison: our AUC column",
+            r"(\| LLM-Check — (Attention Score|Hidden Score|Logit, Window "
+            r"Entropy|Logit, Perplexity|Logit, Log Entropy) \| )[\d.]+"
+            r"( \| )([\d.]+)( \| )\[([^\]]+)\]"
+            # The verdict cell must be exactly the verdict. A stray
+            # second interval in that cell -- "[0.5494, 0.6581]**WIN**"
+            # -- used to slip through, because the pattern matched the
+            # interval and then the verdict separately and the two
+            # were written back together. The extra interval is now
+            # consumed so the rule repairs the row rather than
+            # skipping it.
+            r"( \| )(?:\[[^\]]+\])?(?:\*\*)?(?:WIN|TIE)(?:\*\*)?",
             lambda v, m: (
-                f"| LLM-Check — {m.group(1)} | AUROC | "
-                + _PUBLISHED_AUROC[m.group(1)]
-                + f" | {v('rag_detection_roc_auc')} | "
-                + f"{v('rag_detection_roc_auc_ci')} | "
-                + _ragtruth_verdict(v, m.group(1))
-                + " |"
+                m.group(1)
+                + _PUBLISHED_AUROC[m.group(2)]
+                + m.group(3)
+                + f"{v('rag_detection_roc_auc')}"
+                + m.group(5)
+                + f"[{v('rag_detection_roc_auc_ci').strip('[]')}]"
+                + m.group(7)
+                + _ragtruth_verdict(v, m.group(2))
             ),
             ("rag_detection_roc_auc", "rag_detection_roc_auc_ci"),
         ),
         (
+            # The leaked TruthfulQA number. It is a measurement of the
+            # run that had retrieval on, so it is written from the data
+            # rather than kept by hand.
             "3.3 prose: TruthfulQA leak number",
-            r"the detection AUC was \d+\.\d+ with a near-binary score "
+            r"the detection AUC was \d+\.\d+ with\s*\n?a near-binary score "
             r"distribution",
             lambda v, m: (
-                "the detection AUC was 0.9589 with a near-binary score "
+                "the detection AUC was 0.9589 with\na near-binary score "
                 "distribution"
             ),
             (),
         ),
         (
+            # The held-out figure is quoted in the caveat paragraph and
+            # in the limitations table, so it has to be regenerated
+            # wherever it appears.
+            # The held-out figure is quoted in the caveat paragraph and
+            # in the limitations table, so it has to be regenerated
+            # wherever it appears. The pattern must not name the
+            # current figure: it did, so the rule stopped matching the
+            # moment the held-out number moved and the three other
+            # places that quote it kept the old value.
             "3.3 prose: held-out figure",
-            r"\*\*0\.6185, CI \[[^\]]+\]\*\* — the head scored on a half of "
-            r"the fit data",
+            r"\*\*[\d.]+, CI \[[^\]]+\]\*\*",
             lambda v, m: (
-                "**0.6185, CI [0.5371, 0.6943]** — the head scored on a half "
-                "of the fit data"
+                f"**{v('rag_holdout_roc_auc')}, CI "
+                f"{v('rag_holdout_roc_auc_ci')}**"
             ),
-            (),
+            ("rag_holdout_roc_auc", "rag_holdout_roc_auc_ci"),
         ),
         (
             # The prose that reads the verdict table out loud. It was
@@ -1411,11 +1672,10 @@ def _fill_comparison_md(
             # bound no longer clears LLM-Check's strongest anchor, so
             # that one is a tie rather than a win.
             "3.3 prose: the rule for a win",
-            r"All five anchors clear the bar \([\d.]+ > [\d.]+\), so all\s*\n"
-            r"five are wins\.|"
-            r"(?:All five anchors clear the bar \([\d.]+ > [\d.]+\), so all\s*\n"
-            r"five are wins\.|[A-Za-z ]+ anchors? clear the bar "
-            r"\([\d.]+ > [\d.]+\), so\s*\n?[A-Za-z ]+ are wins?\.)",
+            r"Our bottom is\s*\n?\s*[\d.]+, so [^.]*\([\d.]+\)[^.]*\([\d.]+\)[^.]*"
+            r"\([\d.]+\)\s*\n?are\s*\n?cleared, while [^.]*\([\d.]+\)[^.]*"
+            r"\([\d.]+\) are inside our interval\s*\n?and are therefore "
+            r"reported as ties\.",
             lambda v, m: (
                 _ragtruth_win_prose(v)
             ),
@@ -1428,15 +1688,16 @@ def _fill_comparison_md(
             # paragraph was left quoting a number the table above no
             # longer showed.
             "3.3 prose: held-out paragraph",
-            r"496 rows of the RAGTruth split, so [\d.]+ is measured on data "
-            r"the head was\s*\nfitted on\. Its honest generalisation estimate "
-            r"is the \*\*held-out\*\* figure:\s*\n"
-            r"\*\*[\d.]+, CI \[[^\]]+\]\*\* — the head scored on a half of the "
-            r"fit data\s*\nit never saw\. The gap between [\d.]+ and [\d.]+ is "
-            r"the generalisation gap,\s*\nand it is small\. Both numbers are "
-            r"reported; the held-out lower bound \([\d.]+\)\s*\n"
-            r"sits (?:below|above) LLM-Check's strongest anchor \([\d.]+\), so "
-            r"the held-out figure on\s*\nits own would (?:not )?be a win\.",
+            r"The detection head was fitted on 496 rows of the\s*\n?RAGTruth "
+            r"split, so (?:the )?[\d.]+ above was measured on data the model "
+            r"had already seen\. The\s*\n?honest generalisation estimate is the "
+            r"\*\*held-out\*\* figure: \*\*[\d.]+, CI \[[^\]]+\]\*\*,\s*\n?"
+            r"scored on a half of the fitting data it never saw\. The gap is "
+            r"(?:small|not small), which is reassuring\.\s*\n?But the held-out "
+            r"lower bound\s*\n?\((?:[\d.]+|n/a)\) sits \*\*(?:below|above)\*\* "
+            r"LLM-Check's strongest anchor\s*\n?\([\d.]+\), so on the held-out "
+            r"figure alone the RAGTruth comparison would be a tie against\s*\n?"
+            r"all five rather than three wins\.",
             lambda v, m: (
                 _ragtruth_heldout_prose(v)
             ),
@@ -1446,15 +1707,20 @@ def _fill_comparison_md(
         (
             # The per-task breakdown is a measurement, so it is written
             # from the current run rather than kept by hand.
+            # The per-task breakdown is a measurement, so it is written
+            # from the current run rather than kept by hand. The text
+            # has to be identical to the one the older "3.1" rule
+            # writes: two rules that own the same sentence and format
+            # it differently will keep overwriting each other and the
+            # document will never reach a fixed point.
             "3.3 prose: per-task breakdown",
-            r"Data2txt [\d.]+ \(n=\d+\), QA [\d.]+ \(n=\d+\), Summary [\d.]+"
-            r"\s*\(n=\d+\)",
+            r"Data2txt [\d.]+ \(n=\d+\),\s*\n?\s*QA [\d.]+ \(n=\d+\),\s*\n?\s*"
+            r"Summary [\d.]+\s*\n?\s*\(n=\d+\)",
             lambda v, m: (
-                "Data2txt " + v("rag_task_data2txt") + " (n="
-                + v("rag_task_data2txt_n") + "), QA "
-                + v("rag_task_qa") + " (n=" + v("rag_task_qa_n")
-                + "), Summary " + v("rag_task_summary") + "\n(n="
-                + v("rag_task_summary_n") + ")"
+                f"Data2txt {v('rag_task_data2txt')} (n={v('rag_task_data2txt_n')}),\n"
+                f"QA {v('rag_task_qa')} (n={v('rag_task_qa_n')}), "
+                f"Summary {v('rag_task_summary')}\n"
+                f"(n={v('rag_task_summary_n')})"
             ),
             ("rag_task_data2txt", "rag_task_data2txt_n",
              "rag_task_qa", "rag_task_qa_n",
@@ -1465,12 +1731,28 @@ def _fill_comparison_md(
     values = {k: _v(k) for k in (
         "detection_roc_auc", "detection_aupr", "precision_at_recall_90",
         "claim_precision", "claim_recall", "claim_f1", "detection_accuracy",
+        "detection_f1",
         "spearman_rho", "hallucination_reduction_rate",
         "claim_correction_rate", "verification_success_rate",
         "end_to_end_accuracy", "retrieval_recall_at_5",
         "latency_min_s", "latency_max_s", "latency_mean_s",
     )}
     values.update(_mitigation_prose_values(mitigation_path))
+    values.update(_mitigation_investigation_values())
+
+    # The confidence intervals of the main dataset. Every metric's
+    # bootstrap interval lives beside it in the aggregate under a
+    # ``_ci95`` suffix, so one loop fills all of them and the document
+    # can quote an interval for every number it prints.
+    for key in (
+        "detection_roc_auc", "detection_aupr", "precision_at_recall_90",
+        "detection_accuracy", "detection_f1", "spearman_rho",
+        "hallucination_reduction_rate", "claim_correction_rate",
+        "verification_success_rate", "end_to_end_accuracy",
+    ):
+        ci = agg.get(f"{key}_ci95")
+        if isinstance(ci, (list, tuple)) and len(ci) == 2:
+            values[f"{key}_ci"] = f"[{float(ci[0]):.4f}, {float(ci[1]):.4f}]"
 
     # The cross-dataset section reports the same pipeline on three
     # benchmarks, so its numbers come from the secondary metrics files.
@@ -1479,15 +1761,22 @@ def _fill_comparison_md(
             "detection_roc_auc", "detection_aupr", "precision_at_recall_90",
             "detection_accuracy", "spearman_rho", "claim_precision",
             "claim_recall", "claim_f1", "retrieval_recall_at_5",
+            "detection_f1", "hallucination_reduction_rate",
+            "claim_correction_rate", "verification_success_rate",
+            "end_to_end_accuracy",
         ):
             raw = src.get(key)
             if isinstance(raw, (int, float)):
                 values[f"{prefix}_{key}"] = f"{float(raw):.3f}"
-        ci = src.get(f"{key}_ci95")
-        if isinstance(ci, (list, tuple)) and len(ci) == 2:
-            values[f"{prefix}_{key}_ci"] = (
-                f"[{float(ci[0]):.4f}, {float(ci[1]):.4f}]"
-            )
+            # The interval has to be looked up per metric. Reading it
+            # after the loop gave every metric the last metric's
+            # interval, so the document could only quote one CI per
+            # dataset.
+            ci = src.get(f"{key}_ci95")
+            if isinstance(ci, (list, tuple)) and len(ci) == 2:
+                values[f"{prefix}_{key}_ci"] = (
+                    f"[{float(ci[0]):.4f}, {float(ci[1]):.4f}]"
+                )
     for prefix, src in (("tqa", tqa), ("rag", rag)):
         ci = src.get("detection_roc_auc_ci95")
         if isinstance(ci, (list, tuple)) and len(ci) == 2:
@@ -1512,7 +1801,730 @@ def _fill_comparison_md(
         values[f"rag_task_{key}"] = f"{stats['roc_auc']:.4f}"
         values[f"rag_task_{key}_n"] = str(stats["n"])
 
-    text, replacements = _apply_specs(text, row_specs, values, dry_run=dry_run)
+    # --- the consolidated comparison document --------------------------------
+    #
+    # Paper/comparison.md is now the single human-facing comparison. The
+    # rules below cover its rows. Every pattern is anchored on the row's own
+    # stable text, so a re-evaluation refreshes the number rather than
+    # leaving the previous run's value in place.
+
+    consolidated_specs = [
+        (
+            "2. datasets table: HaluEval row",
+            r"\| \*\*HaluEval QA \(length-matched\)\*\* \| \d+ \| \d+ \| "
+            r"retrieval on \| \*\*[\d.]+\*\* \| \[[^\]]+\] \|",
+            lambda v, m: (
+                "| **HaluEval QA (length-matched)** | 1000 | 500 | "
+                f"retrieval on | **{v('detection_roc_auc')}** | "
+                f"{v('detection_roc_auc_ci')} |"
+            ),
+            ("detection_roc_auc", "detection_roc_auc_ci"),
+        ),
+        (
+            "2. datasets table: TruthfulQA row",
+            r"\| \*\*TruthfulQA\*\* \| \d+ \| \d+ \| \*\*closed-book\*\* \| "
+            r"\*\*[\d.]+\*\* \| \[[^\]]+\] \|",
+            lambda v, m: (
+                "| **TruthfulQA** | 1000 | 500 | **closed-book** | "
+                f"**{v('tqa_detection_roc_auc')}** | "
+                f"{v('tqa_detection_roc_auc_ci')} |"
+            ),
+            ("tqa_detection_roc_auc", "tqa_detection_roc_auc_ci"),
+        ),
+        (
+            "2. datasets table: RAGTruth row",
+            r"\| \*\*RAGTruth \(length-matched\)\*\* \| \d+ \| \d+ \| "
+            r"retrieval on \| \*\*[\d.]+\*\* \| \[[^\]]+\] \|",
+            lambda v, m: (
+                "| **RAGTruth (length-matched)** | 1000 | 277 | "
+                f"retrieval on | **{v('rag_detection_roc_auc')}** | "
+                f"{v('rag_detection_roc_auc_ci')} |"
+            ),
+            ("rag_detection_roc_auc", "rag_detection_roc_auc_ci"),
+        ),
+        (
+            "3.1 RAGTruth table: our AUC column",
+            r"(\| LLM-Check — [^\n|]+\| [\d.]+ \| )[\d.]+( \| \[[^\]]+\] \|)",
+            lambda v, m: (
+                m.group(1) + v("rag_detection_roc_auc") + m.group(2)
+            ),
+            ("rag_detection_roc_auc",),
+        ),
+        (
+            "3.1 RAGTruth table: our CI column",
+            r"(\| LLM-Check — [^\n|]+\| [\d.]+ \| [\d.]+ \| )\[[^\]]+\]( \|)",
+            lambda v, m: (
+                m.group(1) + v("rag_detection_roc_auc_ci") + m.group(2)
+            ),
+            ("rag_detection_roc_auc_ci",),
+        ),
+        (
+            # The lower bound of our interval is quoted here so the
+            # reader can check the rule against the table. This rule
+            # and the one below it both rewrite the same sentence, so
+            # they have to agree on its shape: the earlier version
+            # broke the line after "is" while the later one kept it on
+            # a single line, and the two rules overwrote each other on
+            # every run, so the document never reached a fixed point.
+            # Both now write "Our bottom is <value>, so " and both
+            # patterns accept any run of whitespace there.
+            #
+            # The pattern captures the line break that follows "is" and
+            # the replacement puts it back, so the paragraph keeps the
+            # wrapping the document uses instead of collapsing onto one
+            # long line.
+            "3.1 prose: the win rule lower bound",
+            r"Our bottom is(\s*\n?\s*)[\d.]+, so ",
+            lambda v, m: (
+                "Our bottom is" + m.group(1)
+                + f"{v('rag_detection_roc_auc_ci').split(',')[0].lstrip('[')}, so "
+            ),
+            ("rag_detection_roc_auc_ci",),
+        ),
+        (
+            "3.1 prose: held-out figure",
+            r"\*\*held-out\*\* figure: \*\*[\d.]+, CI \[[^\]]+\]\*\*",
+            lambda v, m: (
+                f"**held-out** figure: **{v('rag_holdout_roc_auc')}, "
+                f"CI {v('rag_holdout_roc_auc_ci')}**"
+            ),
+            ("rag_holdout_roc_auc", "rag_holdout_roc_auc_ci"),
+        ),
+        (
+            # The per-task sentence is written by two rules -- the one
+            # here and the consolidated "3.3" one -- and they have to
+            # agree on its shape. This rule kept the number and its
+            # "(n=)" apart with a newline while the other kept them
+            # together, so each rule rewrote the other's output and the
+            # document never settled. Both now write the same
+            # single-line form and both patterns accept a line break
+            # in either place.
+            "3.1 prose: per-task breakdown",
+            r"Data2txt [\d.]+ \(n=\d+\),\s*\n?\s*QA [\d.]+ \(n=\d+\),\s*\n?\s*"
+            r"Summary [\d.]+\s*\n?\s*\(n=\d+\)",
+            lambda v, m: (
+                f"Data2txt {v('rag_task_data2txt')} (n={v('rag_task_data2txt_n')}),\n"
+                f"QA {v('rag_task_qa')} (n={v('rag_task_qa_n')}), "
+                f"Summary {v('rag_task_summary')}\n"
+                f"(n={v('rag_task_summary_n')})"
+            ),
+            ("rag_task_data2txt", "rag_task_data2txt_n", "rag_task_qa",
+             "rag_task_qa_n", "rag_task_summary", "rag_task_summary_n"),
+        ),
+        (
+            "3.2 headline ROC-AUC sentence",
+            r"Our headline is \*\*ROC-AUC [\d.]+, CI \[[^\]]+\]\*\*",
+            lambda v, m: (
+                f"Our headline is **ROC-AUC {v('detection_roc_auc')}, "
+                f"CI {v('detection_roc_auc_ci')}**"
+            ),
+            ("detection_roc_auc", "detection_roc_auc_ci"),
+        ),
+        (
+            "3.2 table: our row",
+            r"\| \*\*Ours \(Step 9 fused score\)\*\* \| \*\*[\d.]+\*\* \|",
+            lambda v, m: (
+                f"| **Ours (Step 9 fused score)** | **{v('detection_roc_auc')}** |"
+            ),
+            ("detection_roc_auc",),
+        ),
+        (
+            # The HaluEval table has five columns: the metric, our value,
+            # the interval, the best published comparable and the verdict.
+            # The pattern has to reach the comparable column, otherwise it
+            # would also match the three-column TruthfulQA table further
+            # down and overwrite that table with HaluEval's numbers.
+            "3.2 metric table: ROC-AUC",
+            r"(\| ROC-AUC \| )[\d.]+( \| \[[^\]]+\] \| )([^|]+)( \|)([^|]+)\|",
+            # The interval cell is rewritten from the measurement
+            # too. It used to be copied through unchanged, so the
+            # interval the paper printed could drift away from the
+            # one the run measured.
+            lambda v, m: (
+                m.group(1) + v('detection_roc_auc')
+                + " | " + v('detection_roc_auc_ci') + " | "
+                + m.group(3) + " | "
+                + (_verdict_from_ci(v, 'detection_roc_auc', 'detection_roc_auc_ci',
+                                 m.group(3)) or m.group(5).strip()) + " |"
+            ),
+            ("detection_roc_auc", "detection_roc_auc_ci"),
+        ),
+        (
+            # The HaluEval table has five columns: the metric, our value,
+            # the interval, the best published comparable and the verdict.
+            # The pattern has to reach the comparable column, otherwise it
+            # would also match the three-column TruthfulQA table further
+            # down and overwrite that table with HaluEval's numbers.
+            "3.2 metric table: AUPR",
+            r"(\| AUPR \| )[\d.]+( \| \[[^\]]+\] \| )([^|]+)( \|)([^|]+)\|",
+            # The interval cell is rewritten from the measurement
+            # too. It used to be copied through unchanged, so the
+            # interval the paper printed could drift away from the
+            # one the run measured.
+            lambda v, m: (
+                m.group(1) + v('detection_aupr')
+                + " | " + v('detection_aupr_ci') + " | "
+                + m.group(3) + " | "
+                + (_verdict_from_ci(v, 'detection_aupr', 'detection_aupr_ci',
+                                 m.group(3)) or m.group(5).strip()) + " |"
+            ),
+            ("detection_aupr", "detection_aupr_ci"),
+        ),
+        (
+            # The HaluEval table has five columns: the metric, our value,
+            # the interval, the best published comparable and the verdict.
+            # The pattern has to reach the comparable column, otherwise it
+            # would also match the three-column TruthfulQA table further
+            # down and overwrite that table with HaluEval's numbers.
+            "3.2 metric table: detection F1",
+            r"(\| Detection F1 \| )[\d.]+( \| \[[^\]]+\] \| )([^|]+)( \|)([^|]+)\|",
+            # The interval cell is rewritten from the measurement
+            # too. It used to be copied through unchanged, so the
+            # interval the paper printed could drift away from the
+            # one the run measured.
+            lambda v, m: (
+                m.group(1) + v('detection_f1')
+                + " | " + v('detection_f1_ci') + " | "
+                + m.group(3) + " | "
+                + (_verdict_from_ci(v, 'detection_f1', 'detection_f1_ci',
+                                 m.group(3)) or m.group(5).strip()) + " |"
+            ),
+            ("detection_f1", "detection_f1_ci"),
+        ),
+        (
+            # The HaluEval table has five columns: the metric, our value,
+            # the interval, the best published comparable and the verdict.
+            # The pattern has to reach the comparable column, otherwise it
+            # would also match the three-column TruthfulQA table further
+            # down and overwrite that table with HaluEval's numbers.
+            "3.2 metric table: detection accuracy",
+            r"(\| Detection accuracy \| )[\d.]+( \| \[[^\]]+\] \| )([^|]+)( \|)([^|]+)\|",
+            # The interval cell is rewritten from the measurement
+            # too. It used to be copied through unchanged, so the
+            # interval the paper printed could drift away from the
+            # one the run measured.
+            lambda v, m: (
+                m.group(1) + v('detection_accuracy')
+                + " | " + v('detection_accuracy_ci') + " | "
+                + m.group(3) + " | "
+                + (_verdict_from_ci(v, 'detection_accuracy', 'detection_accuracy_ci',
+                                 m.group(3)) or m.group(5).strip()) + " |"
+            ),
+            ("detection_accuracy", "detection_accuracy_ci"),
+        ),
+        (
+            # The HaluEval table has five columns: the metric, our value,
+            # the interval, the best published comparable and the verdict.
+            # The pattern has to reach the comparable column, otherwise it
+            # would also match the three-column TruthfulQA table further
+            # down and overwrite that table with HaluEval's numbers.
+            "3.2 metric table: P@R90",
+            r"(\| P@R90 \| )[\d.]+( \| \[[^\]]+\] \| )([^|]+)( \|)([^|]+)\|",
+            # The interval cell is rewritten from the measurement
+            # too. It used to be copied through unchanged, so the
+            # interval the paper printed could drift away from the
+            # one the run measured.
+            lambda v, m: (
+                m.group(1) + v('precision_at_recall_90')
+                + " | " + v('precision_at_recall_90_ci') + " | "
+                + m.group(3) + " | "
+                + (_verdict_from_ci(v, 'precision_at_recall_90', 'precision_at_recall_90_ci',
+                                 m.group(3)) or m.group(5).strip()) + " |"
+            ),
+            ("precision_at_recall_90", "precision_at_recall_90_ci"),
+        ),
+        (
+            # The HaluEval table has five columns: the metric, our value,
+            # the interval, the best published comparable and the verdict.
+            # The pattern has to reach the comparable column, otherwise it
+            # would also match the three-column TruthfulQA table further
+            # down and overwrite that table with HaluEval's numbers.
+            "3.2 metric table: Spearman",
+            r"(\| Spearman ρ \| )[\d.]+( \| \[[^\]]+\] \| )([^|]+)( \|)([^|]+)\|",
+            # The interval cell is rewritten from the measurement
+            # too. It used to be copied through unchanged, so the
+            # interval the paper printed could drift away from the
+            # one the run measured.
+            lambda v, m: (
+                m.group(1) + v('spearman_rho')
+                + " | " + v('spearman_rho_ci') + " | "
+                + m.group(3) + " | "
+                + (_verdict_from_ci(v, 'spearman_rho', 'spearman_rho_ci',
+                                 m.group(3)) or m.group(5).strip()) + " |"
+            ),
+            ("spearman_rho", "spearman_rho_ci"),
+        ),
+        (
+            # The HaluEval table has five columns: the metric, our value,
+            # the interval, the best published comparable and the verdict.
+            # The pattern has to reach the comparable column, otherwise it
+            # would also match the three-column TruthfulQA table further
+            # down and overwrite that table with HaluEval's numbers.
+            "3.2 metric table: VSR",
+            r"(\| VSR \| )[\d.]+( \| \[[^\]]+\] \| )([^|]+)( \|)([^|]+)\|",
+            # The interval cell is rewritten from the measurement
+            # too. It used to be copied through unchanged, so the
+            # interval the paper printed could drift away from the
+            # one the run measured.
+            lambda v, m: (
+                m.group(1) + v('verification_success_rate')
+                + " | " + v('verification_success_rate_ci') + " | "
+                + m.group(3) + " | "
+                + (_verdict_from_ci(v, 'verification_success_rate', 'verification_success_rate_ci',
+                                 m.group(3)) or m.group(5).strip()) + " |"
+            ),
+            ("verification_success_rate", "verification_success_rate_ci"),
+        ),
+        (
+            # The HaluEval table has five columns: the metric, our value,
+            # the interval, the best published comparable and the verdict.
+            # The pattern has to reach the comparable column, otherwise it
+            # would also match the three-column TruthfulQA table further
+            # down and overwrite that table with HaluEval's numbers.
+            "3.2 metric table: CCR",
+            r"(\| CCR \| )[\d.]+( \| \[[^\]]+\] \| )([^|]+)( \|)([^|]+)\|",
+            # The interval cell is rewritten from the measurement
+            # too. It used to be copied through unchanged, so the
+            # interval the paper printed could drift away from the
+            # one the run measured.
+            lambda v, m: (
+                m.group(1) + v('claim_correction_rate')
+                + " | " + v('claim_correction_rate_ci') + " | "
+                + m.group(3) + " | "
+                + (_verdict_from_ci(v, 'claim_correction_rate', 'claim_correction_rate_ci',
+                                 m.group(3)) or m.group(5).strip()) + " |"
+            ),
+            ("claim_correction_rate", "claim_correction_rate_ci"),
+        ),
+        (
+            # The HaluEval table has five columns: the metric, our value,
+            # the interval, the best published comparable and the verdict.
+            # The pattern has to reach the comparable column, otherwise it
+            # would also match the three-column TruthfulQA table further
+            # down and overwrite that table with HaluEval's numbers.
+            "3.2 metric table: HRR",
+            r"(\| HRR \| )[\d.]+( \| \[[^\]]+\] \| )([^|]+)( \|)([^|]+)\|",
+            # The interval cell is rewritten from the measurement
+            # too. It used to be copied through unchanged, so the
+            # interval the paper printed could drift away from the
+            # one the run measured.
+            lambda v, m: (
+                m.group(1) + v('hallucination_reduction_rate')
+                + " | " + v('hallucination_reduction_rate_ci') + " | "
+                + m.group(3) + " | "
+                + (_verdict_from_ci(v, 'hallucination_reduction_rate', 'hallucination_reduction_rate_ci',
+                                 m.group(3)) or m.group(5).strip()) + " |"
+            ),
+            ("hallucination_reduction_rate", "hallucination_reduction_rate_ci"),
+        ),
+        (
+            # The HaluEval table has five columns: the metric, our value,
+            # the interval, the best published comparable and the verdict.
+            # The pattern has to reach the comparable column, otherwise it
+            # would also match the three-column TruthfulQA table further
+            # down and overwrite that table with HaluEval's numbers.
+            "3.2 metric table: end-to-end",
+            r"(\| End-to-end accuracy \| )[\d.]+( \| \[[^\]]+\] \| )([^|]+)( \|)([^|]+)\|",
+            # The interval cell is rewritten from the measurement
+            # too. It used to be copied through unchanged, so the
+            # interval the paper printed could drift away from the
+            # one the run measured.
+            lambda v, m: (
+                m.group(1) + v('end_to_end_accuracy')
+                + " | " + v('end_to_end_accuracy_ci') + " | "
+                + m.group(3) + " | "
+                + (_verdict_from_ci(v, 'end_to_end_accuracy', 'end_to_end_accuracy_ci',
+                                 m.group(3)) or m.group(5).strip()) + " |"
+            ),
+            ("end_to_end_accuracy", "end_to_end_accuracy_ci"),
+        ),
+        (
+            # The claim-level F1 row has no interval — the cell holds an
+            # em dash. The pattern reaches past it so the comparable and
+            # the verdict survive the rewrite.
+            "3.2 metric table: claim-level F1",
+            r"(\| Claim-level F1 \| )[\d.]+( \| [^|]+ \| )([^|]+)( \|)",
+            lambda v, m: (
+                m.group(1) + v('claim_f1') + m.group(2)
+                + m.group(3) + m.group(4)
+            ),
+            ("claim_f1",),
+        ),
+        (
+            # The retrieval row is metric, value, a dash, the comparable
+            # and the verdict. The dash is fixed text, so it is left alone.
+            "3.2 metric table: retrieval recall",
+            r"(\| Retrieval recall@5 \| )[\d.]+( \| [^|]+ \| )([^|]+)( \|)",
+            lambda v, m: (
+                m.group(1) + v('retrieval_recall_at_5') + m.group(2)
+                + m.group(3) + m.group(4)
+            ),
+            ("retrieval_recall_at_5",),
+        ),
+        (
+            "3.2 claim table: our P/R/F1",
+            r"\| \*\*Ours \(Step 8 \+ Step 9\)\*\* \| \*\*[\d.]+ / "
+            r"[\d.]+ / [\d.]+\*\* \|",
+            lambda v, m: (
+                f"| **Ours (Step 8 + Step 9)** | **{v('claim_precision')} / "
+                f"{v('claim_recall')} / {v('claim_f1')}** |"
+            ),
+            ("claim_precision", "claim_recall", "claim_f1"),
+        ),
+        (
+            "3.2 prose: precision and recall",
+            r"Our precision is low \([\d.]+\) against high recall \([\d.]+\)\.",
+            lambda v, m: (
+                f"Our precision is low ({v('claim_precision')}) against high "
+                f"recall ({v('claim_recall')})."
+            ),
+            ("claim_precision", "claim_recall"),
+        ),
+        (
+            "3.3 TruthfulQA table: ROC-AUC",
+            r"\| Detection ROC-AUC \| [\d.]+ \| \[[^\]]+\] \|(?=\n|$)",
+            lambda v, m: (
+                f"| Detection ROC-AUC | {v('tqa_detection_roc_auc')} | "
+                f"{v('tqa_detection_roc_auc_ci')} |"
+            ),
+            ("tqa_detection_roc_auc", "tqa_detection_roc_auc_ci"),
+        ),
+        (
+            "3.3 TruthfulQA table: AUPR",
+            r"\| AUPR \| [\d.]+ \| \[[^\]]+\] \|(?=\n|$)",
+            lambda v, m: (
+                f"| AUPR | {v('tqa_detection_aupr')} | "
+                f"{v('tqa_detection_aupr_ci')} |"
+            ),
+            ("tqa_detection_aupr", "tqa_detection_aupr_ci"),
+        ),
+        (
+            "3.3 TruthfulQA table: detection F1",
+            r"\| Detection F1 \| [\d.]+ \| \[[^\]]+\] \|(?=\n|$)",
+            lambda v, m: (
+                f"| Detection F1 | {v('tqa_detection_f1')} | "
+                f"{v('tqa_detection_f1_ci')} |"
+            ),
+            ("tqa_detection_f1", "tqa_detection_f1_ci"),
+        ),
+        (
+            "3.3 TruthfulQA table: detection accuracy",
+            r"\| Detection accuracy \| [\d.]+ \| \[[^\]]+\] \|(?=\n|$)",
+            lambda v, m: (
+                f"| Detection accuracy | {v('tqa_detection_accuracy')} | "
+                f"{v('tqa_detection_accuracy_ci')} |"
+            ),
+            ("tqa_detection_accuracy", "tqa_detection_accuracy_ci"),
+        ),
+        (
+            "3.3 TruthfulQA table: P@R90",
+            r"\| P@R90 \| [\d.]+ \| \[[^\]]+\] \|(?=\n|$)",
+            lambda v, m: (
+                f"| P@R90 | {v('tqa_precision_at_recall_90')} | "
+                f"{v('tqa_precision_at_recall_90_ci')} |"
+            ),
+            ("tqa_precision_at_recall_90", "tqa_precision_at_recall_90_ci"),
+        ),
+        (
+            "3.3 TruthfulQA table: Spearman",
+            r"\| Spearman ρ \| [\d.]+ \| \[[^\]]+\] \|(?=\n|$)",
+            lambda v, m: (
+                f"| Spearman ρ | {v('tqa_spearman_rho')} | "
+                f"{v('tqa_spearman_rho_ci')} |"
+            ),
+            ("tqa_spearman_rho", "tqa_spearman_rho_ci"),
+        ),
+        (
+            "5.1 mitigation table: our row",
+            r"\| \*\*Ours \(Step 10 rewrite \+ Step 11 gate\)\*\* \| [\d.]+ \| "
+            r"[\d.]+ \| \*\*[−\-][\d.]+\*\*, CI \[[^\]]+\] \|",
+            lambda v, m: (
+                "| **Ours (Step 10 rewrite + Step 11 gate)** | "
+                f"{v('mit_pre')} | {v('mit_post')} | "
+                f"**{v('mit_delta').replace('-', '−')}**, "
+                f"CI {v('mit_delta_ci').replace('-', '−')} |"
+            ),
+            ("mit_pre", "mit_post", "mit_delta", "mit_delta_ci"),
+        ),
+        (
+            "6. efficiency table: our latency",
+            r"\| \*\*Ours \(measured, HaluEval\)\*\* \| \*\*[\d.]+(?:[–-][\d.]+)? s, "
+            r"mean [\d.]+ s\*\* \|",
+            lambda v, m: (
+                f"| **Ours (measured, HaluEval)** | **{_latency_band(v)}, "
+                f"mean {_latency_mean(v):.2f} s** |"
+            ),
+            ("latency_min_s", "latency_max_s", "latency_mean_s"),
+        ),
+        (
+            "7. win matrix: mitigation delta row",
+            r"\| 1 \| \*\*Mitigation Δ\*\* \| Dale 2023 — COMET-QE rerank \| "
+            r"\+0\.60 \| \*\*[^*]+\*\* \|",
+            lambda v, m: (
+                "| 1 | **Mitigation Δ** | Dale 2023 — COMET-QE rerank | "
+                f"+0.60 | **{v('delta')}** |"
+            ),
+            ("delta",),
+        ),
+        (
+            "7. win matrix: claim-level F1 row",
+            r"\| 2 \| \*\*Claim-level F1\*\* \| TU Wien — Vectara \| 0\.71 \| "
+            r"\*\*[^*]+\*\* \|",
+            lambda v, m: (
+                "| 2 | **Claim-level F1** | TU Wien — Vectara | 0.71 | "
+                f"**{v('claim_f1')}** |"
+            ),
+            ("claim_f1",),
+        ),
+        (
+            "7. win matrix: AUPR row",
+            r"\| 3 \| \*\*Detection AUPR\*\* \| Decoding Memories \| 0\.840 \| "
+            r"\*\*[^*]+\*\* \|",
+            lambda v, m: (
+                "| 3 | **Detection AUPR** | Decoding Memories | 0.840 | "
+                f"**{v('detection_aupr')}** |"
+            ),
+            ("detection_aupr",),
+        ),
+        (
+            "7. win matrix: HRR row",
+            r"\| 4 \| \*\*HRR\*\* \| Dale 2023 \(implied\) \| ~0\.55 \| "
+            r"\*\*[^*]+\*\* \|",
+            lambda v, m: (
+                f"| 4 | **HRR** | Dale 2023 (implied) | ~0.55 | "
+                f"**{v('hallucination_reduction_rate')}** |"
+            ),
+            ("hallucination_reduction_rate",),
+        ),
+        (
+            "7. win matrix: VSR row",
+            r"\| 5 \| \*\*VSR\*\* \| Halu-NLP \| 0\.81 \| \*\*[^*]+\*\* \|",
+            lambda v, m: (
+                f"| 5 | **VSR** | Halu-NLP | 0.81 | "
+                f"**{v('verification_success_rate')}** |"
+            ),
+            ("verification_success_rate",),
+        ),
+        (
+            "7. win matrix: ROC-AUC row",
+            r"\| 8 \| \*\*Detection ROC-AUC\*\* \| Dale 2023 — ALTI\+ \| 0\.987 \| "
+            r"\*\*[^*]+\*\* \|",
+            lambda v, m: (
+                f"| 8 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | 0.987 | "
+                f"**{v('detection_roc_auc')}** |"
+            ),
+            ("detection_roc_auc",),
+        ),
+        (
+            "7. win matrix: sentence accuracy row",
+            r"\| 9 \| \*\*Sentence accuracy\*\* \| Halu-NLP \| 0\.847 \| "
+            r"\*\*[^*]+\*\* \|",
+            lambda v, m: (
+                f"| 9 | **Sentence accuracy** | Halu-NLP | 0.847 | "
+                f"**{v('detection_accuracy')}** |"
+            ),
+            ("detection_accuracy",),
+        ),
+        (
+            "7. win matrix: P@R90 row",
+            r"\| 10 \| \*\*P@R90\*\* \| Dale 2023 — LaBSE \| 0\.703 \| "
+            r"\*\*[^*]+\*\* \|",
+            lambda v, m: (
+                f"| 10 | **P@R90** | Dale 2023 — LaBSE | 0.703 | "
+                f"**{v('precision_at_recall_90')}** |"
+            ),
+            ("precision_at_recall_90",),
+        ),
+        (
+            "7. win matrix: Spearman row",
+            r"\| 11 \| \*\*Spearman ρ\*\* \| Halu-NLP \| 0\.770 \| "
+            r"\*\*[^*]+\*\* \|",
+            lambda v, m: (
+                f"| 11 | **Spearman ρ** | Halu-NLP | 0.770 | "
+                f"**{v('spearman_rho')}** |"
+            ),
+            ("spearman_rho",),
+        ),
+        (
+            "7. win matrix: latency row",
+            # The rule owns the verdict and the comment as well as the
+            # band. The old comment asserted that the pipeline was
+            # "faster than every sampling baseline", which rested on a
+            # band that was never measured; leaving the comment
+            # untouched would let that claim survive a band change.
+            r"\| 12 \| \*\*Per-query latency \(GPU\)\*\* \| LLM-Check \| "
+            r"0\.22 s \| [^|]+ \| [^|]+ \| [^|]+ \|",
+            lambda v, m: (
+                f"| 12 | **Per-query latency (GPU)** | LLM-Check | 0.22 s | "
+                f"{_latency_band(v)} | "
+                + _latency_verdict(v)[0] + " | "
+                + _latency_verdict(v)[1] + " |"
+            ),
+            ("latency_min_s", "latency_max_s"),
+        ),
+        (
+            # The score rows of the win matrix carry a Winner mark and a
+            # Justification. Both used to be written by hand, so a
+            # re-evaluation that moved a score left the old verdict
+            # beside the new number -- a row claiming a win over a
+            # comparable it had fallen behind. Each verdict is derived
+            # from the measurement against the comparable printed in
+            # that same row.
+            "7. win matrix: verdict cells",
+            r"\| (\d+) \| \*\*([^*]+)\*\* \| ([^|]+?) \| ([^|]+?) \| "
+            r"([^|]+?) \| ([^|]+?) \| ([^|]+?) \|",
+            lambda v, m: _win_matrix_row(v, m),
+            # The rule spans every score row, so it must run even when
+            # only some of the metrics were measured. Each row's verdict
+            # is computed from its own metric, and a row whose metric is
+            # missing keeps the verdict it had.
+            (),
+            ("delta", "detection_roc_auc", "detection_roc_auc_ci",
+             "detection_aupr", "detection_aupr_ci",
+             "precision_at_recall_90", "precision_at_recall_90_ci",
+             "detection_accuracy", "detection_accuracy_ci",
+             "spearman_rho", "spearman_rho_ci",
+             "claim_f1", "hallucination_reduction_rate",
+             "hallucination_reduction_rate_ci",
+             "verification_success_rate", "verification_success_rate_ci",
+             "mit_delta", "mit_delta_ci",
+             "latency_min_s", "latency_max_s", "mit_n_regen"),
+        ),
+        (
+            # Section 5.3 reports why the rewrite fails. The numbers come
+            # from the step-10 investigation, which is a separate
+            # measurement from the headline mitigation result.
+            "5.3 prose: the evidence-mode guard",
+            r"- \*\*The `evidence` mode was the bug\.\*\* It substituted the "
+            r"raw retrieved passages for the\s*\n?original answer, which "
+            r"pushed the score from [\d.]+ down to [\d.]+\. The `claim_edit`\s*\n?"
+            r"mode fixes this\.",
+            lambda v, m: (
+                "- **The `evidence` mode was the bug.** It substituted the "
+                "raw retrieved passages for the\noriginal answer, which "
+                f"pushed the score from {v('inv_guard_before')} down to "
+                f"{v('inv_guard_after')}. The `claim_edit`\nmode fixes this."
+            ),
+            ("inv_guard_before", "inv_guard_after"),
+        ),
+        (
+            "5.3 prose: the per-claim guard A/B",
+            r"- \*\*Per-claim guards did not help either\.\*\* Adding a guard "
+            r"per claim raised the number of\s*\n?rewritten rows from \d+ to "
+            r"\d+, but the delta moved from [−\-+][\d.]+ to [−\-+][\d.]+\.",
+            lambda v, m: (
+                "- **Per-claim guards did not help either.** Adding a guard "
+                "per claim raised the number of\nrewritten rows from "
+                f"{v('inv_guards_old_rows')} to {v('inv_guards_new_rows')}, "
+                "but the delta moved from "
+                f"{v('inv_guards_old_delta')} to {v('inv_guards_new_delta')}."
+            ),
+            ("inv_guards_old_rows", "inv_guards_new_rows",
+             "inv_guards_old_delta", "inv_guards_new_delta"),
+        ),
+        (
+            # Position 2 quotes the mitigation result in prose. It was
+            # hand-written, so a re-evaluation left it holding the
+            # previous run's delta while the table beside it was
+            # refreshed. The number, its interval and the number of
+            # rows it is based on all come from the measurement now.
+            # The document writes the minus sign as a typographic one.
+            "8. prose: position 2 mitigation delta",
+            r"The measured delta is\s*\n?[−\-][\d.]+ BERTScore F1 "
+            r"\(CI \[[^\]]+\]\) on \d+ regenerated rows\.",
+            lambda v, m: (
+                "The measured delta is\n"
+                + v("mit_delta").replace("-", "−") + " BERTScore F1 "
+                "(CI " + v("mit_delta_ci").replace("-", "−") + ") on "
+                + v("mit_n_regen") + " regenerated rows."
+            ),
+            ("mit_delta", "mit_delta_ci", "mit_n_regen"),
+        ),
+        (
+            # Position 5 quotes the three rates in prose. The numbers were
+            # written by hand, so a re-evaluation left them holding the
+            # previous run's figures while the metric table above them was
+            # refreshed. The rate, the comparable it is measured against
+            # and the CCR's "no published comparable" caveat all come from
+            # the measurement now.
+            "8. prose: position 5 rates",
+            r"Our HRR is [\d.]+ against Dale's implied ~0\.55\. Our VSR is "
+            r"[\d.]+\+? against [\d.]+[–\-][\d.]+\. Our\s*\n?CCR is [\d.]+ "
+            r"with no published CCR to compare against",
+            lambda v, m: (
+                "Our HRR is " + v("hallucination_reduction_rate")
+                + " against Dale's implied ~0.55. Our VSR is "
+                + v("verification_success_rate") + " against 0.80–0.81. Our\n"
+                "CCR is " + v("claim_correction_rate")
+                + " with no published CCR to compare against"
+            ),
+            ("hallucination_reduction_rate", "verification_success_rate",
+             "claim_correction_rate"),
+        ),
+        (
+            # The demo page charts this block, so it is rewritten as a
+            # whole rather than row by row. The rows are the score
+            # dimensions of the win matrix, each with the best published
+            # comparable, our measured value and the gap between them.
+            # The "best" column is a published constant; the "ours" and
+            # "gap" columns are computed from the measurement.
+            "7. visual headline block",
+            # The heading is followed by a sentence of prose and then the
+            # fenced block. The pattern is compiled without re.DOTALL,
+            # so a "." cannot cross a newline: the old ".*?" stopped at
+            # the end of the heading line and the rule silently stopped
+            # matching, leaving the chart the demo page reads stale.
+            # "[\s\S]*?" crosses lines explicitly.
+            r"(### Visual Headline Comparison[\s\S]*?```\n)Metric\s+Best-Cited\s+"
+            r"Ours\s+Gap\n[─\s]*\n(?:.*\n)*?```",
+            lambda v, m: (
+                m.group(1) + _visual_headline_block(v)
+            ),
+            (),
+            ("detection_roc_auc", "detection_roc_auc_ci",
+             "detection_aupr", "detection_aupr_ci",
+             "precision_at_recall_90", "precision_at_recall_90_ci",
+             "detection_accuracy", "detection_accuracy_ci",
+             "spearman_rho", "spearman_rho_ci",
+             "claim_f1",
+             "hallucination_reduction_rate", "hallucination_reduction_rate_ci",
+             "verification_success_rate", "verification_success_rate_ci",
+             "latency_mean_s", "mit_delta", "mit_delta_ci"),
+        ),
+    ]
+
+    text, consolidated = _apply_specs(
+        text, consolidated_specs, values, dry_run=dry_run
+    )
+    replacements.extend(consolidated)
+
+    # The older rules are applied after the consolidated ones and their
+    # changes are appended rather than assigned: assigning would discard
+    # the consolidated changes, and the document would then be written
+    # with them missing.
+    text, row_changes = _apply_specs(text, row_specs, values, dry_run=dry_run)
+    replacements.extend(row_changes)
+
+    # The verdict tally summarises the matrix rows, so it is computed
+    # from them after their verdicts have been rewritten. Doing it
+    # before would count the verdicts the document happened to hold.
+    text, tally_changes = _fill_verdict_tally(text, dry_run=dry_run)
+    replacements.extend(tally_changes)
+
+    # The paragraph that reads the matrix aloud is written from the
+    # matrix, for the same reason the tally is: a hand-written reading
+    # said "the two score wins" while the table above it showed three.
+    headline = _headline_read(text)
+    if headline:
+        new_text, count = re.subn(
+            r"\*\*Headline read\.\*\*.*?(?=\n\n)",
+            lambda m: headline, text, count=1, flags=re.DOTALL,
+        )
+        if count and new_text != text:
+            text = new_text
+            replacements.append(
+                ("comparison.md 7. headline read", "paragraph", "1 paragraph")
+            )
 
     text, mit_changes = _fill_mitigation_prose(
         text, path, dry_run=dry_run, mitigation_path=mitigation_path
@@ -1690,10 +2702,20 @@ def _fill_comparison_tex(
         ),
         (
             "summary: end-to-end accuracy",
-            r"End-to-end accuracy & -- & [^&]* & Measured \\\\",
+            # The row terminator is written as two backslashes. The
+            # pattern accepts one as well, because a row that lost a
+            # backslash is still a row the fill has to be able to
+            # repair -- and the pattern that only matched the correct
+            # form could never fix it.
+            r"End-to-end accuracy & -- & [^&]* & Measured \\{1,2}",
             lambda v, m: (
                 r"End-to-end accuracy & -- & "
-                f"{v('end_to_end_accuracy')} & Measured \\"
+                + f"{v('end_to_end_accuracy')}"
+                # The terminator is two backslashes. In a plain f-string
+                # ``\\`` would collapse to one, which is exactly the
+                # broken form the rule is supposed to repair, so the
+                # backslashes are written in a raw string instead.
+                + r" & Measured \\"
             ),
             ("end_to_end_accuracy",),
         ),
@@ -1796,614 +2818,6 @@ def _fill_comparison_tex(
     return replacements
 
 
-def _fill_why_we_win_md(
-    path: Path, agg: dict, dry_run: bool = False,
-    mitigation_path: Path | None = None,
-) -> list[tuple[str, str, str]]:
-    """Replace the projected rows in ``Paper/why_we_win.md``."""
-    if not path.exists():
-        return []
-
-    text = path.read_text(encoding="utf-8")
-
-    def _v(key: str) -> str | None:
-        value = agg.get(key)
-        if not isinstance(value, (int, float)):
-            return None
-        return f"{float(value):.3f}"
-
-    specs = [
-        (
-            "row 1: mitigation delta",
-            r"\| 1 \| \*\*Mitigation Δ \(post-mitigation lift\)\*\* \| "
-            r"Dale 2023 — COMET-QE rerank \| \+0\.60 \| \*\*[^*]+\*\* \|",
-            lambda v, m: (
-                "| 1 | **Mitigation Δ (post-mitigation lift)** | "
-                f"Dale 2023 — COMET-QE rerank | +0.60 | **{v('delta')}** |"
-            ),
-            ("delta",),
-        ),
-        (
-            "row 7: ROC-AUC",
-            r"\| 7 \| \*\*Detection ROC-AUC\*\* \| Dale 2023 — ALTI\+ \| "
-            r"0\.987 \(MT-only\) \| \*\*[^*]+\*\* \|",
-            lambda v, m: (
-                "| 7 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | "
-                f"0.987 (MT-only) | **{v('detection_roc_auc')}** |"
-            ),
-            ("detection_roc_auc",),
-        ),
-        (
-            "row 7: detection ROC-AUC verdict",
-            # The verdict compares against the comparable in *this* row,
-            # Dale 2023's 0.987. An earlier version compared against the
-            # Sent-T5 XL band of 0.85-0.90 and, because our 0.925 sits
-            # above that band, wrote "Above the cited comparables" in a
-            # row whose cited comparable is 0.987. The row was claiming a
-            # lead over a number printed two cells to its left.
-            r"\| 7 \| \*\*Detection ROC-AUC\*\* \| Dale 2023 — ALTI\+ \| "
-            r"0\.987 \(MT-only\) \| \*\*[^*]+\*\* \| [^|]* \| [^|]* \|",
-            lambda v, m: (
-                "| 7 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | "
-                f"0.987 (MT-only) | **{v('detection_roc_auc')}** | "
-                + ("\u2713" if _above(v, "detection_roc_auc", 0.987)
-                   else "\u2248")
-                + " | "
-                + ("Above the cited comparables"
-                   if _above(v, "detection_roc_auc", 0.987)
-                   else "Below the MT-specialist (0.987) and inside the "
-                        "Sent-T5 XL band (0.85-0.90); above the "
-                        "general-purpose probes")
-                + " |"
-            ),
-            ("detection_roc_auc",),
-        ),
-        (
-            "row 8: sentence accuracy",
-            r"\| 8 \| \*\*Sentence accuracy\*\* \| Halu-NLP \(SHROOM winner\) \| "
-            r"0\.847 \| \*\*[^*]+\*\* \|",
-            lambda v, m: (
-                "| 8 | **Sentence accuracy** | Halu-NLP (SHROOM winner) | "
-                f"0.847 | **{v('detection_accuracy')}** |"
-            ),
-            ("detection_accuracy",),
-        ),
-        (
-            "row 9: P@R90",
-            r"\| 9 \| \*\*P@R90\*\* \| Dale 2023 — LaBSE \| 0\.703 \| "
-            r"\*\*[^*]+\*\* \|",
-            lambda v, m: (
-                "| 9 | **P@R90** | Dale 2023 — LaBSE | 0.703 | "
-                f"**{v('precision_at_recall_90')}** |"
-            ),
-            ("precision_at_recall_90",),
-        ),
-        (
-            "row 11: latency",
-            r"\| 11 \| \*\*Per-query latency \(GPU\)\*\* \| LLM-Check \| "
-            r"0\.22 s \| [^|]* \| ✗ \| [^|]* \|",
-            lambda v, m: (
-                "| 11 | **Per-query latency (GPU)** | LLM-Check | 0.22 s | "
-                f"{_latency_band(v)} | ✗ | Slower than the single-pass probe; "
-                "much richer output |"
-            ),
-            ("latency_min_s", "latency_max_s"),
-        ),
-        (
-            "row 10: Spearman rho",
-            r"\| 10 \| \*\*Spearman ρ\*\* \| Halu-NLP \| 0\.770 \| "
-            r"\*\*[^*]+\*\* \|",
-            lambda v, m: (
-                "| 10 | **Spearman ρ** | Halu-NLP | 0.770 | "
-                f"**{v('spearman_rho')}** |"
-            ),
-            ("spearman_rho",),
-        ),
-        (
-            "latency table row",
-            r"\| \*\*Ours\*\* \| [\d.]+(?:[–-][\d.]+)? s \|",
-            lambda v, m: (
-                f"| **Ours** | {_latency_band(v)} |"
-            ),
-            ("latency_min_s", "latency_max_s"),
-        ),
-        (
-            "detection table row",
-            r"\| \*\*Ours \(Step 9 fused\)\*\* \| \*\*[^*]+\*\* \| HaluEval QA[^|]*\|",
-            lambda v, m: (
-                f"| **Ours (Step 9 fused)** | **{v('detection_roc_auc')}** | "
-                "HaluEval QA (length-matched) |"
-            ),
-            ("detection_roc_auc",),
-        ),
-        (
-            "claim P/R/F1 table row",
-            r"\| \*\*Ours \(Step 8 \+ Step 9\)\*\* \| \*\*[^*]+\*\* \| "
-            r"Atomic claims \|",
-            lambda v, m: (
-                f"| **Ours (Step 8 + Step 9)** | **{v('claim_precision')} / "
-                f"{v('claim_recall')} / {v('claim_f1')}** | Atomic claims |"
-            ),
-            ("claim_precision", "claim_recall", "claim_f1"),
-        ),
-        (
-            "VSR table row",
-            r"\| \*\*Ours\*\* \| \*\*\d[\d.]*\+?\*\* \|",
-            lambda v, m: (
-                f"| **Ours** | **{v('verification_success_rate')}** |"
-            ),
-            ("verification_success_rate",),
-        ),
-        (
-            "row 1: mitigation delta verdict",
-            r"\| 1 \| \*\*Mitigation \u0394 \(post-mitigation lift\)\*\* \| "
-            r"Dale 2023 — COMET-QE rerank \| \+0\.60 \| \*\*[^*]+\*\* \| "
-            r"[^|]* \| [^|]* \|",
-            lambda v, m: (
-                "| 1 | **Mitigation \u0394 (post-mitigation lift)** | "
-                "Dale 2023 — COMET-QE rerank | +0.60 | "
-                f"**{v('delta')}** | "
-                + ("\u2713" if _delta_positive(v) else "\u2717")
-                + " | "
-                + ("Highest single gain in the comparison"
-                   if _delta_positive(v)
-                   else "Measured on the rows step 10 regenerated; the rewrite "
-                        "does not improve on the no-mitigation baseline yet")
-                + " |"
-            ),
-            ("delta",),
-        ),
-        (
-            "row 2: claim-level F1",
-            r"\| 2 \| \*\*Claim-level F1\*\* \| TU Wien 2024 — Vectara \| "
-            r"0\.71 \| \*\*[^*]+\*\* \| [^|]* \| [^|]* \|",
-            lambda v, m: (
-                "| 2 | **Claim-level F1** | TU Wien 2024 — Vectara | 0.71 | "
-                f"**{v('claim_f1')}** | "
-                + ("\u2713" if _above(v, "claim_f1", 0.71) else "\u2717")
-                + " | "
-                + ("Above the cited comparable"
-                   if _above(v, "claim_f1", 0.71)
-                   else "Below the cited comparable")
-                + " |"
-            ),
-            ("claim_f1",),
-        ),
-        (
-            "row 4: VSR",
-            r"\| 4 \| \*\*Verification Success Rate \(VSR\)\*\* \| "
-            r"AILS-NTUA \(Voting\) \| 0\.80 \(acc\) \| \*\*[^*]+\*\* \| "
-            r"[^|]* \| [^|]* \|",
-            lambda v, m: (
-                "| 4 | **Verification Success Rate (VSR)** | "
-                f"AILS-NTUA (Voting) | 0.80 (acc) | "
-                f"**{v('verification_success_rate')}** | "
-                + ("\u2713"
-                   if _above(v, "verification_success_rate", 0.80)
-                   else "\u2717")
-                + " | "
-                + ("Above the cited comparables"
-                   if _above(v, "verification_success_rate", 0.80)
-                   else "Below the cited comparables")
-                + " |"
-            ),
-            ("verification_success_rate",),
-        ),
-        (
-            "row 3: HRR",
-            r"\| 3 \| \*\*Hallucination Reduction Rate \(HRR\)\*\* \| Dale 2023 "
-            r"\(N-best rerank\) \| ~0\.55 \(implied\) \| \*\*[^*]+\*\* \| "
-            r"[^|]* \| [^|]* \|",
-            lambda v, m: (
-                "| 3 | **Hallucination Reduction Rate (HRR)** | Dale 2023 "
-                f"(N-best rerank) | ~0.55 (implied) | "
-                f"**{v('hallucination_reduction_rate')}** | "
-                + ("\u2713"
-                   if _above(v, "hallucination_reduction_rate", 0.55)
-                   else "\u2717")
-                + " | "
-                + ("Above the implied baseline"
-                   if _above(v, "hallucination_reduction_rate", 0.55)
-                   else "Below the implied baseline")
-                + " |"
-            ),
-            ("hallucination_reduction_rate",),
-        ),
-        (
-            "HRR table row",
-            r"\| \*\*Ours \(Step 11 gate\)\*\* \| \*\*[^*]+\*\* \|",
-            lambda v, m: (
-                "| **Ours (Step 11 gate)** | "
-                f"**{v('hallucination_reduction_rate')}** |"
-            ),
-            ("hallucination_reduction_rate",),
-        ),
-        (
-            "row 8: sentence accuracy",
-            r"\| 8 \| \*\*Sentence accuracy\*\* \| Halu-NLP \(SHROOM winner\) "
-            r"\| 0\.847 \| \*\*[^*]+\*\* \| [^|]* \| [^|]* \|",
-            lambda v, m: (
-                "| 8 | **Sentence accuracy** | Halu-NLP (SHROOM winner) | "
-                f"0.847 | **{v('detection_accuracy')}** | "
-                + ("\u2713" if _above(v, "detection_accuracy", 0.847)
-                   else "\u2717")
-                + " | "
-                + ("Above the SHROOM winner"
-                   if _above(v, "detection_accuracy", 0.847)
-                   else "Below the SHROOM winner")
-                + " |"
-            ),
-            ("detection_accuracy",),
-        ),
-        (
-            # The bar-chart data block is a fixed-width ASCII table inside a
-            # code fence. Each row is "label  comparable  ours  gap  verdict",
-            # and the gap is ours minus the comparable. The row is rebuilt
-            # from the measurement so the gap and the verdict cannot drift
-            # away from the number beside them.
-            "bar-chart: Claim F1",
-            r"Claim F1\s+0\.71\s+[\d.]+\s+[-\d.]+\s+[\u2248\u2713\u2717]?\s*(?:At par|Ahead|Behind)",
-            lambda v, m: _ascii_gap_row(
-                "Claim F1", 0.71, v("claim_f1"),
-            ),
-            ("claim_f1",),
-        ),
-        (
-            "bar-chart: HRR",
-            r"HRR\s+0\.55\s+[\d.]+\s+[-\d.]+\s+[\u2248\u2713\u2717]?\s*(?:At par|Ahead|Behind)",
-            lambda v, m: _ascii_gap_row(
-                "HRR", 0.55, v("hallucination_reduction_rate"),
-            ),
-            ("hallucination_reduction_rate",),
-        ),
-        (
-            "bar-chart: VSR",
-            r"VSR\s+0\.81\s+[\d.]+\s+[-\d.]+\s+[\u2248\u2713\u2717]?\s*(?:At par|Ahead|Behind)",
-            lambda v, m: _ascii_gap_row(
-                "VSR", 0.81, v("verification_success_rate"),
-            ),
-            ("verification_success_rate",),
-        ),
-        (
-            "bar-chart: Detection ROC-AUC",
-            r"Detection ROC-AUC\s+0\.987 \(MT\)\s+[\d.]+\s+[-\d.]+\s+[\u2248\u2713\u2717]?\s*(?:At par|Ahead|Behind)",
-            lambda v, m: _ascii_gap_row(
-                "Detection ROC-AUC", 0.987, v("detection_roc_auc"),
-            ),
-            ("detection_roc_auc",),
-        ),
-        (
-            "bar-chart: Sentence Acc",
-            r"Sentence Acc\s+0\.847\s+[\d.]+\s+[-\d.]+\s+[\u2248\u2713\u2717]?\s*(?:At par|Ahead|Behind)",
-            lambda v, m: _ascii_gap_row(
-                "Sentence Acc", 0.847, v("detection_accuracy"),
-            ),
-            ("detection_accuracy",),
-        ),
-        (
-            "bar-chart: P@R90",
-            r"P@R90\s+0\.703\s+[\d.]+\s+[-\d.]+\s+[\u2248\u2713\u2717]?\s*(?:At par|Ahead|Behind)",
-            lambda v, m: _ascii_gap_row(
-                "P@R90", 0.703, v("precision_at_recall_90"),
-            ),
-            ("precision_at_recall_90",),
-        ),
-        (
-            "bar-chart: Spearman",
-            r"Spearman \u03c1\s+0\.770\s+[\d.]+\s+[-\d.]+\s+[\u2248\u2713\u2717]?\s*(?:At par|Ahead|Behind)",
-            lambda v, m: _ascii_gap_row(
-                "Spearman \u03c1", 0.770, v("spearman_rho"),
-            ),
-            ("spearman_rho",),
-        ),
-        (
-            "prose: headline read ROC-AUC",
-            r"on detection \(ROC-AUC \d+\.\d+ against a SHROOM band",
-            lambda v, m: (
-                "on detection (ROC-AUC "
-                + v("detection_roc_auc")
-                + " against a SHROOM band"
-            ),
-            ("detection_roc_auc",),
-        ),
-        (
-            "prose: HRR in the 'why we do not win' note",
-            r"Our measured HRR \([\d.]+\) is below Dale 2023's implied",
-            lambda v, m: (
-                "Our measured HRR ("
-                + v("hallucination_reduction_rate")
-                + ") is below Dale 2023's implied"
-            ),
-            ("hallucination_reduction_rate",),
-        ),
-        (
-            "prose: VSR in the granularity note",
-            r"Our measured VSR \([\d.]+\) is (?:below|above) the cited "
-            r"comparables",
-            lambda v, m: (
-                "Our measured VSR ("
-                + v("verification_success_rate")
-                + ") is "
-                + ("above" if _above(v, "verification_success_rate", 0.80)
-                   else "below")
-                + " the cited comparables"
-            ),
-            ("verification_success_rate",),
-        ),
-        (
-            "prose: VSR in the Q&A",
-            r"our VSR is [\d.]+, so the difference is capability",
-            lambda v, m: (
-                "our VSR is "
-                + v("verification_success_rate")
-                + ", so the difference is capability"
-            ),
-            ("verification_success_rate",),
-        ),
-        (
-            # The headline read names the dimensions we are behind on. The
-            # list has to follow the matrix, or the summary and the
-            # tally it sits above disagree: the tally counted
-            # claim-level F1 as a loss while the sentence that introduced
-            # the tally also called it one, after the measurement had
-            # moved it above the comparable.
-            "prose: headline read",
-            r"and behind on (?:mitigation Delta, claim-level F1, )?"
-            r"(?:HRR and VSR|claim-level F1, HRR and VSR)\.",
-            lambda v, m: (
-                "and behind on "
-                + ", ".join(
-                    name for name, key, threshold in (
-                        ("mitigation Delta", None, None),
-                        ("claim-level F1", "claim_f1", 0.71),
-                        ("HRR", "hallucination_reduction_rate", 0.55),
-                        ("VSR", "verification_success_rate", 0.80),
-                    )
-                    if key is None or not _above(v, key, threshold)
-                )
-                + "."
-            ),
-            ("claim_f1", "hallucination_reduction_rate",
-             "verification_success_rate"),
-        ),
-        (
-            "prose: measured F1 in the granularity note",
-            # The rule owns the whole sentence, including its trailing
-            # clause. The clause asserted "not a score advantage", which
-            # was true while the measured F1 sat below the comparable and
-            # became false once it did not. Leaving the clause out of the
-            # match would let the sentence contradict itself.
-            r"The measured F1 \([\d.]+\) is (?:below|above) the cited "
-            r"sentence-level comparables, so the claim here is structural "
-            r"\(per-claim verdicts\) and (?:not a score advantage|"
-            r"a score advantage as well as a structural one)",
-            lambda v, m: (
-                "The measured F1 ("
-                + v("claim_f1")
-                + ") is "
-                + ("above" if _above(v, "claim_f1", 0.71) else "below")
-                + " the cited sentence-level comparables, so the claim here "
-                "is structural (per-claim verdicts) and "
-                + ("not a score advantage"
-                   if not _above(v, "claim_f1", 0.71)
-                   else "a score advantage as well as a structural one")
-            ),
-            ("claim_f1",),
-        ),
-        (
-            "prose: strongest result ROC-AUC",
-            r"Detection ROC-AUC of \*\*[\d.]+\*\* on the length-matched "
-            r"HaluEval split \(95% CI \[[^\]]*\]\)",
-            lambda v, m: (
-                "Detection ROC-AUC of **"
-                + v("detection_roc_auc")
-                + "** on the length-matched HaluEval split (95% CI ["
-                + v("detection_roc_auc_ci_text")
-                + "])"
-            ),
-            ("detection_roc_auc", "detection_roc_auc_ci_text"),
-        ),
-    ]
-
-    values = {k: _v(k) for k in (
-        "detection_roc_auc", "detection_aupr", "precision_at_recall_90",
-        "claim_precision", "claim_recall", "claim_f1", "detection_accuracy",
-        "spearman_rho", "hallucination_reduction_rate",
-        "verification_success_rate",
-        "latency_min_s", "latency_max_s", "latency_mean_s",
-    )}
-    values["detection_roc_auc_ci_text"] = _ci_text(agg, "detection_roc_auc")
-    values.update(_mitigation_prose_values(mitigation_path))
-    text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
-
-    # The tally summarises the rows above it, so it is recomputed from
-    # them. A hand-written tally drifts the moment a verdict changes.
-    tally = _verdict_tally(text)
-    if tally is not None:
-        pattern = (
-            r"\| \*\*✓ Win\*\* \| [^\n]*\n"
-            r"\| \*\*≈ Tie / At par\*\* \| [^\n]*\n"
-            r"\| \*\*✗ Loss\*\* \| [^\n]*"
-        )
-        new_text, count = re.subn(pattern, lambda m: tally, text)
-        if count and new_text != text:
-            text = new_text
-            replacements.append(
-                ("verdict tally", pattern, f"{count} block(s)")
-            )
-
-    text, mit_changes = _fill_mitigation_prose(
-        text, path, dry_run=dry_run, mitigation_path=mitigation_path
-    )
-    replacements.extend(mit_changes)
-
-    if replacements and not dry_run:
-        path.write_text(text, encoding="utf-8")
-    return replacements
-
-
-def _fill_five_position_md(
-    path: Path, agg: dict, dry_run: bool = False,
-    mitigation_path: Path | None = None,
-) -> list[tuple[str, str, str]]:
-    """Replace the projected rows in ``Paper/five_position_comparison.md``.
-
-    The file was not wired to this script before, so its numbers were
-    frozen at whatever the synthetic run produced.
-    """
-    if not path.exists():
-        return []
-
-    text = path.read_text(encoding="utf-8")
-
-    def _v(key: str) -> str | None:
-        value = agg.get(key)
-        if not isinstance(value, (int, float)):
-            return None
-        return f"{float(value):.3f}"
-
-    specs = [
-        (
-            "HRR row",
-            r"\| \*\*Ours \(Step 11 gate\)\*\* \| \*\*[^*]+\*\*[^|]*\|",
-            lambda v, m: (
-                f"| **Ours (Step 11 gate)** | "
-                f"**{v('hallucination_reduction_rate')}** |"
-            ),
-            ("hallucination_reduction_rate",),
-        ),
-        (
-            "VSR row",
-            r"\| \*\*Ours \(per-claim NLI\)\*\* \| \*\*[^*]+\*\* \|",
-            lambda v, m: (
-                f"| **Ours (per-claim NLI)** | "
-                f"**{v('verification_success_rate')}** |"
-            ),
-            ("verification_success_rate",),
-        ),
-        (
-            "CCR row",
-            r"\| \*\*Ours \(Step 10 regen\)\*\* \| \*\*[^*]+\*\* \|",
-            lambda v, m: (
-                f"| **Ours (Step 10 regen)** | "
-                f"**{v('claim_correction_rate')}** |"
-            ),
-            ("claim_correction_rate",),
-        ),
-        (
-            "VSR in the win table",
-            r"Halu-NLP VSR 0\.81 vs\. \*\*Ours [^*]+\*\*",
-            lambda v, m: (
-                f"Halu-NLP VSR 0.81 vs. **Ours "
-                f"{v('verification_success_rate')}**"
-            ),
-            ("verification_success_rate",),
-        ),
-        (
-            "prose: neither is a measured advantage",
-            r"Our HRR \([\d.]+\) and VSR \([\d.]+\) are both below the cited "
-            r"comparables, and our CCR \([\d.]+\) has no published CCR",
-            lambda v, m: (
-                "Our HRR ("
-                + v("hallucination_reduction_rate")
-                + ") and VSR ("
-                + v("verification_success_rate")
-                + ") are both below the cited comparables, and our CCR ("
-                + v("claim_correction_rate")
-                + ") has no published CCR"
-            ),
-            (
-                "hallucination_reduction_rate", "verification_success_rate",
-                "claim_correction_rate",
-            ),
-        ),
-        (
-            "verdict: not a win paragraph",
-            r"but the measured HRR \([\d.]+\) and CCR \([\d.]+\) are reported "
-            r"as measured",
-            lambda v, m: (
-                "but the measured HRR ("
-                + v("hallucination_reduction_rate")
-                + ") and CCR ("
-                + v("claim_correction_rate")
-                + ") are reported as measured"
-            ),
-            ("hallucination_reduction_rate", "claim_correction_rate"),
-        ),
-        (
-            "verdict: not a win on the rate",
-            r"but the measured VSR \([\d.]+\) is below the cited comparables",
-            lambda v, m: (
-                "but the measured VSR ("
-                + v("verification_success_rate")
-                + ") is below the cited comparables"
-            ),
-            ("verification_success_rate",),
-        ),
-        (
-            "summary table: position 5 margin",
-            r"\| 5\. HRR / VSR / CCR \| [^|]*\| Halu-NLP VSR 0\.81 vs\. "
-            r"\*\*Ours [^*]+\*\* \| [^|]*\|",
-            lambda v, m: (
-                "| 5. HRR / VSR / CCR | ❌ LOSS on the rates | "
-                "Halu-NLP VSR 0.81 vs. **Ours "
-                + v("verification_success_rate")
-                + "** | −"
-                + f"{0.81 - float(v('verification_success_rate')):.3f}"
-                + " VSR; HRR "
-                + v("hallucination_reduction_rate")
-                + " vs. ~0.55 implied |"
-            ),
-            ("verification_success_rate", "hallucination_reduction_rate"),
-        ),
-        (
-            "position 2 row in the summary table",
-            r"\| 2\. Mitigation [^|]*\|[^|]*\|[^|]*\|[^|]*\|",
-            lambda v, m: (
-                "| 2. Mitigation \u0394 | "
-                + ("\u2713 WIN" if _delta_positive(v) else "\u2717 LOSS")
-                + " | Dale 2023 +0.60 (different domain) | "
-                + (f"{v('delta')} measured" if _delta_positive(v)
-                   else f"{v('delta')} measured vs. +0.60")
-                + " |"
-            ),
-            ("delta",),
-        ),
-        (
-            "position 2 and 5 prose sentence",
-            r"\*Positions 2 and 5 are not wins and are reported as measured\. "
-            r"The mitigation \u0394 is .*? improving it is future work\.",
-            lambda v, m: (
-                "*Positions 2 and 5 are not wins and are reported as measured. "
-                + v("mitigation_prose_sentence")
-                + " The rewrite path is implemented and exercised, but on this "
-                "sample it did not improve similarity to the gold answer; "
-                "improving it is future work."
-            ),
-            ("delta", "mitigation_prose_sentence"),
-        ),
-    ]
-
-    values = {k: _v(k) for k in (
-        "detection_roc_auc", "detection_aupr", "precision_at_recall_90",
-        "claim_precision", "claim_recall", "claim_f1", "detection_accuracy",
-        "spearman_rho", "hallucination_reduction_rate",
-        "verification_success_rate", "claim_correction_rate",
-        "latency_min_s", "latency_max_s", "latency_mean_s",
-    )}
-    values.update(_mitigation_prose_values(mitigation_path))
-    text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
-
-    text, mit_changes = _fill_mitigation_prose(
-        text, path, dry_run=dry_run, mitigation_path=mitigation_path
-    )
-    replacements.extend(mit_changes)
-
-    if replacements and not dry_run:
-        path.write_text(text, encoding="utf-8")
-    return replacements
-
-
 def _fill_readme_md(
     path: Path, agg: dict, dry_run: bool = False,
     mitigation_path: Path | None = None,
@@ -2454,506 +2868,67 @@ def _fill_readme_md(
     return replacements
 
 
-def _fill_wins_summary_md(
-    path: Path, agg: dict, dry_run: bool = False,
-    mitigation_path: Path | None = None,
-    cross: dict[str, dict] | None = None,
-    matrix_path: Path | None = None,
-) -> list[tuple[str, str, str]]:
-    """Keep ``Paper/wins_summary.md`` in sync with the measurements.
-
-    This file is the defence-notes summary. It was hand-written, so every
-    re-evaluation left it holding whatever numbers were current when it was
-    written -- which is how a superseded ROC-AUC of 0.843 and a claim-level
-    F1 of 0.653 survived into a document whose own preamble claims that
-    "no figure in this project is typed by hand".
-
-    Every rule here is anchored on the row's own stable text (the method
-    name, the metric label), so the substitution cannot drift onto an
-    unrelated number. Prose that states a verdict -- "we drop to 0.603" --
-    is rewritten together with the number, because a stale number in prose
-    is exactly the overclaim this generator exists to prevent.
-    """
-    if not path.exists():
-        return []
-
-    cross = cross or {}
-    tqa = cross.get("truthfulqa") or {}
-    rag = cross.get("ragtruth") or {}
-
-    text = path.read_text(encoding="utf-8")
-
-    def _v(key: str) -> str | None:
-        value = agg.get(key)
-        if not isinstance(value, (int, float)):
-            return None
-        return f"{float(value):.3f}"
-
-    def _ci(key: str, source: dict | None = None) -> list[float] | None:
-        src = source if source is not None else agg
-        value = src.get(key)
-        if isinstance(value, (list, tuple)) and len(value) == 2:
-            return [float(value[0]), float(value[1])]
-        return None
-
-    values: dict[str, str] = {}
-    for key in (
-        "detection_roc_auc", "detection_aupr", "precision_at_recall_90",
-        "detection_accuracy", "spearman_rho", "claim_precision",
-        "claim_recall", "claim_f1", "hallucination_reduction_rate",
-        "end_to_end_accuracy", "verification_success_rate",
-        "claim_correction_rate", "retrieval_recall_at_5", "latency_mean_s",
-        "latency_min_s", "latency_max_s",
-    ):
-        got = _v(key)
-        if got is not None:
-            values[key] = got
-    # The AUPR interval, so the AUPR verdict can follow the separation
-    # rule rather than the point estimate.
-    aupr_ci = _ci("detection_aupr_ci95")
-    if aupr_ci:
-        values["detection_aupr_ci95"] = aupr_ci
-        values["detection_aupr_ci_text"] = f"{aupr_ci[0]:.3f}, {aupr_ci[1]:.3f}"
-    for key, src in (("tqa_detection_roc_auc", tqa), ("rag_detection_roc_auc", rag)):
-        # The value has to come from *this* dataset's aggregate. An
-        # earlier version read both from TruthfulQA, which put
-        # TruthfulQA's 0.635 into the RAGTruth row of the defence notes
-        # while the comparison table showed 0.613 for the same run.
-        raw = src.get("detection_roc_auc")
-        if isinstance(raw, (int, float)):
-            values[key] = f"{float(raw):.3f}"
-
-    # The remaining secondary-dataset metrics, under their own prefixed
-    # names so they can never be confused with the HaluEval values.
-    for prefix, src in (("tqa", tqa), ("rag", rag)):
-        for key in (
-            "detection_aupr", "precision_at_recall_90", "detection_accuracy",
-            "spearman_rho", "claim_precision", "claim_recall", "claim_f1",
-        ):
-            raw = src.get(key)
-            if isinstance(raw, (int, float)):
-                values[f"{prefix}_{key}"] = f"{float(raw):.3f}"
-
-    # The HaluEval detection CI, used in the W1 row.
-    roc_ci = _ci("detection_roc_auc_ci95")
-    if roc_ci:
-        values["detection_roc_auc_ci"] = (
-            f"[{roc_ci[0]:.3f}, {roc_ci[1]:.3f}]"
-        )
-    tqa_roc_ci = _ci("detection_roc_auc_ci95", tqa)
-    if tqa_roc_ci:
-        values["tqa_detection_roc_auc_ci"] = (
-            f"[{tqa_roc_ci[0]:.3f}, {tqa_roc_ci[1]:.3f}]"
-        )
-    rag_roc_ci = _ci("detection_roc_auc_ci95", rag)
-    if rag_roc_ci:
-        values["rag_detection_roc_auc_ci"] = (
-            f"[{rag_roc_ci[0]:.3f}, {rag_roc_ci[1]:.3f}]"
-        )
-
-    values.update(_mitigation_prose_values(mitigation_path))
-
-    specs = [
-        (
-            "W1 row",
-            r"\| \*\*W1\*\* \| \*\*Length-controlled detection AUC\*\* \| "
-            r"\*\*[^*]+\*\* ROC-AUC \[[^\]]+\] \|",
-            lambda v, m: (
-                "| **W1** | **Length-controlled detection AUC** | "
-                + f"**{v('detection_roc_auc')}** ROC-AUC "
-                + v("detection_roc_auc_ci")
-                + " |"
-            ),
-            ("detection_roc_auc", "detection_roc_auc_ci"),
-        ),
-        (
-            "plain-English: length-matched score",
-            r"my score drops from 0\.968 to \d+\.\d+\. I am reporting the lower number\.",
-            lambda v, m: (
-                "my score drops from 0.968 to "
-                + v("detection_roc_auc")
-                + ". I am reporting the lower number."
-            ),
-            ("detection_roc_auc",),
-        ),
-        (
-            "plain-English: TruthfulQA score",
-            r"On TruthfulQA my\s+score drops to \d+\.\d+\. I say all of this openly\.",
-            lambda v, m: (
-                "On TruthfulQA my score drops to "
-                + v("tqa_detection_roc_auc")
-                + ". I say all of this openly."
-            ),
-            ("tqa_detection_roc_auc",),
-        ),
-        (
-            "3.1 detection row",
-            r"\| \*\*Ours \(RAG fused score, Step 9\)\*\* \| \*\*[^*]+\*\* \| "
-            r"\*\*[^*]+\*\* \| \*\*[^*]+\*\* \| \*\*[^*]+\*\* \| \*\*[^*]+\*\* \|",
-            lambda v, m: (
-                "| **Ours (RAG fused score, Step 9)** | "
-                + f"**{v('detection_roc_auc')}** | "
-                + f"**{v('detection_aupr')}** | "
-                + f"**{v('precision_at_recall_90')}** | "
-                + f"**{v('detection_accuracy')}** | "
-                + f"**{v('spearman_rho')}** |"
-            ),
-            (
-                "detection_roc_auc", "detection_aupr",
-                "precision_at_recall_90", "detection_accuracy", "spearman_rho",
-            ),
-        ),
-        (
-            "3.1 TruthfulQA row",
-            r"\| \*\*Ours \(TruthfulQA, independent(?:, closed-book)?\)\*\* \| "
-            r"\d+\.\d+ \| \d+\.\d+ \| \d+\.\d+ \| \d+\.\d+ \| \d+\.\d+ \|",
-            lambda v, m: (
-                "| **Ours (TruthfulQA, independent, closed-book)** | "
-                + f"{v('tqa_detection_roc_auc')} | "
-                + f"{v('tqa_detection_aupr')} | "
-                + f"{v('tqa_precision_at_recall_90')} | "
-                + f"{v('tqa_detection_accuracy')} | "
-                + f"{v('tqa_spearman_rho')} |"
-            ),
-            (
-                "tqa_detection_roc_auc", "tqa_detection_aupr",
-                "tqa_precision_at_recall_90", "tqa_detection_accuracy",
-                "tqa_spearman_rho",
-            ),
-        ),
-        (
-            "3.1 TruthfulQA setting cell",
-            # TruthfulQA is closed-book: there is no retrieval corpus, so the
-            # setting cell must not claim "Black-box + retrieval".
-            r"(\| \*\*Ours \(TruthfulQA, independent(?:, closed-book)?\)\*\* \|"
-            r"[^\n]*?\| )Black-box \+ retrieval( \|)",
-            lambda v, m: (
-                m.group(1) + "Black-box, closed-book" + m.group(2)
-            ),
-            (),
-        ),
-        (
-            "3.1 RAGTruth row",
-            r"\| \*\*Ours \(RAGTruth, third dataset\)\*\* \|[^\n]*",
-            lambda v, m: (
-                "| **Ours (RAGTruth, third dataset)** | "
-                + f"**{v('rag_detection_roc_auc')}** | – | – | – | – | "
-                "Black-box + retrieval | RAGTruth (**length-matched**) |"
-            ),
-            ("rag_detection_roc_auc",),
-        ),
-        (
-            "prose: SHROOM band",
-            r"1\. We sit \*\*inside the SHROOM band\*\* on detection \(\d+\.\d+ "
-            r"AUC vs 0\.85–0\.90 for",
-            lambda v, m: (
-                "1. We sit **inside the SHROOM band** on detection ("
-                + v("detection_roc_auc")
-                + " AUC vs 0.85–0.90 for"
-            ),
-            ("detection_roc_auc",),
-        ),
-        (
-            # The AUPR claim follows the interval. The point estimate is
-            # not the evidence; the separation is. The superseded
-            # measurement put the AUPR in a tie, and the corrected
-            # instrument separates it, so both the lead-in and the
-            # verdict have to be able to move with the interval.
-            "prose: AUPR tie",
-            r"2\. Our AUPR of \*\*\d+\.\d+\*\* (?:matches|is above) the best "
-            r"published comparable",
-            lambda v, m: (
-                "2. Our AUPR of **"
-                + v("detection_aupr")
-                + "** "
-                + ("is above the best published comparable"
-                   if _above_ci(v, "detection_aupr_ci95", 0.85)
-                   else "matches the best published comparable")
-            ),
-            ("detection_aupr", "detection_aupr_ci95"),
-        ),
-        (
-            "prose: AUPR interval",
-            r"(?:our 95% CI \[[^\]]+\] overlaps it, so\s*\n?\s*it is a "
-            r"\*\*tie, not a win\*\*, and is reported as such\.|it is a "
-            r"\*\*tie, not a win\*\*, and is reported as such\.)",
-            lambda v, m: (
-                "our 95% CI ["
-                + v("detection_aupr_ci_text")
-                + "] "
-                + ("excludes it, so it is a **win**, and is reported as such"
-                   if _above_ci(v, "detection_aupr_ci95", 0.85)
-                   else "overlaps it, so it is a **tie, not a win**, and is "
-                        "reported as such")
-            ),
-            ("detection_aupr_ci_text", "detection_aupr_ci95"),
-        ),
-        (
-            "prose: TruthfulQA drop",
-            r"3\. On TruthfulQA \(independent dataset\) we \*\*drop to \d+\.\d+ "
-            r"AUC\*\*\.",
-            lambda v, m: (
-                "3. On TruthfulQA (independent dataset, closed-book) we **drop to "
-                + v("tqa_detection_roc_auc")
-                + " AUC**."
-            ),
-            ("tqa_detection_roc_auc",),
-        ),
-        (
-            "3.2 claim-level row",
-            r"\| \*\*Ours \(Step 8 \+ Step 9\)\*\* \| \*\*[\d\. /]+\*\* \|",
-            lambda v, m: (
-                "| **Ours (Step 8 + Step 9)** | "
-                + f"**{v('claim_precision')} / {v('claim_recall')} / "
-                + f"{v('claim_f1')}** |"
-            ),
-            ("claim_precision", "claim_recall", "claim_f1"),
-        ),
-        (
-            "prose: claim-level F1 verdict",
-            r"We are \*\*(?:below|above)\*\* on raw F1 \(\d+\.\d+ vs 0\.71\) and we say so\.",
-            lambda v, m: (
-                "We are **"
-                + ("above" if _above(v, "claim_f1", 0.71) else "below")
-                + "** on raw F1 ("
-                + v("claim_f1")
-                + " vs 0.71) and we say so."
-            ),
-            ("claim_f1",),
-        ),
-        (
-            "limitation: TruthfulQA AUC",
-            r"\| TruthfulQA AUC drops to \d+\.\d+ \|",
-            lambda v, m: (
-                "| TruthfulQA AUC drops to "
-                + v("tqa_detection_roc_auc")
-                + " |"
-            ),
-            ("tqa_detection_roc_auc",),
-        ),
-        (
-            "limitation: end-to-end accuracy",
-            r"\| End-to-end accuracy is \d+\.\d+ \|",
-            lambda v, m: (
-                "| End-to-end accuracy is "
-                + v("end_to_end_accuracy")
-                + " |"
-            ),
-            ("end_to_end_accuracy",),
-        ),
-        (
-            "limitation: claim-level F1",
-            r"\| Claim-level F1 \(\d+\.\d+\) (?:below|above) TU Wien \(0\.71\) \|",
-            lambda v, m: (
-                "| Claim-level F1 ("
-                + v("claim_f1")
-                + ") "
-                + ("above" if _above(v, "claim_f1", 0.71) else "below")
-                + " TU Wien (0.71) |"
-            ),
-            ("claim_f1",),
-        ),
-        (
-            "limitation: HRR",
-            r"\| HRR \(\d+\.\d+\) below Dale's implied 0\.55 \|",
-            lambda v, m: (
-                "| HRR ("
-                + v("hallucination_reduction_rate")
-                + ") below Dale's implied 0.55 |"
-            ),
-            ("hallucination_reduction_rate",),
-        ),
-        (
-            "30-second script: score drop",
-            r"same length, and my own score drops from 0\.968 to \d+\.\d+\. I am reporting",
-            lambda v, m: (
-                "same length, and my own score drops from 0.968 to "
-                + v("detection_roc_auc")
-                + ". I am reporting"
-            ),
-            ("detection_roc_auc",),
-        ),
-        (
-            "contribution statement: headline",
-            # The sentence is quoted and wrapped across lines, so the pattern
-            # has to tolerate the "> " quote markers and the line breaks.
-            r"reaches \d+\.\d+ ROC-AUC and \d+\.\d+ AUPR with\s*percentile "
-            r"bootstrap intervals",
-            lambda v, m: (
-                "reaches "
-                + v("detection_roc_auc")
-                + " ROC-AUC and "
-                + v("detection_aupr")
-                + " AUPR with percentile bootstrap intervals"
-            ),
-            ("detection_roc_auc", "detection_aupr"),
-        ),
-        (
-            "efficiency table row: our latency",
-            # The band and the mean are both measured. This row was
-            # hand-written and held 0.8-13.8 s with a mean of 4.84 s,
-            # which no longer matched the run the rest of the file
-            # describes (1.0-10.3 s, mean 4.18 s).
-            r"\| \*\*Ours \(RAG, single-pass\)\*\* \| \*\*[\d.]+(?:[–-][\d.]+)? s\*\*"
-            r"(?: \(mean [\d.]+ s\))? \|",
-            lambda v, m: (
-                "| **Ours (RAG, single-pass)** | "
-                f"**{_latency_band(v)}** (mean {_latency_mean(v):.2f} s) |"
-            ),
-            ("latency_min_s", "latency_max_s", "latency_mean_s"),
-        ),
-    ]
-
-    text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
-
-    # The tally summarises the win matrix, which lives in
-    # ``why_we_win.md``. It was maintained by hand here, so a verdict that
-    # changed in the matrix left the two files claiming different counts.
-    # It is now derived from the matrix, so the two cannot disagree.
-    if matrix_path is not None and matrix_path.exists():
-        matrix_text = matrix_path.read_text(encoding="utf-8")
-        tally = _name_tally(matrix_text)
-        if tally is not None:
-            pattern = (
-                r"\| \*\*✓ Win\*\* \| [^\n]*\n"
-                r"\| \*\*≈ Tie / At par\*\* \| [^\n]*\n"
-                r"\| \*\*✗ Loss\*\* \| [^\n]*"
-            )
-            new_text, count = re.subn(pattern, lambda m: tally, text)
-            if count and new_text != text:
-                text = new_text
-                replacements.append(
-                    ("verdict tally", pattern, f"{count} block(s)")
-                )
-
-    if replacements and not dry_run:
-        path.write_text(text, encoding="utf-8")
-    return replacements
-
-
 # The mitigation rows of the prose tables. Each entry is
 # (file key, old text, builder) where the builder receives a dict with
 # "pre", "post" and "delta" already formatted.
 _MITIGATION_PROSE = {
-    "why_we_win.md": [
-        (
-            "mitigation table row",
-            r"\| \*\*Ours \(Step 10 regen \+ Step 11 gate\)\*\* \| [^|]* \| "
-            r"[^|]* \| [^|]* \|",
-            lambda m: (
-                "| **Ours (Step 10 regen + Step 11 gate)** | "
-                f"{m['pre']} | {m['post']} | {m['delta']} |"
-            ),
-        ),
-        (
-            "prose: different from Dale",
-            r"on machine translation; our measured \u0394 is .*? so we do not "
-            r"claim to lead on mitigation \u0394\.",
-            lambda m: (
-                "on machine translation; our measured \u0394 is "
-                + m["delta_number"]
-                + " on the length-matched HaluEval split, so we do not "
-                "claim to lead on mitigation \u0394."
-            ),
-        ),
-        (
-            "prose: strongest result",
-            r"The mitigation \u0394 is \*not\* a win: measured on the rows "
-            r"where step 10 regenerated, it is .*?, so it is reported as an "
-            r"open result\.",
-            lambda m: (
-                "The mitigation \u0394 is *not* a win: measured on the rows "
-                "where step 10 regenerated, it is "
-                + m["delta_number"]
-                + (" (CI " + m["delta_ci"] + ")" if m["delta_ci"] else "")
-                + ", so it is reported as an open result."
-            ),
-        ),
-    ],
     "comparison.md": [
         (
-            "mitigation table row",
-            r"\| \*\*Ours \(Step 10 regen \+ Step 11 gate\)\*\* \| "
-            r"Evidence-constrained rewrite \+ ABSTAIN \| [^|]* \| [^|]* \| [^|]* \|",
+            # The prose under the table states the delta, the number of
+            # rewritten rows and the permutation-test p-value. The table
+            # row itself is filled by the consolidated specs in
+            # _fill_comparison_md, which carry the interval alongside
+            # the delta.
+            #
+            # The wording follows the measurement. A delta whose interval
+            # covers zero is not separable from no effect at all, so the
+            # prose says that; only an interval that sits entirely below
+            # zero is a measured failure, and only then may the prose say
+            # the rewrite was worse. Describing an interval that covers
+            # zero as a measured failure would overstate what the
+            # measurement shows.
+            "prose: the negative result",
+            # The middle clause names what the rewrite did, and the
+            # wording depends on the measurement: a measured failure and
+            # an interval that covers zero are described differently. The
+            # clause is matched loosely -- it is a run of words between
+            # "the rewrite" and the full stop -- so the rule can repair
+            # any of the wordings it has produced, and so an earlier
+            # hand-written phrasing is still recognised.
+            r"\*\*Our rewrite does not work yet\.\*\* The delta is [−\-][\d.]+ "
+            r"and the confidence interval\s*\n?includes zero\. On the \d+ rows "
+            r"where step 10 actually rewrote an answer, the rewrite"
+            r"[^\n.]*(?:\n[^.]*)?"
+            r"\.\s*\n?A paired permutation "
+            r"test on those rows gives\s*\n?p = [\d.]+ — no evidence of an "
+            r"effect in either direction\.",
             lambda m: (
-                "| **Ours (Step 10 regen + Step 11 gate)** | Evidence-constrained "
-                f"rewrite + ABSTAIN | {m['pre']} | {m['post']} | {m['delta']} |"
+                "**Our rewrite does not work yet.** The delta is "
+                f"{m['delta_md']} and the confidence interval\n"
+                "includes zero. On the "
+                f"{m['n_regenerated']} rows where step 10 actually rewrote "
+                "an answer, the rewrite\n"
+                + m["outcome_phrase"].removeprefix("the rewrite ")
+                + ".\nA paired permutation test on those rows gives\n"
+                f"p = {m['delta_p']} — no evidence of an effect in "
+                "either direction."
             ),
         ),
         (
-            "prose: observation",
-            r"Measured on the rows where step 10 actually regenerated "
-            r"\(n=\d+ of \d+\), the \u0394 over the no-mitigation baseline is "
-            r"\*\*[^*]+\*\* \(95% CI \[[^\]]*\]\) — i\.e\..*?reported here as "
-            r"measured rather than as the projected figure an earlier draft "
-            r"carried\.",
+            # The sample-size paragraph: how many rows were regenerated and
+            # how many distinct questions they came from.
+            "prose: the small sample",
+            r"\*\*Our sample is small\.\*\* Only \d+ of \d+ rows were "
+            r"regenerated, because our gate only\s*\n?fires when the "
+            r"evidence supports a rewrite\. A negative result on \d+ rows "
+            r"from \d+ unique\s*\n?questions is weak evidence\.",
             lambda m: (
-                "Measured on the rows where step 10 actually regenerated "
-                f"(n={m['n_regenerated']} of {m['n_rows']}), the \u0394 over the "
-                "no-mitigation baseline is **"
-                + m["delta_number"]
-                + " BERTScore F1** (95% CI "
-                + m["delta_ci"]
-                + f") — i.e. {m['outcome']} on this sample. The rewrite step "
-                "is therefore not yet a demonstrated win over the "
-                "no-mitigation baseline, and the \u0394 is reported here as "
-                "measured rather than as the projected figure an earlier "
-                "draft carried."
-            ),
-        ),
-    ],
-    "five_position_comparison.md": [
-        (
-            "mitigation table row",
-            r"\| \*\*Ours \(Step 10 regen \+ Step 11 gate\)\*\* \| [^|]* \| "
-            r"[^|]* \| [^|]* \|",
-            lambda m: (
-                "| **Ours (Step 10 regen + Step 11 gate)** | "
-                f"{m['pre']} | {m['post']} | {m['delta']} |"
-            ),
-        ),
-        (
-            "heading: position 2",
-            r"## Position 2 — Mitigation \u0394 \(Measured: .*? vs\. \+0\.60 Dale\)",
-            lambda m: (
-                "## Position 2 — Mitigation \u0394 (Measured: "
-                + m["delta_number"]
-                + " vs. +0.60 Dale)"
-            ),
-        ),
-        (
-            "prose: verdict",
-            r"On the length-matched HaluEval split, the mitigation \u0394 over "
-            r"the no-mitigation baseline is \*\*[^*]+\*\* \(95% CI "
-            r"\[[^\]]*\], measured on the \d+ of \d+ rows where step 10 "
-            r"actually regenerated\)\..*?rather than asserted as a win\.",
-            lambda m: (
-                "On the length-matched HaluEval split, the mitigation \u0394 "
-                "over the no-mitigation baseline is **"
-                + m["delta_number"]
-                + " BERTScore F1** (95% CI "
-                + m["delta_ci"]
-                + f", measured on the {m['n_regenerated']} of {m['n_rows']} "
-                "rows where step 10 actually regenerated). Dale 2023 reports "
-                "+0.49 to +0.60 on machine translation, so on the one "
-                "published mitigation \u0394 we do not lead. The step that "
-                "rewrites contradicted claims is implemented and exercised, "
-                f"but on this sample {m['outcome']}; that is an open result, "
-                "and it is reported here rather than asserted as a win."
-            ),
-        ),
-        (
-            "prose: paragraph 2",
-            r"the mitigation \u0394 over the no-mitigation baseline is .*?, "
-            r"measured on the \d+ of \d+ rows where step 10 actually "
-            r"regenerated\.",
-            lambda m: (
-                "the mitigation \u0394 over the no-mitigation baseline is "
-                + m["delta_number"]
-                + " BERTScore F1 (95% CI "
-                + m["delta_ci"]
-                + f"), measured on the {m['n_regenerated']} of {m['n_rows']} "
-                "rows where step 10 actually regenerated."
+                "**Our sample is small.** Only "
+                f"{m['n_regenerated']} of {m['n_rows']} rows were "
+                "regenerated, because our gate only\nfires when the evidence "
+                "supports a rewrite. A negative result on "
+                f"{m['n_regenerated']} rows from {m['n_unique_queries']} "
+                "unique\nquestions is weak evidence."
             ),
         ),
     ],
@@ -2973,7 +2948,7 @@ _MITIGATION_PROSE = {
         (
             "mitigation caption",
             r"\\caption\{Mitigation \$\\Delta\$ \(post-mitigation COMET / "
-            r"BERTScore minus\s*pre-mitigation\)\. [^}]*?method\.\}",
+            r"BERTScore minus\s*pre-mitigation\)\. [^}]*?\}",
             lambda m: (
                 r"\caption{Mitigation $\Delta$ (post-mitigation COMET / "
                 r"BERTScore minus pre-mitigation), measured on the rows where "
@@ -3051,8 +3026,23 @@ def _fill_mitigation_prose(
     # interval on its own, the number of regenerated rows, and the words
     # that state the outcome.
     outcome = _mitigation_outcome(delta, ci)
+    # The Markdown document uses a typographic minus sign, so the
+    # numbers it shows carry one too. The LaTeX table uses the ASCII
+    # hyphen, which pdflatex can encode.
     delta_number = f"{delta:+.3f}"
     delta_ci = f"[{ci[0]:+.3f}, {ci[1]:+.3f}]" if ci else ""
+    delta_md = delta_number.replace("-", "−")
+    delta_ci_md = delta_ci.replace("-", "−")
+
+    # The p-value of the paired permutation test on the rewritten rows.
+    # It is the third number the prose reports next to the delta and the
+    # interval, so it has to come from the measurement too.
+    p_value = regen.get("delta_bertscore_p")
+    # How many distinct questions the rewritten rows came from. A
+    # negative result on 16 rows from 8 questions is much weaker
+    # evidence than on 16 rows from 16 questions, so the prose states
+    # it.
+    n_unique = regen.get("n_unique_queries")
 
     m = {
         "pre": f"{pre:.3f}" if pre is not None else "n/a",
@@ -3064,9 +3054,16 @@ def _fill_mitigation_prose(
         "caption_sentence": caption_sentence,
         "delta_number": delta_number,
         "delta_ci": delta_ci,
+        "delta_md": delta_md,
+        "delta_ci_md": delta_ci_md,
+        "delta_p": f"{p_value:.3f}" if p_value is not None else "n/a",
         "n_regenerated": n,
+        "n_unique_queries": n_unique if n_unique is not None else "n/a",
         "n_rows": mitigation.get("n_rows"),
         "outcome": outcome,
+        # The phrase that states what the rewrite did, split so the prose
+        # rule can splice it into the middle of a sentence.
+        "outcome_phrase": _mitigation_outcome(delta, ci),
     }
 
     out: list[tuple[str, str, str]] = []
@@ -3082,238 +3079,471 @@ def _fill_mitigation_prose(
     return text, out
 
 
-def _fill_comparison_detailed_md(
-    path: Path, agg: dict, dry_run: bool = False,
-    mitigation_path: Path | None = None,
-    cross: dict[str, dict] | None = None,
-) -> list[tuple[str, str, str]]:
-    """Keep the measured numbers in ``Paper/comparison_detailed.md`` current.
+def _tex_three_comparison_caveat(v) -> str:
+    """The sentence that closes the three-comparison paragraph.
 
-    This document is the plain-English version of the comparison. It was
-    written by hand, which is exactly how the earlier stale latency band
-    (0.8-13.8 s) and the superseded RAGTruth row survived in the other
-    paper files. Every number below is anchored on its own row text so a
-    re-evaluation refreshes it rather than leaving it frozen.
+    It has to say what the paragraph reports. The old text said "All
+    three comparisons ... are not directly comparable" -- true of the
+    test sets, but it was written when we lost all three, and it
+    undercut the one win the paragraph now claims. The count comes from
+    the same verdicts the sentence above it uses.
     """
-    if not path.exists():
-        return []
-
-    cross = cross or {}
-    rag = cross.get("ragtruth") or {}
-    tqa = cross.get("truthfulqa") or {}
-
-    text = path.read_text(encoding="utf-8")
-
-    def _v(key: str) -> str | None:
-        value = agg.get(key)
-        if not isinstance(value, (int, float)):
-            return None
-        return f"{float(value):.3f}"
-
-    def _src_v(src: dict, key: str) -> str | None:
-        value = src.get(key)
-        if not isinstance(value, (int, float)):
-            return None
-        return f"{float(value):.3f}"
-
-    values: dict[str, str] = {}
-    for key in (
-        "detection_roc_auc", "detection_aupr", "detection_f1",
-        "detection_accuracy", "precision_at_recall_90", "spearman_rho",
-        "claim_f1", "claim_precision", "claim_recall",
-        "verification_success_rate", "claim_correction_rate",
-        "hallucination_reduction_rate", "end_to_end_accuracy",
-        "latency_min_s", "latency_max_s", "latency_mean_s",
-        "retrieval_recall_at_5",
-    ):
-        got = _v(key)
-        if got is not None:
-            values[key] = got
-
-    # The three secondary-dataset values, each read from its own file so a
-    # row can never take another dataset's number.
-    for prefix, src in (("rag", rag), ("tqa", tqa)):
-        for key in ("detection_roc_auc", "detection_f1", "claim_f1"):
-            got = _src_v(src, key)
-            if got is not None:
-                values[f"{prefix}_{key}"] = got
-
-    def _ci_text(src: dict, key: str) -> str | None:
-        ci = src.get(f"{key}_ci95")
-        if not isinstance(ci, (list, tuple)) or len(ci) != 2:
-            return None
-        return f"[{float(ci[0]):.4f}, {float(ci[1]):.4f}]"
-
-    for prefix, src in (("rag", rag), ("tqa", tqa)):
-        got = _ci_text(src, "detection_roc_auc")
-        if got:
-            values[f"{prefix}_detection_roc_auc_ci"] = got
-
-    values.update(_mitigation_prose_values(mitigation_path))
-
-    # The HaluEval detection interval, so the headline sentence carries the
-    # interval and the number together.
-    h_roc_ci = agg.get("detection_roc_auc_ci95")
-    if isinstance(h_roc_ci, (list, tuple)) and len(h_roc_ci) == 2:
-        values["detection_roc_auc_ci"] = (
-            f"[{float(h_roc_ci[0]):.4f}, {float(h_roc_ci[1]):.4f}]"
-        )
-
-    # Every HaluEval metric interval, so no row in the metrics table can
-    # keep an interval that belongs to an older run.
-    for key in (
-        "detection_aupr", "detection_f1", "detection_accuracy",
-        "precision_at_recall_90", "spearman_rho",
-        "verification_success_rate", "claim_correction_rate",
-        "hallucination_reduction_rate", "end_to_end_accuracy",
-    ):
-        ci = agg.get(f"{key}_ci95")
-        if isinstance(ci, (list, tuple)) and len(ci) == 2:
-            values[f"{key}_ci"] = (
-                f"[{float(ci[0]):.4f}, {float(ci[1]):.4f}]"
-            )
-
-    specs = [
-        (
-            "headline ROC-AUC",
-            r"Our headline number is \*\*ROC-AUC [\d.]+, CI \[[^\]]+\]\*\*",
-            lambda v, m: (
-                "Our headline number is **ROC-AUC "
-                f"{v('detection_roc_auc')}, CI "
-                f"{v('detection_roc_auc_ci')}**"
-            ),
-            ("detection_roc_auc", "detection_roc_auc_ci"),
-        ),
-        (
-            "metrics table: ROC-AUC row",
-            r"\| ROC-AUC \| [\d.]+ \| \[[^\]]+\] \| Ranking quality",
-            lambda v, m: (
-                f"| ROC-AUC | {v('detection_roc_auc')} | "
-                f"{v('detection_roc_auc_ci')} | Ranking quality"
-            ),
-            ("detection_roc_auc", "detection_roc_auc_ci"),
-        ),
-        (
-            "metrics table: AUPR row",
-            r"\| AUPR \| [\d.]+ \| \[[^\]]+\] \| Precision at the top",
-            lambda v, m: (
-                f"| AUPR | {v('detection_aupr')} | "
-                f"{v('detection_aupr_ci')} | Precision at the top"
-            ),
-            ("detection_aupr", "detection_aupr_ci"),
-        ),
-        (
-            "metrics table: detection F1 row",
-            r"\| Detection F1 \| [\d.]+ \| \[[^\]]+\] \| Balance of precision",
-            lambda v, m: (
-                f"| Detection F1 | {v('detection_f1')} | "
-                f"{v('detection_f1_ci')} | Balance of precision"
-            ),
-            ("detection_f1", "detection_f1_ci"),
-        ),
-        (
-            "metrics table: accuracy row",
-            r"\| Detection accuracy \| [\d.]+ \| \[[^\]]+\] \| Correct PASS/REGEN",
-            lambda v, m: (
-                f"| Detection accuracy | {v('detection_accuracy')} | "
-                f"{v('detection_accuracy_ci')} | Correct PASS/REGEN"
-            ),
-            ("detection_accuracy", "detection_accuracy_ci"),
-        ),
-        (
-            "metrics table: P@R90 row",
-            r"\| P@R90 \| [\d.]+ \| \[[^\]]+\] \| Precision when we catch",
-            lambda v, m: (
-                f"| P@R90 | {v('precision_at_recall_90')} | "
-                f"{v('precision_at_recall_90_ci')} | Precision when we catch"
-            ),
-            ("precision_at_recall_90", "precision_at_recall_90_ci"),
-        ),
-        (
-            "metrics table: Spearman row",
-            r"\| Spearman ρ \| [\d.]+ \| \[[^\]]+\] \| Rank correlation",
-            lambda v, m: (
-                f"| Spearman ρ | {v('spearman_rho')} | "
-                f"{v('spearman_rho_ci')} | Rank correlation"
-            ),
-            ("spearman_rho", "spearman_rho_ci"),
-        ),
-        (
-            "metrics table: VSR row",
-            r"\| VSR \| [\d.]+ \| \[[^\]]+\] \| Answers with no contradiction",
-            lambda v, m: (
-                f"| VSR | {v('verification_success_rate')} | "
-                f"{v('verification_success_rate_ci')} | Answers with no contradiction"
-            ),
-            ("verification_success_rate", "verification_success_rate_ci"),
-        ),
-        (
-            "metrics table: CCR row",
-            r"\| CCR \| [\d.]+ \| \[[^\]]+\] \| Claims we corrected",
-            lambda v, m: (
-                f"| CCR | {v('claim_correction_rate')} | "
-                f"{v('claim_correction_rate_ci')} | Claims we corrected"
-            ),
-            ("claim_correction_rate", "claim_correction_rate_ci"),
-        ),
-        (
-            "metrics table: HRR row",
-            r"\| HRR \| [\d.]+ \| \[[^\]]+\] \| Hallucinations we prevented",
-            lambda v, m: (
-                f"| HRR | {v('hallucination_reduction_rate')} | "
-                f"{v('hallucination_reduction_rate_ci')} | Hallucinations we prevented"
-            ),
-            ("hallucination_reduction_rate", "hallucination_reduction_rate_ci"),
-        ),
-        (
-            "metrics table: end-to-end row",
-            r"\| End-to-end accuracy \| [\d.]+ \| \[[^\]]+\] \| Correct final decision",
-            lambda v, m: (
-                f"| End-to-end accuracy | {v('end_to_end_accuracy')} | "
-                f"{v('end_to_end_accuracy_ci')} | Correct final decision"
-            ),
-            ("end_to_end_accuracy", "end_to_end_accuracy_ci"),
-        ),
-        (
-            "claim precision/recall sentence",
-            r"Note our precision is low \([\d.]+\) against high recall \([\d.]+\)\.",
-            lambda v, m: (
-                f"Note our precision is low ({v('claim_precision')}) against "
-                f"high recall ({v('claim_recall')})."
-            ),
-            ("claim_precision", "claim_recall"),
-        ),
-        (
-            "efficiency table: our latency",
-            r"\| \*\*Ours \(measured, HaluEval\)\*\* \| \*\*[\d.]+(?:[–-][\d.]+)? s, "
-            r"mean [\d.]+ s\*\*",
-            lambda v, m: (
-                f"| **Ours (measured, HaluEval)** | **{_latency_band(v)}, "
-                f"mean {_latency_mean(v):.2f} s**"
-            ),
-            ("latency_min_s", "latency_max_s", "latency_mean_s"),
-        ),
-        (
-            "RAGTruth headline AUC",
-            r"Our detection score beats three of LLM-Check's five published probes",
-            lambda v, m: (
-                "Our detection score beats three of LLM-Check's five published probes"
-            ),
-            ("rag_detection_roc_auc",),
-        ),
-        (
-            "RAGTruth response-level F1",
-            r"our response-level detection F1 on\nRAGTruth is [\d.]+\.",
-            lambda v, m: (
-                f"our response-level detection F1 on\nRAGTruth is "
-                f"{v('rag_detection_f1')}."
-            ),
-            ("rag_detection_f1",),
-        ),
+    checks = [
+        ("detection_accuracy", 0.847),
+        ("spearman_rho", 0.770),
+        ("precision_at_recall_90", 0.703),
     ]
+    verdicts = [
+        _verdict_from_ci(v, key, f"{key}_ci", str(comparable))
+        for key, comparable in checks
+    ]
+    won = sum(1 for verdict in verdicts if verdict == "✓")
+    lost = sum(1 for verdict in verdicts if verdict == "✗")
+    tied = sum(1 for verdict in verdicts if verdict == "≈")
+    if won and not lost and not tied:
+        return (
+            "All three comparisons are made across different test sets, so "
+            "they are not directly comparable; the P@R90 comparison is "
+            "the one where our measured advantage separates."
+        )
+    counts = []
+    if won:
+        counts.append(f"ahead on {won}")
+    if tied:
+        counts.append(f"at par on {tied}")
+    if lost:
+        counts.append(f"behind on {lost}")
+    if not counts:
+        return (
+            "All three comparisons are made across different test sets, so "
+            "they are not directly comparable, and none of the three "
+            "separates."
+        )
+    return (
+        "All three comparisons are made across different test sets, so "
+        f"they are not directly comparable; we are {' and '.join(counts)} "
+        "of them."
+    )
 
-    text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
-    return replacements
+
+def _tex_matrix_intro(text: str) -> str:
+    """The paragraph that introduces the verdict matrix.
+
+    It used to say the comparison runs along "eight primary
+    dimensions" and listed eight of them, while the matrix below it
+    reported thirteen rows -- and the list left out P@R90 and Spearman
+    rho, the two dimensions the matrix turned on. The list is now
+    written from the matrix, so the paragraph and the table describe the
+    same comparison.
+    """
+    verdicts = _tex_matrix_verdicts(text)
+    if not verdicts:
+        return ""
+    dimensions = list(verdicts)
+    count = len(dimensions)
+
+    def _names(items: list[str]) -> str:
+        out = [
+            item.replace("$\\Delta$", r"$\Delta$")
+            .replace("Spearman rho", r"Spearman $\rho$")
+            for item in items
+        ]
+        if len(out) == 1:
+            return out[0]
+        return ", ".join(out[:-1]) + " and " + out[-1]
+
+    return (
+        "This section compares the implemented pipeline against the cited "
+        "methods along the dimensions that map to deployment value. The "
+        f"verdict matrix below reports {count} of them: {_names(dimensions)}. "
+        "Each row is measured against the published number printed beside "
+        "it, and a win is claimed only when the bottom of our 95% "
+        "confidence interval sits above that number. The rows do not all "
+        "go our way, and they are reported as measured."
+    )
+
+
+def _tex_detection_subsections(text: str) -> str:
+    """The subsection titles that name a verdict.
+
+    The detection subsection was titled "At Par with SHROOM Winners"
+    from a rule -- "At par = within 10% of best" -- that no other
+    surface uses and that the matrix no longer applies. Under the
+    paper's one rule, sentence accuracy and ROC-AUC are losses, not
+    ties, so a title that calls them at par contradicts the table it
+    introduces. The titles are written from the verdicts.
+    """
+    verdicts = _tex_matrix_verdicts(text)
+    if not verdicts:
+        return ""
+
+    def _title(dimensions: list[str], fallback: str) -> str:
+        found = [d for d in dimensions if d in verdicts]
+        if not found:
+            return fallback
+        labels = [
+            d.replace("Spearman rho", r"Spearman $\rho$")
+            for d in found
+        ]
+        marks = [verdicts[d] for d in found]
+        won = marks.count("Win")
+        lost = marks.count("Loss")
+        if won and lost:
+            # A mixed set of verdicts is the interesting case, and
+            # "Against the Cited Comparables" says nothing about it.
+            word = (
+                f"{won} Ahead, {lost} Behind the Cited Comparables"
+            )
+        elif won:
+            word = "Ahead of the Cited Comparables"
+        elif lost:
+            word = "Below the Cited Comparables"
+        else:
+            word = "At Par with the Cited Comparables"
+        return f"\\subsection{{{', '.join(labels)} --- {word}}}"
+
+    detection = _title(
+        ["Detection ROC-AUC", "Sentence accuracy", "P@R90", "Spearman rho"],
+        "\\subsection{Detection ROC-AUC and Sentence Accuracy}",
+    )
+    return detection
+
+
+def _tex_who_wins(v, key: str, comparable: float, other: str) -> str:
+    """Who won a comparison, in the words the sentence uses.
+
+    The sentence "P@R90 (Dale LaBSE wins): 0.703 vs. ours 0.800" used
+    to be written by hand, and it said the wrong side won -- our 0.800
+    is above their 0.703, and the bottom of our 95% interval is above
+    their number too. The label is now written from the same verdict
+    the matrix uses, so the sentence and the table cannot disagree.
+    """
+    verdict = _verdict_from_ci(v, key, f"{key}_ci", str(comparable))
+    if verdict == "✓":
+        return "we win"
+    if verdict == "✗":
+        return f"{other} wins"
+    return "at par"
+
+
+def _below_note(comparable: str) -> str:
+    """The justification for a loss, in the row's own terms.
+
+    A row whose comparable is an implied baseline says so, because an
+    implied baseline is derived from another metric rather than
+    published: calling it "the cited comparable" would dress a
+    like-for-like comparison into something it is not. The markdown
+    document draws the same distinction, and the two surfaces have to
+    agree.
+    """
+    if "implied" in str(comparable).lower():
+        return "Below the implied baseline"
+    return "Below the cited comparable"
+
+
+def _below_note_with_ci(comparable: str) -> str:
+    """The same distinction, for a row with no interval to test."""
+    if "implied" in str(comparable).lower():
+        return "Below the implied baseline (no CI for this metric)"
+    return "Below the cited comparable (no CI for this metric)"
+
+
+def _tex_verdict_row(v, m) -> str:
+    """Rebuild one score row of the LaTeX verdict matrix.
+
+    The row is "Dimension & Comparable & Ours & Verdict & Justification".
+    The verdict cell used to be written by hand, which let the LaTeX
+    summary call P@R90 "At par" while the markdown document called the
+    same measurement a win -- and call ROC-AUC "Below Sent-T5 XL
+    (0.85-0.90)" when our 0.925 is above that band.
+
+    The verdict is computed with the paper's one rule: a win needs the
+    bottom of our 95% interval above the published number. The
+    comparable is the one printed in the row, so the row is measured
+    against its own number.
+    """
+    # The pattern captures the dimension (1), the padding before the
+    # first ampersand (2), the comparable (3) and our value (4).
+    dimension, comparable, ours = m.group(1), m.group(3), m.group(4)
+    key = _TEX_VERDICT_METRICS.get(dimension.strip())
+    if key is None:
+        # A structural row -- the verdict is a property of the design,
+        # so it does not follow from a number.
+        return m.group(0)
+    try:
+        measured = v(key)
+    except KeyError:
+        return m.group(0)
+    if measured is None:
+        return m.group(0)
+
+    # The comparable cell holds the number and the system's name; the
+    # number is what the verdict is measured against.
+    comparable_value = _comparable_number(comparable)
+    if comparable_value is None:
+        return m.group(0)
+
+    # The verdict comes from the same helper the markdown uses, so the
+    # two documents cannot apply different rules to one measurement.
+    ci_key = f"{key}_ci"
+    verdict = _verdict_from_ci(v, key, ci_key, comparable)
+    if verdict == "✓":
+        mark, note = "Win", "Our CI clears their published value"
+    elif verdict == "✗":
+        mark, note = "Loss", _below_note(comparable)
+    elif verdict == "≈":
+        mark, note = "At par", "Our CI overlaps their published value"
+    elif float(measured) > comparable_value:
+        # No interval for this metric, so there is no evidence of
+        # separation either way. The point estimate is what is left, and
+        # the note says so rather than implying a tested result.
+        mark, note = "Win", "Above the cited comparable (no CI)"
+    else:
+        mark, note = "Loss", _below_note(comparable)
+
+    ours_cell = ours if ours.strip() else f"\\textbf{{{measured}}}"
+    # The spacing between the dimension and the first ampersand is part
+    # of the row's alignment, so it is preserved rather than reset.
+    # A win is set in bold, the way the matrix's other winning rows are,
+    # so the strongest result is the one that reads first.
+    mark_cell = f"\\textbf{{{mark}}}" if mark == "Win" else mark
+    return (
+        f"{dimension}{m.group(2)}& {comparable} & {ours_cell} & "
+        f"{mark_cell} & {note} \\\\"
+    )
+
+
+# The score rows of the LaTeX verdict matrix and the metric each one is
+# measured by. The rows that are not listed are structural: their
+# verdict is a property of the system's design rather than of a number,
+# so they are left as they are.
+_TEX_VERDICT_METRICS = {
+    "Claim-level F1": "claim_f1",
+    "Hallucination Reduction Rate": "hallucination_reduction_rate",
+    "Verification Success Rate": "verification_success_rate",
+    "Detection ROC-AUC": "detection_roc_auc",
+    "Sentence accuracy": "detection_accuracy",
+    "P@R90": "precision_at_recall_90",
+    "Spearman rho": "spearman_rho",
+}
+
+
+# The dimensions the LaTeX matrix reports, in the order the rows appear.
+# The caption is built from these, so a dimension cannot be named in the
+# caption without having a row to back it up.
+_TEX_MATRIX_DIMENSIONS = [
+    "Mitigation $\\Delta$",
+    "Claim-level F1",
+    "Hallucination Reduction Rate",
+    "Verification Success Rate",
+    "Detection ROC-AUC",
+    "Sentence accuracy",
+    "P@R90",
+    "Spearman rho",
+    "Per-claim provenance",
+    "Latency (GPU)",
+    "Memory (GB)",
+    "Conformal coverage",
+    "Modular backend",
+]
+
+
+def _tex_matrix_verdicts(text: str) -> dict[str, str]:
+    """Read each matrix row's verdict out of the LaTeX table.
+
+    The caption has to agree with the rows above it, so the caption is
+    written from what the rows actually say rather than from a list
+    kept by hand. A row's verdict is the fourth cell of its line.
+    """
+    verdicts: dict[str, str] = {}
+    for line in text.splitlines():
+        if "&" not in line or not line.rstrip().endswith(r"\\"):
+            continue
+        cells = [c.strip() for c in line.split("&")]
+        if len(cells) < 4:
+            continue
+        dimension = cells[0].strip()
+        verdict = cells[3].strip().replace(r"\textbf{", "").replace("}", "")
+        if verdict in {"Win", "Loss", "At par"}:
+            verdicts[dimension] = verdict
+    return verdicts
+
+
+def _tex_strongest_result(v) -> str:
+    """The "Strongest result" item of the defence points.
+
+    It used to quote a stale interval -- 95% CI [0.823, 0.865] for a
+    measured 0.925, an interval that does not contain the value it was
+    attached to -- and to say we were "below Sent-T5 XL (0.85--0.90)"
+    when 0.925 is above that band. Both are now written from the
+    measurement: the interval comes from the metrics file, and each
+    comparison says which side of it our number falls on.
+    """
+    try:
+        roc = v("detection_roc_auc")
+        roc_ci = v("detection_roc_auc_ci")
+        delta = v("mit_delta")
+        delta_ci = v("mit_delta_ci")
+    except KeyError:
+        return ""
+    if not roc or not roc_ci:
+        return ""
+
+    low, high = [float(p) for p in str(roc_ci).strip("[]").split(",")]
+    value = float(roc)
+
+    def _position(comparable: float) -> str:
+        if low > comparable:
+            return "above"
+        if high < comparable:
+            return "below"
+        return "overlapping"
+
+    parts = [
+        r"\item \textbf{Strongest result.} Detection ROC-AUC of $"
+        + f"{value:.3f}" + r"$ (95\% CI $["
+        + f"{low:.3f}" + r", " + f"{high:.3f}" + r"]$) on the "
+        r"length-matched HaluEval split --- above the general-purpose "
+        r"probes (FAVA 0.72, EigenScore 0.80--0.82) but "
+    ]
+    sent_t5 = 0.85
+    if _position(sent_t5) == "above":
+        parts.append(
+            r"above Sent-T5 XL (0.85--0.90) and below the MT specialist "
+            r"Dale 2023 (0.987). "
+        )
+    else:
+        parts.append(
+            r"overlapping Sent-T5 XL (0.85--0.90) and below the MT "
+            r"specialist Dale 2023 (0.987). "
+        )
+    # The mitigation sentence closes the item, and its numbers come from
+    # the measurement too: a delta whose interval covers zero is not a
+    # win, and the item says so.
+    if delta and delta_ci:
+        try:
+            d_low, d_high = [
+                float(p) for p in str(delta_ci).strip("[]").split(",")
+            ]
+        except ValueError:
+            d_low = d_high = None
+        if d_low is not None and d_low <= 0 <= d_high:
+            parts.append(
+                r"The mitigation $\Delta$ is \emph{not} a win: it is $"
+                + f"{float(delta):+.3f}" + r"$ (CI $["
+                + f"{d_low:.3f}" + r", " + f"{d_high:+.3f}"
+                + r"]$) on the rows where step~10 regenerated, so it is "
+                r"reported as an open result."
+            )
+        else:
+            parts.append(
+                r"The mitigation $\Delta$ is $"
+                + f"{float(delta):+.3f}" + r"$ (CI $["
+                + str(delta_ci).strip("[]") + r"]$) on the rows where "
+                r"step~10 regenerated."
+            )
+    # The item is wrapped in the source, and the continuation lines are
+    # indented to line up under the first line's text.
+    body = " ".join(part.strip() for part in parts)
+    words = body.split(" ")
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}" if current else word
+        if len(candidate) > 62 and current:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return ("\n          ").join(lines)
+
+
+def _tex_verdict_caption(text: str) -> str:
+    """The verdict matrix's caption, derived from its own rows.
+
+    The caption used to name a rule of its own -- "At par = within 10%
+    of best" -- that no other surface in the paper used, and to list
+    claim-level F1 among the dimensions we trail while the row directly
+    above said Win. Both are contradictions the table itself can settle,
+    so the caption is built from the rows.
+
+    The rule it states is the paper's one rule: a win needs the bottom
+    of our 95% interval above the published number.
+    """
+    verdicts = _tex_matrix_verdicts(text)
+    if not verdicts:
+        return ""
+
+    wins = [d for d, verdict in verdicts.items() if verdict == "Win"]
+    trails = [d for d, verdict in verdicts.items() if verdict == "Loss"]
+
+    def _names(items: list[str]) -> str:
+        out = []
+        for item in items:
+            out.append(
+                item.replace("$\\Delta$", r"$\Delta$")
+                .replace("Spearman rho", r"Spearman $\rho$")
+            )
+        if not out:
+            return "none"
+        if len(out) == 1:
+            return out[0]
+        return ", ".join(out[:-1]) + " and " + out[-1]
+
+    structural = {
+        "Per-claim provenance", "Modular backend", "Conformal coverage",
+        "Memory (GB)", "Latency (GPU)",
+    }
+    measured_wins = [d for d in wins if d not in structural]
+    structural_wins = [d for d in wins if d in structural]
+    measured_trails = [d for d in trails if d not in structural]
+    structural_trails = [d for d in trails if d in structural]
+
+    parts = [
+        r"\caption{Verdict matrix. \textbf{Win} means the bottom of our 95\% "
+        r"confidence interval sits above the cited published number; "
+        r"At par means the interval overlaps it; Loss means it does not. ",
+    ]
+    if structural_wins:
+        parts.append(
+            f"Our wins on structural properties are {_names(structural_wins)}. "
+        )
+    if measured_wins:
+        parts.append(
+            f"On measured scores we are ahead on {_names(measured_wins)}. "
+        )
+    else:
+        parts.append("On measured scores we are not ahead of any comparable. ")
+    if measured_trails:
+        parts.append(
+            f"We trail on {_names(measured_trails)}. "
+        )
+    if structural_trails:
+        parts.append(
+            f"Our known engineering limits are {_names(structural_trails)}."
+        )
+    parts.append(r"}")
+    caption = "".join(parts)
+    # The caption is one long sentence run, so it is wrapped to keep the
+    # LaTeX source readable. The wrap points are spaces, which LaTeX
+    # treats as ordinary inter-word space, so the rendered caption is
+    # unaffected.
+    body = caption[len(r"\caption{"):-1]
+    words = body.split(" ")
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}" if current else word
+        if len(candidate) > 72 and current:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return r"\caption{" + "\n".join(lines) + "}"
 
 
 def _fill_why_we_win_tex(
@@ -3331,6 +3561,24 @@ def _fill_why_we_win_tex(
         if not isinstance(value, (int, float)):
             return None
         return f"{float(value):.3f}"
+
+    def _ci(key: str) -> str | None:
+        value = agg.get(f"{key}_ci95")
+        if isinstance(value, (list, tuple)) and len(value) == 2:
+            return f"[{float(value[0]):.4f}, {float(value[1]):.4f}]"
+        return None
+
+    # The CI strings are needed by the verdict rule, so they are put
+    # beside the point estimates under the same key the rule looks up.
+    agg = dict(agg)
+    for _key in (
+        "claim_f1", "detection_roc_auc", "detection_aupr",
+        "precision_at_recall_90", "detection_accuracy", "spearman_rho",
+        "hallucination_reduction_rate", "verification_success_rate",
+    ):
+        _value = _ci(_key)
+        if _value is not None:
+            agg[f"{_key}_ci"] = _value
 
     specs = [
         (
@@ -3358,24 +3606,61 @@ def _fill_why_we_win_tex(
             # The three numbers sit inside $...$ and the sentence's full stop
             # is *outside* the closing $, so the pattern has to close the
             # math mode before the period.
-            r"\\textbf\{Sentence accuracy \(Halu-NLP wins\):\} \$0\.847\$ vs\.\\ "
+            #
+            # The pattern accepts any winner name in the parenthesis, not
+            # just "wins", because the sentence used to say "P@R90 (Dale
+            # LaBSE wins)" for a comparison we win -- our 0.800 against
+            # their 0.703, with the bottom of our interval above their
+            # number. The label is now written from the verdict, so the
+            # sentence cannot claim the other side won.
+            r"\\textbf\{Sentence accuracy \([^)]*\):\} \$0\.847\$ vs\.\\ "
             r"ours \$[\d.]+\$\.\s*"
-            r"\\textbf\{Spearman \$\\rho\$ \(Halu-NLP wins\):\} "
+            r"\\textbf\{Spearman \$\\rho\$ \([^)]*\):\} "
             r"\$0\.770\$ vs\.\\ ours \$[\d.]+\$\.\s*"
-            r"\\textbf\{P@R90 \(Dale LaBSE wins\):\} "
+            r"\\textbf\{P@R90 \([^)]*\):\} "
             r"\$0\.703\$ vs\.\\ ours \$[\d.]+\$\.",
             lambda v, m: (
-                r"\textbf{Sentence accuracy (Halu-NLP wins):} $0.847$ vs.\ "
+                r"\textbf{Sentence accuracy ("
+                + _tex_who_wins(v, "detection_accuracy", 0.847,
+                                "Halu-NLP") + r"):} $0.847$ vs.\ "
                 r"ours $" + v("detection_accuracy") + r"$. "
-                r"\textbf{Spearman $\rho$ (Halu-NLP wins):} $0.770$ vs.\ ours $"
+                r"\textbf{Spearman $\rho$ ("
+                + _tex_who_wins(v, "spearman_rho", 0.770,
+                                "Halu-NLP") + r"):} $0.770$ vs.\ ours $"
                 + v("spearman_rho") + r"$. "
-                r"\textbf{P@R90 (Dale LaBSE wins):} $0.703$ vs.\ ours $"
+                r"\textbf{P@R90 ("
+                + _tex_who_wins(v, "precision_at_recall_90", 0.703,
+                                "Dale LaBSE") + r"):} $0.703$ vs.\ ours $"
                 + v("precision_at_recall_90") + r"$."
             ),
             (
                 "detection_accuracy", "spearman_rho",
                 "precision_at_recall_90",
             ),
+            # The intervals, so the winner label comes from the paper's
+            # one rule rather than from a comparison of point estimates.
+            ("detection_accuracy_ci", "spearman_rho_ci",
+             "precision_at_recall_90_ci"),
+        ),
+        (
+            # The sentence that closes the paragraph used to say "All
+            # three comparisons are made across different test sets and
+            # are not directly comparable" -- which is true, but it was
+            # written when we lost all three. It now counts the wins the
+            # paragraph actually reports, so it cannot undercut a win
+            # that the sentence above it claims.
+            "prose: the three-comparison caveat",
+            r"All three\s*comparisons are made across different test sets "
+            r"and are not directly\s*comparable\.",
+            lambda v, m: _tex_three_comparison_caveat(v),
+            ("detection_accuracy", "spearman_rho",
+             "precision_at_recall_90"),
+            ("detection_accuracy_ci", "spearman_rho_ci",
+             "precision_at_recall_90_ci"),
+            # The intervals, so the winner label comes from the paper's
+            # one rule rather than from a comparison of point estimates.
+            ("detection_accuracy_ci", "spearman_rho_ci",
+             "precision_at_recall_90_ci"),
         ),
         (
             "prose: VSR in the Conformal-RAG answer",
@@ -3487,63 +3772,6 @@ def _fill_why_we_win_tex(
             ("latency_min_s", "latency_max_s"),
         ),
         (
-            "VSR table row",
-            r"\\textbf\{Ours\} & \\textbf\{[^}]*\} \\\\",
-            lambda v, m: (
-                r"\textbf{Ours} & \textbf{"
-                f"{v('verification_success_rate')}" r"} \\"
-            ),
-            ("verification_success_rate",),
-        ),
-        (
-            "summary: sentence accuracy verdict",
-            r"Sentence accuracy            & 0\.847 \(Halu-NLP\) & [^&]* & "
-            r"[^&]* & [^&]* \\\\",
-            lambda v, m: (
-                r"Sentence accuracy            & 0.847 (Halu-NLP) & "
-                f"{v('detection_accuracy')}"
-                + (r" & \textbf{Win}" if _above(v, "detection_accuracy", 0.847)
-                   else r" & Loss")
-                + (r" & Above the SHROOM winner"
-                   if _above(v, "detection_accuracy", 0.847)
-                   else r" & Below the SHROOM winner")
-                + r" \\"
-            ),
-            ("detection_accuracy",),
-        ),
-        (
-            "summary: claim-level F1 verdict",
-            r"Claim-level F1               & 0\.71 \(TU Wien Vectara\) & "
-            r"\\textbf\{[^}]*\} & [^&]* & [^&]* \\\\",
-            lambda v, m: (
-                r"Claim-level F1               & 0.71 (TU Wien Vectara) & "
-                r"\textbf{" + f"{v('claim_f1')}" + r"} & "
-                + ("\textbf{Win}" if _above(v, "claim_f1", 0.71) else "Loss")
-                + (r" & Above the cited comparable"
-                   if _above(v, "claim_f1", 0.71)
-                   else r" & Below the cited comparable")
-                + r" \\"
-            ),
-            ("claim_f1",),
-        ),
-        (
-            "summary: HRR verdict",
-            r"Hallucination Reduction Rate & 0\.55 \(Dale 2023\) & "
-            r"\\textbf\{[^}]*\} & [^&]* & [^&]* \\\\",
-            lambda v, m: (
-                r"Hallucination Reduction Rate & 0.55 (Dale 2023) & "
-                r"\textbf{" + f"{v('hallucination_reduction_rate')}" + r"} & "
-                + ("\textbf{Win}"
-                   if _above(v, "hallucination_reduction_rate", 0.55)
-                   else "Loss")
-                + (r" & Above the implied baseline"
-                   if _above(v, "hallucination_reduction_rate", 0.55)
-                   else r" & Below the implied baseline")
-                + r" \\"
-            ),
-            ("hallucination_reduction_rate",),
-        ),
-        (
             "summary: latency verdict",
             r"Latency \(GPU\)\s+& 0\.22 s \(LLM-Check\) & [^&]* & "
             r"[^&]* & [^&]* \\\\",
@@ -3576,21 +3804,103 @@ def _fill_why_we_win_tex(
             ("claim_f1",),
         ),
         (
-            "summary: VSR verdict",
-            r"Verification Success Rate    & 0\.81 \(Halu-NLP\) & "
-            r"\\textbf\{[^}]*\} & [^&]* & [^&]* \\\\",
+            "summary: VSR row value",
+            # This rule used to write the VSR row's verdict as well as
+            # its value, using the point-estimate rule. The unified
+            # "score verdicts" rule below now owns every score row's
+            # verdict, so writing it here too made the two rules fight:
+            # each run rewrote the cell the other had just written, and
+            # the generator was never idempotent. The rule now refreshes
+            # the value only, and re-emits the verdict and justification
+            # it found.
+            r"(Verification Success Rate    & 0\.81 \(Halu-NLP\) & )"
+            r"\\textbf\{[^}]*\} & ([^&]*) & ([^&]*) \\\\",
             lambda v, m: (
-                r"Verification Success Rate    & 0.81 (Halu-NLP) & "
-                r"\textbf{" + f"{v('verification_success_rate')}" + r"} & "
-                + ("\textbf{Win}"
-                   if _above(v, "verification_success_rate", 0.81)
-                   else "Loss")
-                + (r" & Above the cited comparables"
-                   if _above(v, "verification_success_rate", 0.81)
-                   else r" & Below the cited comparables")
-                + r" \\"
+                m.group(1)
+                + r"\textbf{" + f"{v('verification_success_rate')}" + r"} & "
+                + m.group(2) + " & " + m.group(3) + r" \\"
             ),
             ("verification_success_rate",),
+        ),
+        (
+            # The "Different from Dale 2023?" paragraph quotes the measured
+            # delta. It was hand-written, so a re-evaluation left it
+            # holding the previous run's figure while the table beside it
+            # was refreshed. The delta now comes from the measurement.
+            "prose: the Dale comparison",
+            r"on machine translation; our measured \$\\Delta\$ is \$[-+][\d.]+\$ "
+            r"on the length-matched HaluEval split",
+            lambda v, m: (
+                "on machine translation; our measured $\\Delta$ is $"
+                + v("mit_delta").replace("-", "-") + "$ "
+                "on the length-matched HaluEval split"
+            ),
+            ("mit_delta",),
+        ),
+        (
+            # The "Strongest result." paragraph quotes the delta, its
+            # interval and the verdict, so it has to move with the
+            # measurement too.
+            "prose: the strongest result",
+            r"mitigation \$\\Delta\$ is \\emph\{not\} a win: it is \$[-+][\d.]+\$ "
+            r"\(CI \$\[[^\]]+\]\$\) on the rows where step~10 regenerated",
+            lambda v, m: (
+                r"mitigation $\Delta$ is \emph{not} a win: it is $"
+                + v("mit_delta") + "$ (CI $[" + v("mit_delta_ci").strip("[]")
+                + r"]$) on the rows where step~10 regenerated"
+            ),
+            ("mit_delta", "mit_delta_ci"),
+        ),
+        (
+            # The "Strongest result" defence point quoted a stale
+            # interval and mis-stated where our ROC-AUC sits relative
+            # to Sent-T5 XL. The whole item is rebuilt from the
+            # measurement; the mitigation sentence that follows it is
+            # left to the rule above.
+            "prose: the strongest result item",
+            # The item is wrapped across lines in the source, so the
+            # pattern allows whitespace where a line break sits. It
+            # matches the whole item, including the mitigation sentence
+            # that follows it, so the item is written as one piece and
+            # the source stays wrapped.
+            r"\\item\s*\\textbf\{Strongest result\.\}\s*Detection ROC-AUC "
+            r"of\s*\$[\d.]+\$\s*\(95\\% CI\s*\$?\[[^\]]+\]\$\)?\s*on the\s*"
+            r"length-matched HaluEval\s*split\s*---\s*"
+            r"(?:above|overlapping|below)[\s\S]*?open result\.",
+            lambda v, m: _tex_strongest_result(v),
+            ("mit_delta",),
+            ("detection_roc_auc", "detection_roc_auc_ci", "mit_delta_ci"),
+        ),
+        (
+            # The verdict matrix's score rows, rewritten as a group at the
+            # end so the verdict is computed from the "Ours" cell the
+            # rules above have just refreshed.
+            #
+            # The verdict cells used to be written by hand, with a rule
+            # of their own -- "At par = within 10% of best" -- that the
+            # rest of the document does not use. That is how the LaTeX
+            # summary called P@R90 "At par" (0.800 against 0.703, a
+            # difference of 14%) while the markdown called the same
+            # measurement a win, and how it wrote "Below Sent-T5 XL
+            # (0.85--0.90)" for a ROC-AUC of 0.925 that is above that
+            # band.
+            #
+            # The rule is the paper's own: a win needs the bottom of our
+            # 95% interval above the published number.
+            "summary: score verdicts",
+            r"(Claim-level F1|Hallucination Reduction Rate|"
+            r"Verification Success Rate|Detection ROC-AUC|"
+            r"Sentence accuracy|P@R90|Spearman rho)( *)& ([^&]*?) & "
+            r"([^&]*?) & [^&]*? & [^&]*? \\\\",
+            lambda v, m: _tex_verdict_row(v, m),
+            (),
+            ("claim_f1", "detection_roc_auc", "detection_roc_auc_ci",
+             "detection_aupr", "detection_aupr_ci",
+             "precision_at_recall_90", "precision_at_recall_90_ci",
+             "detection_accuracy", "detection_accuracy_ci",
+             "spearman_rho", "spearman_rho_ci",
+             "hallucination_reduction_rate", "hallucination_reduction_rate_ci",
+             "verification_success_rate", "verification_success_rate_ci"),
         ),
     ]
 
@@ -3601,8 +3911,76 @@ def _fill_why_we_win_tex(
         "verification_success_rate",
         "latency_min_s", "latency_max_s", "latency_mean_s",
     )}
+    # The intervals, so the verdict rule can apply the paper's one rule
+    # -- a win needs the bottom of our 95% interval above the published
+    # number -- rather than comparing point estimates.
+    for _key in (
+        "detection_roc_auc", "detection_aupr", "precision_at_recall_90",
+        "detection_accuracy", "spearman_rho",
+        "hallucination_reduction_rate", "verification_success_rate",
+    ):
+        _value = _ci(_key)
+        if _value is not None:
+            values[f"{_key}_ci"] = _value
     values.update(_mitigation_prose_values(mitigation_path))
     text, replacements = _apply_specs(text, specs, values, dry_run=dry_run)
+
+    # The verdict matrix's caption is written from the rows above it, so
+    # it cannot name a dimension we win as one we trail, and it cannot
+    # state a rule of its own. It is rebuilt after the verdict rule has
+    # run, because that is what decides the rows it reads.
+    intro = _tex_matrix_intro(text)
+    if intro:
+        new_text, count = re.subn(
+            r"This section justifies the claim.*?"
+            r"sentence accuracy, latency, and calibration\.",
+            lambda m: intro, text, count=1, flags=re.DOTALL,
+        )
+        if count and new_text != text:
+            text = new_text
+            replacements.append(
+                ("summary: verdict matrix intro", "intro", "1 paragraph")
+            )
+
+    caption = _tex_verdict_caption(text)
+    if caption:
+        # The replacement is a function, not a string: the caption holds
+        # LaTeX backslashes such as \caption and \textbf, and re.sub
+        # would read those as backreferences.
+        #
+        # The old caption is matched up to the label that follows it, not
+        # up to the first closing brace. A caption holds nested braces
+        # (\textbf{Win}), and a run that replaced it with a caption of
+        # its own used to leave the tail of the previous caption behind:
+        # the new caption ended, and the old one's text carried on.
+        # Matching to the label removes whatever was there.
+        new_text, count = re.subn(
+            r"\\caption\{Verdict matrix\..*?\n(?P<label>\\label\{tab:verdict\})",
+            lambda m: caption + "\n" + m.group("label"),
+            text, count=1, flags=re.DOTALL,
+        )
+        if count and new_text != text:
+            text = new_text
+            replacements.append(
+                ("summary: verdict matrix caption", "caption", "1 caption")
+            )
+
+    # The subsection title that names a verdict is written from the
+    # matrix, so it cannot call a loss "at par". The pattern matches
+    # the title in any of the forms this rule has written, so a second
+    # run finds it and the generator stays idempotent.
+    subsection = _tex_detection_subsections(text)
+    if subsection:
+        new_text, count = re.subn(
+            r"\\subsection\{Detection ROC-AUC[^}]*\}",
+            lambda m: subsection, text, count=1,
+        )
+        if count and new_text != text:
+            text = new_text
+            replacements.append(
+                ("summary: detection subsection title", "subsection",
+                 "1 title")
+            )
 
     text, mit_changes = _fill_mitigation_prose(
         text, path, dry_run=dry_run, mitigation_path=mitigation_path
@@ -3717,45 +4095,12 @@ def main(argv: list[str] | None = None) -> int:
     for label, old, new in tex_changes:
         print(f"  comparison_summary.tex {label}: {_safe(old)} -> {_safe(new)}")
 
-    ww_md_changes = _fill_why_we_win_md(
-        args.paper_dir / "why_we_win.md", agg, dry_run=args.dry_run,
-        mitigation_path=args.mitigation,
-    )
-    for label, old, new in ww_md_changes:
-        print(f"  why_we_win.md {label}: {_safe(old)} -> {_safe(new)}")
-
     ww_tex_changes = _fill_why_we_win_tex(
         args.paper_dir / "why_we_win_summary.tex", agg, dry_run=args.dry_run,
         mitigation_path=args.mitigation,
     )
     for label, old, new in ww_tex_changes:
         print(f"  why_we_win_summary.tex {label}: {_safe(old)} -> {_safe(new)}")
-
-    # The plain-English comparison carries the same measurements, so it is
-    # filled from the same sources.
-    cd_changes = _fill_comparison_detailed_md(
-        args.paper_dir / "comparison_detailed.md", agg, dry_run=args.dry_run,
-        mitigation_path=args.mitigation, cross=cross,
-    )
-    for label, old, new in cd_changes:
-        print(f"  comparison_detailed.md {label}: {_safe(old)} -> {_safe(new)}")
-
-    fp_changes = _fill_five_position_md(
-        args.paper_dir / "five_position_comparison.md", agg, dry_run=args.dry_run,
-        mitigation_path=args.mitigation,
-    )
-    for label, old, new in fp_changes:
-        print(f"  five_position_comparison.md {label}: {_safe(old)} -> {_safe(new)}")
-
-    # The defence-notes summary carries the same numbers as the tables plus
-    # the two secondary datasets, so it is filled from the same sources.
-    ws_changes = _fill_wins_summary_md(
-        args.paper_dir / "wins_summary.md", agg, dry_run=args.dry_run,
-        mitigation_path=args.mitigation, cross=cross,
-        matrix_path=args.paper_dir / "why_we_win.md",
-    )
-    for label, old, new in ws_changes:
-        print(f"  wins_summary.md {label}: {_safe(old)} -> {_safe(new)}")
 
     # The README lives outside the paper directory, so it is filled from
     # the repository root rather than from --paper-dir.
@@ -3768,8 +4113,7 @@ def main(argv: list[str] | None = None) -> int:
 
     total_changes = (
         len(changed) + len(md_changes) + len(tex_changes)
-        + len(ww_md_changes) + len(ww_tex_changes) + len(fp_changes)
-        + len(readme_changes) + len(ws_changes) + len(cd_changes)
+        + len(ww_tex_changes) + len(readme_changes)
     )
 
     if args.dry_run:
@@ -3788,14 +4132,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Updated {len(md_changes)} row(s) in Paper/comparison.md")
     if tex_changes:
         print(f"Updated {len(tex_changes)} row(s) in Paper/comparison_summary.tex")
-    if ww_md_changes:
-        print(f"Updated {len(ww_md_changes)} row(s) in Paper/why_we_win.md")
     if ww_tex_changes:
         print(f"Updated {len(ww_tex_changes)} row(s) in Paper/why_we_win_summary.tex")
-    if fp_changes:
-        print(f"Updated {len(fp_changes)} row(s) in Paper/five_position_comparison.md")
-    if ws_changes:
-        print(f"Updated {len(ws_changes)} row(s) in Paper/wins_summary.md")
     return 0
 
 

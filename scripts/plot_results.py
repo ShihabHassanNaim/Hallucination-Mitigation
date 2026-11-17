@@ -205,6 +205,40 @@ NOT_BAR_COMPARABLE = {
     "Per-query Latency (GPU)", "GPU Peak", "Cost per 1k queries",
 }
 
+# The lower bound of our own 95% bootstrap interval, per comparison-table
+# metric name. A chart may only call a metric a win when this bound sits
+# strictly above the published value, so the bounds are read from the
+# metrics file rather than typed in -- a stale bound here would silently
+# turn a tie into a win.
+#
+# The metrics file is the HaluEval length-matched run, which is the
+# headline result. A metric with no interval in that file is left out of
+# the map, and a metric left out of the map can never be a win.
+_CI_LOW_KEYS = {
+    "ROC-AUC": "detection_roc_auc_ci95",
+    "AUPR": "detection_aupr_ci95",
+    "P at R=90": "precision_at_recall_90_ci95",
+    "Sentence Accuracy": "detection_accuracy_ci95",
+    "Spearman rho": "spearman_rho_ci95",
+    "Hallucination Reduction Rate (HRR)": "hallucination_reduction_rate_ci95",
+    "Verification Success Rate (VSR)": "verification_success_rate_ci95",
+    "Claim Correction Rate (CCR)": "claim_correction_rate_ci95",
+}
+
+
+def _our_ci_lows() -> dict[str, float]:
+    """Lower 95% bound per comparison-table metric, from the metrics file."""
+    agg = _load("data/metrics_halueval.json").get("aggregate", {})
+    out: dict[str, float] = {}
+    for label, key in _CI_LOW_KEYS.items():
+        ci = agg.get(key)
+        if isinstance(ci, (list, tuple)) and len(ci) == 2:
+            out[label] = float(ci[0])
+    return out
+
+
+OUR_CI_LOW = _our_ci_lows()
+
 
 def plot_literature_comparison() -> None:
     csv_path = Path("Paper/comparison_table.csv")
@@ -213,6 +247,19 @@ def plot_literature_comparison() -> None:
         return
 
     import csv as _csv
+
+    # A cell only counts as a comparable score when it is a number that the
+    # cited work actually published. Three kinds of cell have to be
+    # rejected, because treating them as scores is what made this chart
+    # claim wins that the confidence intervals do not support:
+    #
+    #   "projected"          a projection, not a measurement
+    #   "0 (no rewriting)"   a filler meaning "this system has no
+    #                        mitigation stage", not a score of zero
+    #   "0.55 (implied ...)" a baseline derived from another metric of the
+    #                        same paper rather than a published score
+    IMPLED = ("implied", "projected", "no rewriting", "no mitigation",
+              "not reported", "n/a")
 
     def num(v):
         """First number in the cell, or None.
@@ -229,7 +276,8 @@ def plot_literature_comparison() -> None:
         must not turn the value negative.
         """
         text = str(v or "").strip()
-        if "projected" in text.lower():
+        low = text.lower()
+        if any(tag in low for tag in IMPLED):
             return None
         m = re.search(r"[-+]?\d+(?:\.\d+)?", text)
         if not m:
@@ -255,7 +303,7 @@ def plot_literature_comparison() -> None:
 
     other_idx = [i for i in range(2, len(header)) if i != ours_idx]
 
-    labels, ours_vals, best_vals = [], [], []
+    labels, ours_vals, best_vals, ci_lows = [], [], [], []
     for r in rows[1:]:
         if len(r) < 3:
             continue
@@ -280,17 +328,24 @@ def plot_literature_comparison() -> None:
         labels.append(label)
         ours_vals.append(o)
         best_vals.append(max(others))
+        ci_lows.append(OUR_CI_LOW.get(metric))
 
     if not labels:
         print("  [skip] 3 comparison_literature")
         return
 
-    # Every row that reaches the chart is a rate in [0,1] where higher is
-    # better and both sides use the same definition, so a larger value is a
-    # genuine win. The tie test is exact so a rounded-equal pair is not
-    # flagged as a win.
-    def is_win(label: str, o: float, b: float) -> bool:
-        return o > b + 1e-9
+    # A win requires the two to be *separated*, not merely for our point
+    # estimate to be higher. Comparing point estimates against a published
+    # value whose interval we do not have is how a chart ends up claiming a
+    # win that the confidence interval contradicts -- this chart used to
+    # mark ROC-AUC, Spearman rho and CCR as wins on that basis, while the
+    # sibling chart in plot_wins.py called them ties.
+    #
+    # So the rule is: our lower CI bound must sit strictly above the
+    # comparable. With no interval available there is no separation to
+    # demonstrate, so it is not a win.
+    def is_win(o: float, b: float, ci_low: float | None) -> bool:
+        return bool(ci_low is not None and ci_low > b)
 
     fig, ax = plt.subplots(figsize=(11.5, max(6, 0.5 * len(labels))))
     xs = np.arange(len(labels))
@@ -299,12 +354,14 @@ def plot_literature_comparison() -> None:
     ax.barh(xs + 0.2, best_vals, 0.4, label="Best published", color="#94a3b8",
             edgecolor="white")
 
-    for x, o, b, label in zip(xs, ours_vals, best_vals, labels):
+    n_wins = 0
+    for x, o, b, ci_low in zip(xs, ours_vals, best_vals, ci_lows):
         ax.text(o + 0.012, x - 0.2, f"{o:.2f}", va="center", fontsize=8,
                 fontweight="bold", color="#2563eb")
         ax.text(b + 0.012, x + 0.2, f"{b:.2f}", va="center", fontsize=8,
                 color="#475569")
-        if is_win(label, o, b):
+        if is_win(o, b, ci_low):
+            n_wins += 1
             ax.text(max(o, b) + 0.06, x, "✓", va="center", fontsize=11,
                     fontweight="bold", color="#16a34a")
 
@@ -322,7 +379,10 @@ def plot_literature_comparison() -> None:
         "Only metrics that are rates on the same scale appear here. The "
         "mitigation scores/deltas and the efficiency rows (latency, GPU "
         "memory, cost) are reported on their own charts, because they are "
-        "not scores on a 0-1 scale.",
+        "not scores on a 0-1 scale.\n"
+        f"A ✓ marks a separated win: our 95% CI sits entirely above the "
+        f"published value ({n_wins} of {len(labels)}). Where the interval "
+        "overlaps, the metric is a tie, not a win.",
         transform=ax.transAxes, ha="center", va="top",
         fontsize=8.5, color="#475569",
     )
@@ -349,7 +409,10 @@ def plot_decision_distribution() -> None:
         print("  [skip] 4 decision_distribution")
         return
 
-    fig, ax = plt.subplots(figsize=(10, 5.5))
+    # The dataset names are long ("HaluEval QA (length-matched)"), and at
+    # the old figure width the tick labels ran into each other: the
+    # "length-matched)" of the first bar sat on top of "TruthfulQA".
+    fig, ax = plt.subplots(figsize=(13, 5.8))
     slugs = list(counts)
     totals = [sum(counts[s].values()) for s in slugs]
     xlabels = [f"{_label(s)}\n(n={t})" for s, t in zip(slugs, totals)]
@@ -460,7 +523,11 @@ def plot_ablation_study() -> None:
 
     rows.sort(key=lambda r: -r[1])
 
-    fig, ax = plt.subplots(figsize=(11, 5.8))
+    # The width scales with the number of bars. At a fixed 11 inches a
+    # two-bar ablation left the plot looking empty and pushed the caption
+    # past the right edge of the canvas.
+    width = max(6.5, min(12.0, 3.2 * len(rows) + 2.0))
+    fig, ax = plt.subplots(figsize=(width, 5.8))
     colors = ["#16a34a" if r[0] == "Full pipeline" else "#f97316" for r in rows]
     bars = ax.bar([r[0] for r in rows], [r[1] for r in rows], color=colors,
                   edgecolor="white", linewidth=1.2)
@@ -509,7 +576,7 @@ def plot_ablation_study() -> None:
         ax.text(
             0.5, -0.20,
             f"This is a separate ablation run on {int(n_queries)} queries, "
-            f"not {headline_txt}, so its full-pipeline ROC-AUC "
+            f"not {headline_txt},\nso its full-pipeline ROC-AUC "
             f"({base:.3f}) {roc_txt}. The comparison of interest is the "
             f"drop when a stage is removed.",
             transform=ax.transAxes, ha="center", va="top",
