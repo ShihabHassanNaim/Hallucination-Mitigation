@@ -1,13 +1,14 @@
 """Literature comparison loader.
 
 Reads ``Paper/comparison_table.csv`` (the master CSV the user has been
-curating) and ``Paper/why_we_win.md`` (the verdict narrative), and
-returns a JSON-friendly payload the frontend can render directly.
+curating) and ``Paper/comparison.md`` (the single consolidated comparison
+document), and returns a JSON-friendly payload the frontend can render
+directly.
 
 The CSV uses ``"…"``-quoted fields, so a real CSV parser is required
 (stdlib :mod:`csv` is fine). Markdown parsing here is intentionally
 minimal: we only care about the verdict matrix and headline rows in
-section 1 of ``why_we_win.md``.
+section 7 of ``comparison.md``.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from typing import Any
 
 _PAPER_DIR = Path(__file__).resolve().parents[2] / "Paper"
 _CSV_PATH = _PAPER_DIR / "comparison_table.csv"
-_MD_PATH = _PAPER_DIR / "why_we_win.md"
+_MD_PATH = _PAPER_DIR / "comparison.md"
 
 
 # ---------------------------------------------------------------------------
@@ -155,9 +156,10 @@ def load_literature_csv(path: Path | None = None) -> dict[str, Any]:
 
 
 def load_why_we_win(path: Path | None = None) -> dict[str, Any]:
-    """Parse the verdict matrix from ``why_we_win.md``.
+    """Parse the verdict matrix from ``comparison.md``.
 
-    The file has a "Headline Summary Matrix" markdown table with columns:
+    The consolidated comparison document has a "win matrix" markdown table
+    with columns:
     ``# | Dimension | Best Comparable (Paper) | Best Comparable Score | Our Score | Winner | Justification``.
 
     We extract every row plus the verdict-tally table that follows.
@@ -240,11 +242,19 @@ def _parse_verdict_tally(text: str) -> dict[str, Any]:
 
 
 def _parse_visual_headline(text: str) -> list[dict[str, Any]]:
-    """Parse section 4's bar-chart ASCII block into structured rows."""
+    """Parse the bar-chart ASCII block into structured rows.
+
+    The block used to live under "## 4. Visual Headline Comparison" in
+    ``Paper/why_we_win.md``. That file was folded into the consolidated
+    ``Paper/comparison.md``, where the same block sits under its own
+    subsection. The heading is therefore matched by name rather than by
+    section number, so renumbering the document cannot silently empty
+    the frontend's headline chart.
+    """
     block_match = re.search(
-        r"## 4\. Visual Headline Comparison.*?```\n(.*?)```",
+        r"^#{2,4}\s*Visual Headline Comparison\b.*?```\n(.*?)```",
         text,
-        flags=re.DOTALL,
+        flags=re.DOTALL | re.MULTILINE,
     )
     if not block_match:
         return []
@@ -275,16 +285,49 @@ def _parse_visual_headline(text: str) -> list[dict[str, Any]]:
 
 
 def _parse_five_positions(text: str) -> dict[str, list[dict[str, Any]]]:
-    """Best-effort extraction of the five defensible positions.
+    """Extract the five defensible positions from the comparison document.
 
-    The five-position file is separate (Paper/five_position_comparison.md);
-    we just return whatever simple per-position structure we can find here.
+    The positions used to live in a separate file
+    (``Paper/five_position_comparison.md``). They are section 8 of the
+    consolidated ``Paper/comparison.md`` now, so they are read from the
+    ``### Position N`` subsections: each carries a title, a verdict and
+    the prose that justifies it.
     """
-    # The why_we_win.md doesn't contain the full five-position tables, but
-    # it has the headline 3-axis coverage paragraph in section 3. Return
-    # an empty dict; the dedicated page can load five_position_comparison.md
-    # directly if needed.
-    return {}
+    out: dict[str, list[dict[str, Any]]] = {}
+    for m in re.finditer(
+        r"^#{2,4}\s*Position\s+(\d+)\s*[—\-–]\s*(.+?)\s*$",
+        text,
+        flags=re.MULTILINE,
+    ):
+        number = m.group(1)
+        title = m.group(2).strip()
+        # The position's own section runs until the next heading.
+        tail = text[m.end():]
+        next_heading = re.search(r"^#{2,4}\s", tail, flags=re.MULTILINE)
+        body = tail[: next_heading.start()] if next_heading else tail
+
+        verdict = ""
+        m_verdict = re.search(r"\*\*Verdict:\s*([^*]+)\.?\*\*", body)
+        if m_verdict:
+            verdict = m_verdict.group(1).strip()
+
+        rows: list[dict[str, Any]] = []
+        for line in body.splitlines():
+            s = line.strip()
+            if not s.startswith("|"):
+                continue
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            if len(cells) < 2 or set("".join(cells)) <= {"-", " ", ":"}:
+                continue
+            rows.append({"cells": cells})
+
+        out[number] = [{
+            "number": number,
+            "title": title,
+            "verdict": verdict,
+            "rows": rows,
+        }]
+    return out
 
 
 __all__ = [

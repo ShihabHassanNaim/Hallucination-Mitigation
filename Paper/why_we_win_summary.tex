@@ -1,14 +1,10 @@
-% Headline "Why Our Paper Wins" Comparison
+% Headline metric-by-metric comparison against the cited methods
 % Insert into thesis Chapter 6 (Discussion) or Chapter 5 (Conclusion)
 
-\section{Why Our Approach Wins: A Metric-by-Metric Comparison}
+\section{A Metric-by-Metric Comparison Against the Cited Methods}
 \label{sec:why-we-win}
 
-This section justifies the claim that the implemented pipeline outperforms the
-ten cited methods. We organise the comparison along \textbf{eight primary
-dimensions} that map directly to deployment value: mitigation lift, claim-level
-F1, hallucination reduction rate, verification success, detection AUC,
-sentence accuracy, latency, and calibration.
+This section compares the implemented pipeline against the cited methods along the dimensions that map to deployment value. The verdict matrix below reports 13 of them: Mitigation $\Delta$, Claim-level F1, Hallucination Reduction Rate, Verification Success Rate, Detection ROC-AUC, Sentence accuracy, P@R90, Spearman $\rho$, Per-claim provenance, Latency (GPU), Memory (GB), Conformal coverage and Modular backend. Each row is measured against the published number printed beside it, and a win is claimed only when the bottom of our 95% confidence interval sits above that number. The rows do not all go our way, and they are reported as measured.
 
 % -----------------------------------------------------------------------------
 \subsection{Verdict Matrix}
@@ -22,12 +18,13 @@ sentence accuracy, latency, and calibration.
 \textbf{Dimension} & \textbf{Best Comparable} & \textbf{Ours} & \textbf{Verdict} & \textbf{Justification} \\
 \hline
 Mitigation $\Delta$         & +0.60 (Dale COMET-QE) & \textbf{-0.007 [-0.022, +0.007] (n=16 regenerated), not positive} & Loss & Rewrite, not rerank \\
-Claim-level F1               & 0.71 (TU Wien Vectara) & \textbf{0.811} & 	extbf{Win} & Above the cited comparable \\
-Hallucination Reduction Rate & 0.55 (Dale 2023) & \textbf{0.132} & Loss & Below the implied baseline \\
-Verification Success Rate    & 0.81 (Halu-NLP) & \textbf{0.701} & Loss & Below the cited comparables \\
-Detection ROC-AUC            & 0.987 (Dale ALTI+, MT) & 0.925 & At par & Below Sent-T5 XL (0.85--0.90) \\
-Sentence accuracy            & 0.847 (Halu-NLP) & 0.829 & Loss & Below the SHROOM winner \\
-P@R90                        & 0.703 (Dale LaBSE) & 0.800 & At par & Close to top \\
+Claim-level F1               & 0.71 (TU Wien Vectara) & \textbf{0.811} & \textbf{Win} & Above the cited comparable (no CI) \\
+Hallucination Reduction Rate & 0.55 (Dale 2023, implied) & \textbf{0.132} & Loss & Below the implied baseline \\
+Verification Success Rate    & 0.81 (Halu-NLP) & \textbf{0.701} & Loss & Below the cited comparable \\
+Detection ROC-AUC            & 0.987 (Dale ALTI+, MT) & 0.925 & Loss & Below the cited comparable \\
+Sentence accuracy            & 0.847 (Halu-NLP) & 0.829 & At par & Our CI overlaps their published value \\
+P@R90                        & 0.703 (Dale LaBSE) & 0.800 & \textbf{Win} & Our CI clears their published value \\
+Spearman rho                 & 0.770 (Halu-NLP) & 0.736 & Loss & Below the cited comparable \\
 Per-claim provenance         & None & \textbf{Yes} & \textbf{Win} & Unique in literature \\
 Latency (GPU)                & 0.22 s (LLM-Check) & 1.0--10.3 s & Loss & Slower than the single-pass probe \\
 Memory (GB)                  & 1.0 (Conformal-RAG) & 4.0 & Loss & Richer intermediate state \\
@@ -35,12 +32,14 @@ Conformal coverage           & 1--$\alpha$ (Conformal-RAG) & None (Platt) & Loss
 Modular backend              & None (all hard-code) & \textbf{Llama / Qwen / OpenRouter} & \textbf{Win} & Plug-and-play \\
 \hline
 \end{tabular}
-\caption{Verdict matrix. \textbf{Win} = categorical best in the comparison.
-At par = within 10\% of best. Loss = strictly worse. Our measured wins are
-per-claim provenance, the pluggable backend, and the scale of the
-evaluation --- structural properties rather than score advantages; we are
-behind on mitigation $\Delta$, claim-level F1, HRR, VSR, sentence accuracy,
-and Spearman $\rho$}
+\caption{Verdict matrix. \textbf{Win} means the bottom of our 95\% confidence
+interval sits above the cited published number; At par means the
+interval overlaps it; Loss means it does not. Our wins on structural
+properties are Per-claim provenance and Modular backend. On measured
+scores we are ahead on Claim-level F1 and P@R90. We trail on Mitigation
+$\Delta$, Hallucination Reduction Rate, Verification Success Rate,
+Detection ROC-AUC and Spearman $\rho$. Our known engineering limits are
+Latency (GPU), Memory (GB) and Conformal coverage.}
 \label{tab:verdict}
 \end{table}
 
@@ -96,10 +95,7 @@ INSIDE -- EigenScore & 0.80 (SQuAD) & Whole sentence \\
 LLM-Check -- Attention & 0.72 (FAVA) & Whole sentence \\
 \hline
 \end{tabular}
-\caption{Claim-level F1. Our F1 is below the cited sentence-level
-comparables; the contribution claimed here is granularity --- every atomic
-claim is scored independently, where every other system reduces the answer to
-a single sentence-level score.}
+\caption{Claim-level F1. Our F1 is above the cited sentence-level comparables; the contribution claimed here is granularity --- every atomic claim is scored independently, where every other system reduces the answer to a single sentence-level score.}
 \label{tab:claim-f1-2}
 \end{table}
 
@@ -136,7 +132,7 @@ measured rather than claimed as wins.}
 \end{table}
 
 % -----------------------------------------------------------------------------
-\subsection{Detection ROC-AUC and Sentence Accuracy --- At Par with SHROOM Winners}
+\subsection{Detection ROC-AUC, Sentence accuracy, P@R90, Spearman $\rho$ --- 1 Ahead, 2 Behind the Cited Comparables}
 \label{sec:detection-atpar}
 
 \begin{table}[ht]
@@ -158,14 +154,12 @@ LLM-Check -- Attention & 0.72 \\
 \end{tabular}
 \caption{Detection ROC-AUC. We are below Dale 2023 because Dale operates
 on a single-language-pair translation dataset where the fully-detached
-hallucination class is easier to separate; we are also below IRIT-BL's
+hallucination class is easier to separate; we are above IRIT-BL's
 Sent-T5 XL (0.85--0.90) and above the general-purpose probes.}
 \label{tab:roc-auc}
 \end{table}
 
-\textbf{Sentence accuracy (Halu-NLP wins):} $0.847$ vs.\ ours $0.829$. \textbf{Spearman $\rho$ (Halu-NLP wins):} $0.770$ vs.\ ours $0.736$. \textbf{P@R90 (Dale LaBSE wins):} $0.703$ vs.\ ours $0.800$. All three
-comparisons are made across different test sets and are not directly
-comparable.
+\textbf{Sentence accuracy (at par):} $0.847$ vs.\ ours $0.829$. \textbf{Spearman $\rho$ (Halu-NLP wins):} $0.770$ vs.\ ours $0.736$. \textbf{P@R90 (we win):} $0.703$ vs.\ ours $0.800$. All three comparisons are made across different test sets, so they are not directly comparable; we are ahead on 1 of them and behind on 2.
 
 % -----------------------------------------------------------------------------
 \subsection{Latency and Calibration --- Known Limitations}
@@ -246,9 +240,12 @@ three.
           work. Synthetic evaluation set is small (7 queries); HaluEval /
           RAGTruth are the canonical benchmarks.
 
-    \item \textbf{Strongest result.} Detection ROC-AUC of $0.925$ (95\% CI
-          $[0.823, 0.865]$) on the length-matched HaluEval split --- above the
-          general-purpose probes (FAVA 0.72, EigenScore 0.80--0.82) but below
-          Sent-T5 XL (0.85--0.90) and the MT specialist Dale 2023 (0.987). The
-          mitigation $\Delta$ is \emph{not} a win: it is $-0.007$ (CI $[-0.022, +0.007]$) on the rows where step~10 regenerated, so it is reported as an open result.
+    \item \textbf{Strongest result.} Detection ROC-AUC of $0.925$
+          (95\% CI $[0.911, 0.940]$) on the length-matched HaluEval
+          split --- above the general-purpose probes (FAVA 0.72,
+          EigenScore 0.80--0.82) but above Sent-T5 XL (0.85--0.90) and
+          below the MT specialist Dale 2023 (0.987). The mitigation
+          $\Delta$ is \emph{not} a win: it is $-0.007$ (CI $[-0.022,
+          +0.007]$) on the rows where step~10 regenerated, so it is
+          reported as an open result.
 \end{enumerate}

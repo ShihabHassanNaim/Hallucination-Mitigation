@@ -202,7 +202,7 @@ async function loadTable() {
 
 async function loadTalkingPoints() {
   // We don't have a dedicated endpoint, so we render static talking points
-  // sourced from the why_we_win.md section 6.
+  // sourced from the comparison document's section 6.
   const target = $("talking-points");
   if (!target) return;
   const points = [

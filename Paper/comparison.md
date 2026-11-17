@@ -77,8 +77,8 @@ number over 1000 rows. Neither is perfect, but they answer the same question.
 | LLM-Check — Logit, Window Entropy | 0.5458 | 0.613 | [0.5494, 0.6581] | **WIN** |
 | LLM-Check — Logit, Perplexity | 0.5327 | 0.613 | [0.5494, 0.6581] | **WIN** |
 | LLM-Check — Logit, Log Entropy | 0.5168 | 0.613 | [0.5494, 0.6581] | **WIN** |
-| LLM-Check — Attention Score | 0.5830 | 0.613 | [0.5494, 0.6581] | TIE |
-| LLM-Check — Hidden Score | 0.5724 | 0.613 | [0.5494, 0.6581] | TIE |
+| LLM-Check — Attention Score | 0.5830 | 0.613 | [0.5494, 0.6581] | **TIE** |
+| LLM-Check — Hidden Score | 0.5724 | 0.613 | [0.5494, 0.6581] | **TIE** |
 
 **Three wins, two ties.**
 
@@ -148,11 +148,11 @@ same data, and the gap there is much smaller.
 
 | Metric | Our value | 95% CI | Best published comparable | Verdict |
 |---|---|---|---|---|
-| ROC-AUC | 0.925 | [0.9113, 0.9401] | 0.987 (Dale 2023 — ALTI+) | ≈ |
+| ROC-AUC | 0.925 | [0.9113, 0.9401] | 0.987 (Dale 2023 — ALTI+) | ✗ |
 | AUPR | 0.922 | [0.9057, 0.9383] | 0.840 (Decoding Memories) | ✓ |
 | Detection F1 | 0.820 | [0.7970, 0.8437] | — | Measured |
-| Detection accuracy | 0.829 | [0.8090, 0.8510] | 0.847 (Halu-NLP — SHROOM) | ✗ |
-| P@R90 | 0.800 | [0.7732, 0.8443] | 0.703 (Dale 2023 — LaBSE) | ≈ |
+| Detection accuracy | 0.829 | [0.8090, 0.8510] | 0.847 (Halu-NLP — SHROOM) | ≈ |
+| P@R90 | 0.800 | [0.7732, 0.8443] | 0.703 (Dale 2023 — LaBSE) | ✓ |
 | Spearman ρ | 0.736 | [0.7124, 0.7623] | 0.770 (Halu-NLP) | ✗ |
 | Claim-level F1 | 0.811 | — | 0.71 (TU Wien — Vectara) | ✓ |
 | VSR | 0.701 | [0.6730, 0.7260] | 0.81 (Halu-NLP) | ✗ |
@@ -254,8 +254,9 @@ stop.
 | All other systems | — | — | 0 (no mitigation) |
 
 **Our rewrite does not work yet.** The delta is −0.007 and the confidence interval
-includes zero. On the 16 rows where step 10 actually rewrote an answer, the rewrite was
-no better than leaving the answer alone. A paired permutation test on those rows gives
+includes zero. On the 16 rows where step 10 actually rewrote an answer, the rewrite
+is not distinguishable from no effect on similarity to the gold answer.
+A paired permutation test on those rows gives
 p = 0.404 — no evidence of an effect in either direction. We report this as a loss and an
 open result.
 
@@ -330,16 +331,16 @@ per-dimension verdict. ✓ wins, ≈ ties, ✗ loses.
 | # | Dimension | Best Comparable (Paper) | Best Comparable Score | Our Score | Winner | Justification |
 |---|---|---|---|---|---|---|
 | 1 | **Mitigation Δ** | Dale 2023 — COMET-QE rerank | +0.60 | **-0.007 [-0.022, +0.007] (n=16 regenerated) — not positive** | ✗ | Measured on the 16 rows step 10 regenerated; the rewrite does not improve on no mitigation yet |
-| 2 | **Claim-level F1** | TU Wien — Vectara | 0.71 | **0.811** | ✓ | Above the cited comparable |
+| 2 | **Claim-level F1** | TU Wien — Vectara | 0.71 | **0.811** | ✓ | Above the cited comparable (no CI for this metric) |
 | 3 | **Detection AUPR** | Decoding Memories | 0.840 | **0.922** | ✓ | Our CI's bottom is above their top |
 | 4 | **HRR** | Dale 2023 (implied) | ~0.55 | **0.132** | ✗ | Below the implied baseline |
-| 5 | **VSR** | Halu-NLP | 0.81 | **0.701** | ✗ | Below the cited comparables |
+| 5 | **VSR** | Halu-NLP | 0.81 | **0.701** | ✗ | Below the cited comparable |
 | 6 | **Per-claim provenance** | None | — | **Yes (doc_id per claim)** | ✓ | Unique among all cited papers |
 | 7 | **Calibrated confidence** | Conformal-RAG | 1−α guaranteed | **Platt + temp scaling** | ≈ | Both calibrate; ours is more interpretable, weaker guarantee |
-| 8 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | 0.987 | **0.925** | ≈ | Below the MT specialist (0.987), above the general-purpose probes |
-| 9 | **Sentence accuracy** | Halu-NLP | 0.847 | **0.829** | ✗ | Below the SHROOM winner |
-| 10 | **P@R90** | Dale 2023 — LaBSE | 0.703 | **0.800** | ≈ | Above, but different task |
-| 11 | **Spearman ρ** | Halu-NLP | 0.770 | **0.736** | ✗ | Below top; offset by per-claim granularity |
+| 8 | **Detection ROC-AUC** | Dale 2023 — ALTI+ | 0.987 | **0.925** | ✗ | Below the cited comparable |
+| 9 | **Sentence accuracy** | Halu-NLP | 0.847 | **0.829** | ≈ | Our CI overlaps their published value |
+| 10 | **P@R90** | Dale 2023 — LaBSE | 0.703 | **0.800** | ✓ | Our CI's bottom is above their top |
+| 11 | **Spearman ρ** | Halu-NLP | 0.770 | **0.736** | ✗ | Below the cited comparable |
 | 12 | **Per-query latency (GPU)** | LLM-Check | 0.22 s | 1.0-10.3 s | ✗ | Slower than the single-pass probe; much richer output |
 | 13 | **GPU peak memory** | Conformal-RAG (CRG) | 1 GB | 4 GB | ✗ | Higher memory; richer intermediate state |
 | 14 | **Cost per 1k queries** | Conformal-RAG (CRG) | $0.10 | **$0.10–$0.80** | ≈ | Local HF free; OpenRouter tunable |
@@ -357,9 +358,9 @@ The 21 dimensions of the matrix above, counted by verdict.
 
 | Outcome | Count | Dimensions |
 |---|---|---|
-| **✓ Win** | 7 | 2, 3, 6, 15, 17, 18, 21 |
-| **≈ Tie / At par** | 6 | 7, 8, 10, 14, 16, 20 |
-| **✗ Loss** | 8 | 1, 4, 5, 9, 11, 12, 13, 19 |
+| **✓ Win** | 8 | 2, 3, 6, 10, 15, 17, 18, 21 |
+| **≈ Tie / At par** | 5 | 7, 9, 14, 16, 20 |
+| **✗ Loss** | 8 | 1, 4, 5, 8, 11, 12, 13, 19 |
 
 Separately, and counted against published anchors rather than against the matrix
 above, the RAGTruth head-to-head in section 3.1 gives **3 wins and 2 ties** out of
@@ -367,12 +368,33 @@ LLM-Check's five published probes. That is the only like-for-like comparison in 
 document, and it is kept apart from the matrix tally rather than added into it, so
 that the two counts each describe one thing.
 
-**Headline read.** Five of the seven matrix wins are structural — they are properties of
-the system's design, not of a single score. The two score wins are claim-level F1 and
-AUPR. On the score dimensions we are at parity with the cited comparables on detection
-(ROC-AUC 0.925 against a SHROOM band of 0.85–0.90 on a different test set) and behind on
-mitigation delta, HRR and VSR. We trail further on single-pass latency, memory and the
-conformal guarantee.
+**Headline read.** Of the 8 matrix wins, 5 are structural (Per-claim provenance,
+Modular backend, Retrieval that works, Explicit abstention and Evaluation scale) --
+properties of the system's design rather than of a single score. The score wins are
+Claim-level F1, Detection AUPR and P@R90. We trail on Mitigation Δ, HRR, VSR,
+Detection ROC-AUC, Spearman ρ, Per-query latency (GPU), GPU peak memory and Conformal
+coverage guarantee, and we are at parity on Calibrated confidence, Sentence accuracy,
+Cost per 1k queries, Active mitigation and Multi-domain NLG tasks.
+
+### Visual Headline Comparison
+
+The same dimensions in the form the demo page charts. Every number in the block is
+regenerated from the evaluation run that produced the tables above.
+
+```
+Metric                    Best-Cited   Ours    Gap
+─────────────────────────────────────────────────────────────
+Claim F1                       0.710   0.811   +0.101  ✓ Ahead (no CI)
+Detection AUPR                 0.840   0.922   +0.082  ✓ Ahead
+Detection ROC-AUC              0.987   0.925   -0.062  ✗ Behind
+Sentence accuracy              0.847   0.829   -0.018  ≈ At par
+P@R90                          0.703   0.800   +0.097  ✓ Ahead
+Spearman ρ                     0.770   0.736   -0.034  ✗ Behind
+Mitigation Δ                   0.600  -0.007   -0.607  ✗ Behind
+HRR                            0.550   0.132   -0.418  ✗ Behind
+VSR                            0.810   0.701   -0.109  ✗ Behind
+Latency (s, GPU)                0.22    4.18    +3.96  ✗ Slower
+```
 
 ---
 

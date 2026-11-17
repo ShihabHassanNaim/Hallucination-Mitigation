@@ -79,11 +79,17 @@ def test_latency_mean_is_zero_without_a_measurement():
 
 
 def test_latency_row_is_rewritten_from_the_measurement(tmp_path):
-    """The stale band is replaced by the measured one."""
+    """The stale band is replaced by the measured one.
+
+    The fixture mirrors the shape of the row in the consolidated
+    ``Paper/comparison.md``: the win matrix numbers its rows and gives
+    the comparable its own column before the measured band.
+    """
     md = tmp_path / "comparison.md"
     md.write_text(
-        "| **Per-query latency (GPU)** | 0.22 s (LLM-Check) | **0.5-1.5 s** | "
-        "Slower than LLM-Check, faster than every sampling baseline |\n",
+        "| 12 | **Per-query latency (GPU)** | LLM-Check | 0.22 s | "
+        "**0.5-1.5 s** | ✗ | Slower than LLM-Check, faster than every "
+        "sampling baseline |\n",
         encoding="utf-8",
     )
 

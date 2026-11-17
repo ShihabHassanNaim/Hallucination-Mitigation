@@ -212,7 +212,10 @@ def test_the_score_wins_follow_the_measured_values(table):
     # The paper's headline claim set must match. This is the part that
     # stops the numbers and the prose from drifting apart: if a new
     # measurement produces a win the paper has not adopted, this fails.
-    wins_summary = Path("Paper/wins_summary.md")
+    #
+    # The wins summary was folded into the consolidated comparison
+    # document, whose win matrix is the place a win is now claimed.
+    wins_summary = Path("Paper/comparison.md")
     if wins_summary.exists():
         text = wins_summary.read_text(encoding="utf-8")
         # Each metric is named differently in the paper from the CSV

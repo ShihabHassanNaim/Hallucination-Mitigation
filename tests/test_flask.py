@@ -103,7 +103,7 @@ def test_flask_structure_page_and_api(fake_pipeline, monkeypatch):
 
 def test_flask_literature_endpoints(fake_pipeline, monkeypatch):
     """Literature comparison endpoints + page should serve the parsed
-    Paper/comparison_table.csv + Paper/why_we_win.md content."""
+    Paper/comparison_table.csv + Paper/comparison.md content."""
     client, _ = _client(monkeypatch, fake_pipeline)
 
     # Page

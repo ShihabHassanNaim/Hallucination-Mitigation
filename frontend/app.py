@@ -482,7 +482,7 @@ def create_app(index_dir: str | None = None) -> Flask:
 
     @app.get("/api/literature/why-we-win")
     def api_literature_why_we_win():
-        """Verdict matrix + headline bar chart from Paper/why_we_win.md.
+        """Verdict matrix + headline bar chart from Paper/comparison.md.
 
         Shape::
 
