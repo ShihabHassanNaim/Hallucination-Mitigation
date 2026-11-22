@@ -264,6 +264,121 @@ def test_the_held_out_figure_is_reported_beside_the_in_sample_one():
 
 
 # ---------------------------------------------------------------------------
+# Section 3.2.5 -- the result analysis against other papers
+# ---------------------------------------------------------------------------
+
+def _section_325() -> str:
+    """The text of the result-analysis section, from its heading to the next one."""
+    md = _text()
+    start = md.index("#### 3.2.5 Result analysis")
+    end = md.index("### 3.3 Claim-level granularity", start)
+    return md[start:end]
+
+
+def test_the_result_analysis_section_exists():
+    sec = _section_325()
+    assert len(sec) > 3000, "the result-analysis section is too short to be useful"
+    assert "3.2.5" in _text()
+
+
+def test_the_result_analysis_quotes_the_winning_scores_exactly():
+    sec = _section_325()
+    hal = _agg("data/metrics_halueval.json")
+    # AUPR 0.922 -- the interval's bottom must be above Decoding Memories' 0.840.
+    assert f"{hal['detection_aupr']:.3f}" == "0.922"
+    assert "0.922" in sec
+    low, high = hal["detection_aupr_ci95"]
+    assert f"[{low:.4f}, {high:.4f}]" == "[0.9057, 0.9383]"
+    assert "[0.9057, 0.9383]" in sec
+    # P@R90 0.800 vs Dale's 0.703.
+    assert f"{hal['precision_at_recall_90']:.3f}" == "0.800"
+    assert "0.800" in sec and "0.703" in sec
+    low, high = hal["precision_at_recall_90_ci95"]
+    assert f"[{low:.4f}, {high:.4f}]" == "[0.7732, 0.8443]"
+    assert "[0.7732, 0.8443]" in sec
+    # Claim-level F1 0.811 vs TU Wien's 0.710.
+    assert f"{hal['claim_f1']:.3f}" == "0.811"
+    assert "0.811" in sec and "0.710" in sec
+    assert "0.467" in sec and "0.810" in sec
+
+
+def test_the_result_analysis_states_the_gaps_it_claims():
+    sec = _section_325()
+    hal = _agg("data/metrics_halueval.json")
+    # The AUPR gap and the P@R90 gap are stated as differences.
+    assert "0.082" in sec, "the AUPR gap must be stated"
+    assert f"{hal['detection_aupr'] - 0.840:.3f}" == "0.082"
+    assert "0.097" in sec, "the P@R90 gap must be stated"
+    assert f"{hal['precision_at_recall_90'] - 0.703:.3f}" == "0.097"
+    assert "0.101" in sec, "the claim-F1 gap must be stated"
+    assert f"{hal['claim_f1'] - 0.710:.3f}" == "0.101"
+
+
+def test_the_result_analysis_ties_are_quoted_with_their_intervals():
+    sec = _section_325()
+    hal = _agg("data/metrics_halueval.json")
+    # Sentence accuracy: the tie must show the interval straddling 0.847.
+    assert "0.847" in sec
+    assert "0.829" in sec
+    low, high = hal["detection_accuracy_ci95"]
+    assert f"[{low:.4f}, {high:.4f}]" == "[0.8090, 0.8510]"
+    assert "[0.8090, 0.8510]" in sec
+    # The section must say the interval straddles the comparable.
+    assert "straddle" in sec.lower()
+
+
+def test_the_result_analysis_ragtruth_ties_are_quoted():
+    sec = _section_325()
+    anchors = _json("data/published_anchors.json")["auroc_family"]["anchors"]
+    for a in anchors:
+        if a["value"] in (0.583, 0.5724):
+            assert f"{a['value']:.4f}" in sec, f"the tie anchor {a['value']} is missing"
+
+
+def test_the_result_analysis_tally_matches_the_paper():
+    sec = _section_325()
+    paper = (ROOT / "Paper" / "comparison.md").read_text(encoding="utf-8")
+    tally = re.search(
+        r"\|\s*\*\*✓ Win\*\*\s*\|\s*(\d+)\s*\|.*?"
+        r"\|\s*\*\*≈ Tie / At par\*\*\s*\|\s*(\d+)\s*\|.*?"
+        r"\|\s*\*\*✗ Loss\*\*\s*\|\s*(\d+)\s*\|",
+        paper,
+        re.S,
+    )
+    assert tally
+    wins, ties, losses = (int(g) for g in tally.groups())
+    assert (wins, ties, losses) == (8, 5, 8)
+    assert "8 wins, 5 ties" in sec or "8 wins / 5 ties / 8 losses" in sec
+    assert "3 wins" in sec and "2 ties" in sec
+
+
+def test_the_result_analysis_explains_why_the_section_matters():
+    """The user asked for a brief explanation of why this matters."""
+    sec = _section_325().lower()
+    assert "why these" in sec or "why the structural wins matter" in sec
+    assert "why ties are important" in sec
+    # The plain-English framing of the three verdicts must be present.
+    assert "whole 95% interval sits" in sec
+    assert "overlaps" in sec
+
+
+def test_the_result_analysis_does_not_hide_the_losses():
+    """A win-focused section may still not pretend the losses do not exist."""
+    sec = _section_325()
+    assert "loss" in sec.lower()
+    assert "8 losses" in sec or "and 8 losses" in sec
+    # The concrete losses must be named, not implied away.
+    assert "0.987" in sec, "the ROC-AUC loss must be named"
+    assert "19" in sec, "the latency loss must be named"
+
+
+def test_the_result_analysis_is_in_the_table_of_contents():
+    md = _text()
+    assert "[Result analysis: where we win, and where we tie]" in md
+    assert "#325-result-analysis-where-we-win-and-where-we-tie" in md
+
+
+# ---------------------------------------------------------------------------
 # The length confound, the leak and the bad fusion
 # ---------------------------------------------------------------------------
 

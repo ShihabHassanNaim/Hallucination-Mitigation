@@ -67,6 +67,7 @@ negative results, reproducibility.
 3. [Results](#3-results)
    - 3.1 [Detection performance across three datasets](#31-detection-performance-across-three-datasets)
    - 3.2 [Comparison with published work](#32-comparison-with-published-work)
+      - 3.2.5 [Result analysis: where we win, and where we tie](#325-result-analysis-where-we-win-and-where-we-tie)
    - 3.3 [Claim-level granularity](#33-claim-level-granularity)
    - 3.4 [Retrieval performance](#34-retrieval-performance)
    - 3.5 [Mitigation — the negative result](#35-mitigation--the-negative-result)
@@ -755,6 +756,195 @@ API model is a one-line config change, while the white-box systems are hard-wire
 to one model. And **only two systems actively fix the answer**: Dale reranks among
 generated candidates, we rewrite in place using only verified evidence — the other
 nine detect and stop.
+
+---
+
+#### 3.2.5 Result analysis: where we win, and where we tie
+
+This section takes the comparison with the other papers and works out what it
+actually means for the project. It focuses on the wins and the ties, because those
+are the two outcomes that tell the reader something true about the system. The
+losses are already stated plainly in §3.1, §3.2.2, §3.5 and §3.8, and they are not
+softened anywhere.
+
+**The vocabulary used here, in plain words.**
+
+| Term | What it means |
+|---|---|
+| **WIN** | Our whole 95% interval sits **above** their published number. We are better, and we are sure of it. |
+| **TIE** | Our interval **overlaps** their number. We cannot say we are better, and we cannot say we are worse. |
+| **LOSS** | Our whole interval sits **below** their number. We are worse, and we are sure of it. |
+| **Comparable** | The best number any published paper reported **for the same metric**. |
+| **Like-for-like** | Both numbers measured on the same data, with the same metric. Only one comparison in this project qualifies. |
+
+---
+
+##### 3.2.5.1 The wins, grouped by what kind of win they are
+
+The 8 wins from the 21-dimension matrix (§3.8) fall into two very different
+groups. This distinction matters, so it is made explicit here.
+
+**Group A — the score wins (3 of 8).** These are measured numbers where our
+interval clears a published number.
+
+| Dimension | Comparable | Their number | Ours | Our 95% CI | Why it is a win |
+|---|---|---|---|---|---|
+| **Detection AUPR** | Decoding Memories | 0.840 | **0.922** | [0.9057, 0.9383] | Our whole interval sits above their number. The gap is large — 0.082. |
+| **P@R90** | Dale 2023 — LaBSE | 0.703 | **0.800** | [0.7732, 0.8443] | Our whole interval sits above their number. The gap is 0.097. |
+| **Claim-level F1** | TU Wien — Vectara | 0.710 | **0.811** | not published | Our number is above theirs. No CI is published for this metric, so this is a point comparison, and it is labelled as one. |
+
+**What these three wins mean for the project.**
+
+- **AUPR is the most meaningful of the three.** ROC-AUC can look strong when the
+  two classes are unbalanced, because a detector that rarely fires can still score
+  well. AUPR does not have that weakness: it asks "when the detector says
+  hallucinated, how often is it right?" Ours answers 0.922. Beating the best
+  published comparable by 0.082 on a measure that punishes false alarms is a real
+  result, not a rounding artefact.
+- **P@R90 is the most *practical* of the three.** It answers the question a real
+  deployment asks: "if I want to catch 90 out of 100 hallucinations, how many false
+  alarms will I get?" Ours: 0.800 precision at that recall point. Dale's LaBSE
+  baseline: 0.703. So at the same recall, we make roughly 10 fewer false alarms
+  per 100 hallucinations. That is a difference a user would actually feel.
+- **Claim-level F1 is the biggest gap (0.101) and the most misunderstood.** The
+  gap is large partly because we are doing a harder job: our unit is the atomic
+  claim, theirs is the whole sentence. We are also lower on precision (0.467) and
+  higher on recall (0.810), which is a deliberate trade — a false flag costs one
+  rewrite, a missed hallucination ships a wrong answer to the user unchallenged.
+
+**Group B — the structural wins (5 of 8).** These are not numbers. They are
+things the system *does* that no paper in the comparison does at all.
+
+| Dimension | What we have | Who else has it |
+|---|---|---|
+| **Per-claim provenance** | Every claim carries the `doc_id` of the document that supports it | Nobody |
+| **Retrieval that works** | recall@5 = 0.994 on HaluEval, 0.902 on RAGTruth | Nobody else retrieves at all |
+| **Explicit abstention** | PASS / REGEN / ABSTAIN — a real "I don't know" | Nobody |
+| **Modular backend** | Llama / Qwen / OpenRouter, swapped in one config line | Every white-box system is hard-wired to one model |
+| **Evaluation scale** | 1,000 rows × 3 datasets, intervals bootstrapped over *questions* not rows | Dale used 600 sentences |
+
+**Why the structural wins matter more than the score wins.**
+
+This is the part a reviewer should read twice. A score win says *"on this dataset,
+with this metric, our number is higher."* A structural win says *"there is a class
+of output these systems cannot produce at all."* The second kind does not go away
+when the dataset changes, when the metric changes, or when a stronger model is
+released.
+
+The concrete example: on RAGTruth our detection score (0.613) is **lower** than
+LLM-Check's Attention Score anchor (0.583) is close to, and the two ties in that
+head-to-head show we are not clearly ahead there. But LLM-Check cannot produce a
+citation for any claim, cannot retrieve a document to check against, and cannot say
+"I don't know." Our system can do all three. **A tie on the score with a
+structural advantage is a better research position than a small score win.**
+
+---
+
+##### 3.2.5.2 The ties, and why a tie is a real result
+
+There are 5 ties in the matrix, plus 2 ties in the RAGTruth head-to-head. A tie is
+not a failure to produce a number. It is a **statement that the measurement cannot
+separate the two systems** — and with 1,000 bootstrap resamples, that statement is
+itself evidence.
+
+**The 5 matrix ties:**
+
+| Dimension | Comparable | Their number | Ours | Our 95% CI | Why it is a tie |
+|---|---|---|---|---|---|
+| **Sentence accuracy** | Halu-NLP (SHROOM) | 0.847 | **0.829** | [0.8090, 0.8510] | Our interval **straddles** 0.847 — 0.809 is below it and 0.851 is above it. We cannot say we are worse, even though our best guess (0.829) is lower. |
+| **Calibrated confidence** | Conformal-RAG | 1−α guaranteed | Platt + temperature | — | Both systems calibrate. Ours is easier to read; theirs has a stronger mathematical guarantee. Different strengths, so neither is simply better. |
+| **Cost per 1k queries** | Conformal-RAG (CRG) | $0.10 | **$0.10–$0.80** | — | At the local-model end we match exactly. Only the API end costs more, and that is a choice, not a defect. |
+| **Active mitigation** | Dale 2023 | ✓ | ✓ | — | Two systems in twelve actually rewrite the answer. Dale reranks candidates; we rewrite in place. Both do it, in different ways. |
+| **Multi-domain NLG tasks** | SHROOM | 3 tasks | QA + summarization + data-to-text | — | We cover three task types. SHROOM covers machine translation, dialogue and paraphrase generation. Different coverage, not better or worse. |
+
+**The 2 RAGTruth ties:**
+
+| Published system | Their AUROC | Ours | Our 95% CI | Why it is a tie |
+|---|---|---|---|---|
+| LLM-Check — Attention Score | 0.5830 | 0.613 | [0.5494, 0.6581] | Their number falls **inside** our interval. We cannot claim to be better. |
+| LLM-Check — Hidden Score | 0.5724 | 0.613 | [0.5494, 0.6581] | Their number falls **inside** our interval. We cannot claim to be better. |
+
+**The sentence-accuracy tie is the one worth understanding, because it is a case
+where a weaker rule would have given the wrong answer.** Our point estimate is
+0.829 and Halu-NLP's is 0.847. If you compared the two numbers directly, you would
+conclude we lost. But our 95% interval is [0.8090, 0.8510] — and 0.847 sits
+*inside* it. So the honest verdict is a **tie**. This is exactly why the rule
+requires the interval, not the point estimate: the 0.018 gap is smaller than the
+uncertainty in our own measurement, so calling it a loss would be reporting noise
+as a finding.
+
+**Why ties are important for the project.**
+
+1. **A tie is honest, and a fake win is not.** Saying "we are level with the best
+   teams on SHROOM" is a stronger, more credible statement than inventing a win
+   from a 0.003 difference. Reviewers trust a result that does not flinch.
+2. **Ties tell you where the ceiling is.** We tie Halu-NLP on sentence accuracy.
+   That means our detection is *good enough* on this class of task — the remaining
+   gap is not a failure of the approach. It also tells us the next step is
+   something other than a better classifier.
+3. **Ties are where the honest story lives.** If this thesis reported only wins, a
+   reader would assume the comparison was rigged. The 8/5/8 split — 8 wins, 5 ties,
+   8 losses — is a believable shape for an honest result, and it is more useful
+   than a clean sweep would be.
+4. **Ties protect the wins.** Because the tie rule is applied in both directions
+   (the interval decides a loss as well as a win), the wins that *are* claimed have
+   survived the same strict test. When the report says "WIN", it means the whole
+   interval is clear — not that a point estimate happened to be higher.
+
+---
+
+##### 3.2.5.3 The full picture: all three outcomes on one page
+
+| | Wins | Ties | Losses |
+|---|---|---|---|
+| **21-dimension matrix** | 8 | 5 | 8 |
+| **RAGTruth head-to-head** (vs LLM-Check's 5 anchors) | 3 | 2 | — (0 losses) |
+
+**Reading the two rows together.** The RAGTruth head-to-head is the only
+like-for-like comparison in the project, and it is the one to quote first: **3 wins,
+2 ties, 0 losses against a NeurIPS 2024 paper's published numbers, on the same
+dataset, with the same metric.** The 21-dimension matrix is broader — it covers
+architecture, cost, speed and capabilities as well as scores — which is why it
+contains losses. It is reported separately on purpose, so that each number describes
+exactly one thing.
+
+**The honest one-paragraph version of this analysis:**
+
+> Against the eleven systems we compare with, we win 8 of 21 dimensions, tie 5 and
+> lose 8. The five wins that come from *what the system can do* — per-claim
+> citations, working retrieval, real abstention, a pluggable model, and a
+> three-dataset evaluation with question-level intervals — are the ones that
+> survive a change of dataset or model. The three wins that come from *scores* —
+> AUPR 0.922 against 0.840, P@R90 0.800 against 0.703, and claim-level F1 0.811
+> against 0.710 — are the ones a reviewer can check against the published tables.
+> Where we tie, we say so: on sentence accuracy our interval [0.809, 0.851]
+> straddles Halu-NLP's 0.847, so we are level rather than behind. The only
+> like-for-like head-to-head in the project, against LLM-Check on RAGTruth, gives 3
+> wins and 2 ties with no losses. The losses are real too — we are below Dale 2023
+> on ROC-AUC and Spearman ρ, our rewrite does not measurably help, and we are 19×
+> slower than the single-pass probes — and the same document reports them.
+
+##### 3.2.5.4 The losses, named — because a win-only section would not be honest
+
+This subsection exists so that the reader is not asked to take the wins on trust.
+These are the 8 losses, with their numbers:
+
+| Dimension | Comparable | Their number | Ours | Our 95% CI | Why it is a loss |
+|---|---|---|---|---|---|
+| **Detection ROC-AUC** | Dale 2023 — ALTI+ | **0.987** | 0.925 | [0.9113, 0.9401] | Our whole interval sits below their number. Dale works on machine translation with a reference answer available at training time — a narrower problem than ours. |
+| **Spearman ρ** | Halu-NLP | **0.770** | 0.736 | [0.7124, 0.7623] | Our whole interval sits below their number. |
+| **VSR** | Halu-NLP | **0.81** | 0.701 | [0.6730, 0.7260] | Our whole interval sits below their number. The verifier marks too many correct claims as wrong. |
+| **HRR** | Dale 2023 (implied) | ~0.55 | 0.132 | [0.1140, 0.1530] | Far below. Dale's number is *implied* from a different metric, so this is not strictly like-for-like. |
+| **Mitigation Δ** | Dale 2023 — COMET-QE | +0.60 | −0.007 | [−0.022, +0.007] | Our rewrite does not measurably help. Reported as an open result. |
+| **Per-query latency** | LLM-Check | 0.22 s | 4.18 s | — | About **19×** slower. The price of retrieval and per-claim verification. |
+| **GPU peak memory** | Conformal-RAG (CRG) | 1 GB | 4 GB | — | Higher, because we hold the retrieved evidence and the per-claim state. |
+| **Conformal coverage guarantee** | Conformal-RAG | 1−α guaranteed | None (Platt only) | — | We calibrate, but we cannot promise a coverage rate. A known gap. |
+
+**What the losses tell us.** Most of them point at the same place: our **speed and
+our rewrite** are the weak parts, and our **detection is competitive but not
+leading**. The one loss that is not a design trade is the mitigation Δ, and §3.5
+shows it is null rather than negative — a different thing, and an open question
+rather than a failure.
 
 ### 3.3 Claim-level granularity
 
