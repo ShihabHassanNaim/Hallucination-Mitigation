@@ -793,6 +793,39 @@ interval clears a published number.
 | **P@R90** | Dale 2023 — LaBSE | 0.703 | **0.800** | [0.7732, 0.8443] | Our whole interval sits above their number. The gap is 0.097. |
 | **Claim-level F1** | TU Wien — Vectara | 0.710 | **0.811** | not published | Our number is above theirs. No CI is published for this metric, so this is a point comparison, and it is labelled as one. |
 
+Each of the three gets its own diagram below, so a reader can look at one
+comparison without scanning a combined chart for the row that concerns them.
+
+**Figure: Detection AUPR.**
+
+![Detection AUPR: CRISP against the published comparables. CRISP reaches 0.922 with a 95% interval of [0.9057, 0.9383], which sits entirely above the published comparable of 0.840 from Decoding Memories. LLM-Check's SelfCheck variant reaches 0.800. The verdict is WIN.](data/graphs/win_aupr.png)
+
+*How to read it.* The grey diamonds are the published numbers. The blue circle
+with the bar through it is us. The bar is our 95% confidence interval — the range
+of values our system would still produce if we ran it again on a different sample.
+The dashed vertical line is the number we have to beat, 0.840. Our whole bar sits
+to the right of that line, so the win does not depend on a lucky run.
+
+**Figure: Precision at 90% recall (P@R90).**
+
+![Precision at 90% recall: CRISP against the published comparables. CRISP reaches 0.800 with a 95% interval of [0.7732, 0.8443], which sits entirely above the published comparable of 0.703 from Dale 2023's LaBSE baseline. The verdict is WIN.](data/graphs/win_pr90.png)
+
+*How to read it.* Same shape as the AUPR figure. The one published comparable is
+Dale's LaBSE baseline at 0.703. Our interval runs from 0.7732 to 0.8443, and its
+left end is still above 0.703. That is why this is a win and not a tie: it is not
+enough for our midpoint to be higher, the whole interval has to be higher.
+
+**Figure: Claim-level F1.**
+
+![Claim-level F1: CRISP against the published comparables. CRISP reaches 0.811, above the published comparable of 0.710 from TU Wien's Vectara system, with AILS-NTUA's voting ensemble at 0.690 and its NLI variant at 0.590. The verdict is WIN.](data/graphs/win_claim_f1.png)
+
+*How to read it.* The same three published systems, on the metric where we judge
+one atomic claim at a time instead of one whole sentence. TU Wien's Vectara is the
+best of them at 0.710. We reach 0.811. There is no confidence interval on this
+metric, so no bar is drawn on our mark and the figure says so in writing — the
+comparison is between point estimates, and it is labelled as such rather than
+being dressed up with an interval it does not have.
+
 **What these three wins mean for the project.**
 
 - **AUPR is the most meaningful of the three.** ROC-AUC can look strong when the
@@ -1345,6 +1378,9 @@ python -m scripts.compare_to_published --metrics data/metrics_ragtruth_fitted.js
 # The figures for this report
 python -m scripts.plot_audit_figures
 
+# The three win-comparison diagrams in §3.2.5.1 (one per winning metric)
+python -m scripts.plot_win_comparisons
+
 # The 13 paper graphs (order matters)
 python -m scripts.plot_results
 python -m scripts.plot_wins
@@ -1355,11 +1391,11 @@ python -m scripts.plot_headline
 python -m pytest tests/ -q
 ```
 
-**The test suite** is 30 test files covering every step (`test_step01.py` …
+**The test suite** is 32 test files covering every step (`test_step01.py` …
 `test_step13.py`), the API and Flask app, the pipeline, the evaluation aggregate,
 the significance machinery, the detector training data, the component directions,
 the closed-book no-leak guarantee, the provided-answer branch, the latency basis,
-the literature parsers, the comparison-table generator and both chart scripts.
+the literature parsers, the comparison-table generator and all three chart scripts.
 
 Two test idioms are worth naming, because they are what keep the numbers honest:
 

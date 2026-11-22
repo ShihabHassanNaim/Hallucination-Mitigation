@@ -379,6 +379,80 @@ def test_the_result_analysis_is_in_the_table_of_contents():
 
 
 # ---------------------------------------------------------------------------
+# The three win-comparison diagrams
+# ---------------------------------------------------------------------------
+
+WIN_FIGURES = ["win_aupr.png", "win_pr90.png", "win_claim_f1.png"]
+
+
+@pytest.mark.parametrize("name", WIN_FIGURES)
+def test_the_win_diagrams_are_embedded_and_exist(name):
+    """Each of the three wins has its own diagram, and the report shows it."""
+    path = ROOT / "data" / "graphs" / name
+    assert path.exists(), f"{name} was not generated"
+    assert name in _text(), f"{name} is not embedded in the report"
+
+
+def test_the_three_diagrams_are_in_the_score_wins_subsection():
+    """They belong with the score wins, not somewhere else in the report."""
+    md = _text()
+    start = md.index("##### 3.2.5.1 The wins")
+    end = md.index("##### 3.2.5.2", start)
+    sec = md[start:end]
+    for name in WIN_FIGURES:
+        assert name in sec, f"{name} is not in the score-wins subsection"
+
+
+def test_each_diagram_caption_explains_how_to_read_it():
+    """A figure nobody can read is not evidence."""
+    md = _text()
+    start = md.index("##### 3.2.5.1 The wins")
+    end = md.index("##### 3.2.5.2", start)
+    sec = md[start:end]
+    assert sec.count("*How to read it.*") == 3, (
+        "each of the three diagrams needs a plain-English reading guide"
+    )
+
+
+def test_the_diagram_captions_quote_the_real_numbers():
+    """The alt text must not drift from the measurements."""
+    md = _text()
+    hal = _agg("data/metrics_halueval.json")
+    # AUPR.
+    assert f"{hal['detection_aupr']:.3f}" == "0.922"
+    assert "0.922" in md and "[0.9057, 0.9383]" in md
+    # P@R90.
+    assert f"{hal['precision_at_recall_90']:.3f}" == "0.800"
+    assert "[0.7732, 0.8443]" in md
+    # Claim-level F1.
+    assert f"{hal['claim_f1']:.3f}" == "0.811"
+    assert "0.811" in md
+    # The published comparables the diagrams draw.
+    for comparable in ("0.840", "0.703", "0.710"):
+        assert comparable in md, f"the comparable {comparable} is not quoted"
+
+
+def test_the_claim_level_diagram_says_the_metric_has_no_interval():
+    """The figure must not imply an interval it does not have."""
+    md = _text()
+    start = md.index("##### 3.2.5.1 The wins")
+    end = md.index("##### 3.2.5.2", start)
+    sec = md[start:end]
+    claim = sec[sec.index("win_claim_f1.png"):]
+    assert "no confidence interval" in claim.lower()
+    assert "point estimates" in claim.lower()
+
+
+def test_the_diagrams_are_regenerated_by_a_script_the_report_names():
+    """The figures must be reproducible, not hand-made."""
+    md = _text()
+    assert "python -m scripts.plot_win_comparisons" in md, (
+        "the reproduction section does not name the script that draws "
+        "the three win diagrams"
+    )
+
+
+# ---------------------------------------------------------------------------
 # The length confound, the leak and the bad fusion
 # ---------------------------------------------------------------------------
 
