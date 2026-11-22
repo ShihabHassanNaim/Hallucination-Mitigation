@@ -1,0 +1,1719 @@
+SHAM-Bench: A Span-level Hallucination Benchmark Across
+Multiple Tasks
+Sicong Huang and Ian Lane
+University of California, Santa Cruz
+shaun213@ucsc.edu,ialane@ucsc.edu
+Abstract
+Span-level hallucination detection pinpoints un-
+supported content in LLM outputs, enabling ac-
+tionable feedback and targeted mitigation. Ex-
+isting evaluations for span-level hallucination
+detection methods are fragmented across tasks,
+annotation formats, and metrics, and most span-
+level datasets cover only a single NLG domain,
+making it difficult to assess whether a detection
+method actually generalizes across tasks and
+domains. In this paper, we introduceSHAM-
+Bench(Span-levelHallucination benchmark
+AcrossMultiple tasks), a unified benchmark for
+span-level hallucination detection spanning six
+NLG tasks, aggregated from existing human-
+annotated datasets totaling 6,461 examples un-
+der a common schema and evaluation protocol.
+Using SHAM-Bench, we evaluate existing hal-
+lucination detection methods and find that fine-
+tuned detectors often perform well in-domain
+but degrade under distribuiton shift, whereas
+prompt-based methdos with reasoning are more
+robust across tasks. Our analysis further shows
+that subtle unsupported content remains diffi-
+cult to detect and span-level evaluation is still
+challenged by ambiguous span boundaries and
+noisy labels. We release the dataset, evaluation
+code, and a public leaderboard to support future
+research on broadly generalizable hallucination
+detection.
+1 Introduction
+While Large Language Models (LLMs) are ex-
+tremely effective at generating fluent text, they of-
+ten produce hallucinations, generating content that
+isfactually incorrect with respect to world knowl-
+edge or is unsupported by the available evidence
+(Huang et al., 2025a; Zhang et al., 2025). Detecting
+hallucinations in LLM outputs is important for ap-
+plications ranging from dialog assistants (Li et al.,
+2023) and decision-support systems (Singhal et al.,
+2023; Brynjolfsson et al., 2023) to complex agen-
+tic workflows (Lin et al., 2025). Early work in
+hallucination detection focused on coarse-grained,
+response-level decisions (Wang et al., 2020; Fab-
+bri et al., 2021; Adlakha et al., 2024; Healy et al.,
+2026). While useful for screening, response-level
+detection does not identifywherehallucination er-
+rors occur, limiting its value for actionable feed-
+back.
+Span-level hallucination detection addresses this
+limitation by localizing the specific words or
+phrases in a generation that are unsupported or
+factually incorrect (Liu et al., 2022). Rather than
+rejecting an entire response, a span-level detector
+can preserve supported content while identifying
+hallucinated segments. This is especially valuable
+for post-editing workflows (Tonmoy et al., 2024)
+and for providing fine-grained training signals for
+hallucination mitigation (Wen et al., 2025).
+Despite its practical importance, span-level hal-
+lucination detection remains difficult to evaluate
+systematically. Most annotated resources provide
+only sentence- or response-level labels (Lin et al.,
+2022), too coarse to test whether methods identify
+precise unsupported spans. Datasets with span-
+level annotations remain scarce and typically focus
+on a single task (Tang et al., 2023; Vazquez et al.,
+2025), limiting how far their conclusions gener-
+alize across domains. Moreover, differences in
+annotation formats and evaluation metrics further
+complicate direct comparisons of detectors.
+To address these challenges, we introduce
+SHAM-Bench, theSpan-levelHallucination
+benchmarkAcrossMultiple tasks. SHAM-Bench
+is a unified benchmark for span-level hallucination
+detection. It consolidates nine task partitions ag-
+gregated from six human-annotated datasets into
+a single standardized multitask benchmark. The
+benchmark spans six NLG tasks: open-domain
+QA, context-based QA, data-to-text generation, bio-
+graphical generation, summarization, and machine
+translation, totaling 6,461 test set examples. By
+normalizing annotation formats and using standard
+arXiv:2610.27370v1  [cs.CL]  19 Oct 2026
+evaluation metrics across all datasets and tasks,
+SHAM-Bench allows a meaningful comparison of
+hallucination detection methods across a wide vari-
+ety of tasks.
+Using SHAM-Bench, we perform a comprehen-
+sive evaluation of seven existing hallucination de-
+tection methods and analyze why they succeed or
+fail across tasks. Our results show that fine-tuned
+detectors often perform well in narrow domains
+but struggle under distribution shift, while prompt-
+based methods with reasoning are more robust
+across domains. Furthermore, our analysis shows
+that both annotation and modeling challenges ex-
+ist. Span annotations can suffer from ambiguous
+span boundaries and noisy labels, and subtle unsup-
+ported content remains difficult to detect reliably
+even for the most capable model.
+Taken together, our findings suggest that advanc-
+ing span-level hallucination detection requires both
+accurrate and reliable annotations across tasks to
+support evaluation and more sensitive detection
+methods to identify subtle errors. We hope SHAM-
+Bench will serve as a valuable resource for the
+community, allowing practitioners to understand
+the pros and cons of different hallucination de-
+tection methods, and to advance the state-of-the-
+art in span-level hallucination detection. Further,
+we hope that future work would build on SHAM-
+Bench to incorporate more tasks and datasets cap-
+turing the fuller spectrum of NLG tasks to support
+more generalizable hallucination detection.
+2 Related Works
+2.1 Detecting Hallucinations in LLMs
+Most early approaches to detect hallucinations in
+LLM outputs aim to provide response level judge-
+ments. Starting with a reference and a response,
+BERTScore (Zhang* et al., 2020) judges a response
+by scoring the embedding similarity between a ref-
+erence and the response while BARTScore (Yuan
+et al., 2021) uses the log-likelihood of the response
+directly as the score. Taking a reference-free ap-
+proach, SelfCheckGPT (Manakul et al., 2023) es-
+timates factuality by sampling multiple responses
+and measuring their mutual inconsistency.
+Later approaches aim to provide more fine-
+grained hallucination judgements. For instance,
+AlignScore (Zha et al., 2023) and MiniCheck (Tang
+et al., 2024) fine-tune models to determine whether
+a sentence aligns or is supported by a given context.
+RAGTruth (Niu et al., 2024) and FA V A (Mishra
+et al., 2024) use span-annotated data to fine-tune
+models to achieve span-level hallucination detec-
+tion. QAGS (Wang et al., 2020) and FactScore
+(Min et al., 2023) operate at the fact level by ei-
+ther asking and answering factual questions about
+the response or by decomposing the response into
+individual facts and verifying each one.
+Another class of methods leverage model-
+internal signals. LLM-Check (Sriramanan et al.,
+2024) uses internal attention maps, hidden activa-
+tions, and output probabilities to detect hallucina-
+tions within a single response, while Ogasa and
+Arase (2025) exploits attention irregularities across
+informative layers to localize hallucinated spans.
+Leveraging uncertainty, Farquhar et al. (2024) in-
+troduces semantic entropy as a hallucination signal,
+showing hallucinated claims exhibit higher entropy.
+2.2 Evaluating and Benchmarking
+Hallucination Detection Methods
+Most prior benchmarks for hallucination detection
+are limited in one of two ways: they either provide
+only coarse-grained annotations at the response or
+sentence level, or they provide fine-grained span
+annotations but only for a single task.
+TruthfulQA (Lin et al., 2022) evaluate response-
+level hallucinations on QA task and find that larger
+models are more prone to misconceptions. Ag-
+greFact (Tang et al., 2023) aggregates nine summa-
+rization datasets for response-level evaluation, find-
+ing that no single metric performs best across the
+individual datasets and HADES (Liu et al., 2022)
+gathers token-level annotations for free-form gen-
+eration, showing that surrounding context length
+greatly affects how well hallucinations can be de-
+tected. While these approaches offer valuable in-
+sight when evaluating hallucination detection on
+these tasks, the evaluations in each work are limited
+to a single task.
+HaluEval (Li et al., 2023), though spans mul-
+tiple tasks, only perform hallucination detection
+at the response level. The same is true for LLM-
+AggreFact (Tang et al., 2024) which aggregates 10
+datasets for sentence-level factual consistency eval-
+uation. Mu-SHROOM (Vazquez et al., 2025) and
+PsiloQA (Rykov et al., 2025), despite providing
+span-level annotations for multiple languages, fo-
+cus exclusively on the QA task. To our knowledge,
+RAGTruth (Niu et al., 2024) and Zhou et al. (2021)
+are the only two benchmark with human labeled
+span-label annotations of hallucinations that span
+multiple tasks.
+3 SHAM-Bench
+SHAM-Bench, theSpan-levelHallucination
+BenchmarkAcrossMultiple Tasks is a reference-
+based benchmark for span-level hallucination de-
+tection in LLM outputs. It combines all currently
+available human-annotated span-labeled hallucina-
+tion detection datasets, covering nine task-specific
+test sets from six datasets, into a single unified
+multitask benchmark. SHAM-Bench spans six
+NLG tasks: open-domain QA, context-based QA,
+data-to-text, biographical generation, summariza-
+tion, and machine translation. The responses in the
+benchmark are generated by modern LLMs, allow-
+ing SHAM-Bench to reflect the real-world condi-
+tions and LLM-generated outputs which hallucina-
+tion detection systems are likely to encounter. Ad-
+ditionally, the summarization and QA tasks include
+multiple dataset partitions, enabling SHAM-Bench
+to identify generalization failures across datasets
+that single-dataset benchmarks cannot expose.
+3.1 Benchmark Datasets
+FaithBench(Bao et al., 2025) is a summarization
+faithfulness benchmark containing 750 summaries
+(75 passages× 10 LLMs), where annotators la-
+bel spans asquestionable,benign, orunwanted.
+We convert these into binary hallucinated/non-
+hallucinated span labels.FA V ABench(Mishra
+et al., 2024) contains∼1k model responses to open-
+domain queries with human annotations that lo-
+calize factual errors at the span level with a fine-
+grained error-type taxonomy. After processing, we
+retain 266 examples, each augmented with GPT-
+5-retrieved context for use as reference evidence.
+HalluEntity(Yeh et al., 2025) is an entity-level
+hallucination dataset built from GPT-3.5-generated
+biographies. Following the FActScore pipeline
+(Min et al., 2023), atomic facts are verified against
+Wikipedia and mapped to entity mentions, yielding
+157 manually verified examples. Each is paired
+with GPT-5-retrieved context.Mu-SHROOM
+(Vazquez et al., 2025) provides human-annotated
+span-level hallucination labels for LLM-generated
+answers to open-domain questions across 14 lan-
+guages. We use the English subset of 150 exam-
+ples, each augmented with GPT-5-retrieved con-
+text.RAGTruth(Niu et al., 2024) is a span-
+annotated RAG benchmark covering question an-
+swering, data-to-text, and summarization. Each
+of the 2,700 test examples pairs a user query and
+evidence context with an LLM-generated response.
+Task & % of count response hallu hallu
+dataset total words words rate
+context_qa 13.5% 875 131.5 7.1 0.041
+ragtruth 13.5% 875 131.5 7.1 0.041
+data2text 13.9% 900 182.0 7.2 0.040
+ragtruth 13.9% 900 182.0 7.2 0.040
+mt 7.4% 479 27.5 4.0 0.136
+zhou 7.4% 479 27.5 4.0 0.136
+open_bio 2.4% 152 182.2 41.4 0.227
+halluentity 2.4% 152 182.2 41.4 0.227
+open_qa 6.4% 415 192.0 32.6 0.210
+favabench 4.0% 261 278.4 42.5 0.142
+mushroom 2.4% 154 45.6 15.7 0.326
+summ 56.3% 3640 62.7 9.1 0.294
+faithbench 11.5% 745 101.2 14.8 0.154
+ragtruth 13.9% 900 124.2 3.6 0.030
+zhou 30.9% 1995 20.5 9.5 0.466
+total 100.0% 6461 97.1 10.5 0.108
+Table 1: SHAM-Bench statistics in both task aggregates
+and dataset breakdowns. Hallucination rate is the pro-
+portion of reponse words that are hallucinated. Word
+counts and hallucination rate are averaged across all
+examples.
+Human annotators highlight spans unsupported by
+or contradicted by the evidence.Zhou(Zhou et al.,
+2021) provides token-level hallucination annota-
+tions for summarization and machine translation
+tasks. It includes 2,000 span-annotated summariza-
+tion outputs adapted from Maynez et al. (2020),
+generated by PtGen, TConvS2S, TransS2S, and
+BERTS2S (See et al., 2017; Narayan et al., 2018;
+Vaswani et al., 2017; Rothe et al., 2020), and∼500
+MT outputs from TransS2S and mBART (Vaswani
+et al., 2017; Liu et al., 2020).
+3.2 Dataset Schema, Tasks, and Statistics
+Standardized schema.To reconcile differences
+in dataset formats, we convert every instance to a
+unified schema with four main fields, enabling con-
+sistent preprocessing and evaluation across tasks:
+• question: the original user query or instruc-
+tion that elicited the response.
+• context: auxiliary input required to answer
+the query (e.g., evidence passage, structured
+record, source document, or target-language
+text). For tasks that do not provide additional
+input (e.g. open_qa, open_biography), this
+field contains retrieved context that answers
+the question, so that the hallucination detec-
+tion methods that require context can use it.
+• response: the model-generated response to be
+evaluated for hallucinations.
+• hallu_spans: a list of human-annotated hallu-
+cinated spans in the response text.
+Tasks.We assign each instance from the six
+source datasets (§3.1) to one of six tasks that cover
+common NLG use cases:
+• open_qa: open-domain QA where the answer-
+ing model is given only a question, without
+any supporting evidence or context.
+• context_qa: QA conditioned on an explicit
+context passage; the model receives both a
+question and a provided context and is ex-
+pected to answer using that context.
+• data-to-text: data-grounded generation
+where the query targets information in struc-
+tured data (e.g., a JSON record) and the model
+produces a natural-language output.
+• open_biography: biographical generation
+where the model is prompted to write a bi-
+ography of a real person.
+• summarization: summarization of an input
+document; the model is given a source text
+and asked to produce a concise summary.
+• machine_translation: translation of a source
+text from one language to another.
+We provide a small validation set by sampling
+five instances for each (dataset, task)-pair, yielding
+45 instances in total. This validation set is used to
+explore the effectiveness of prompt optimization
+explored in section §4 of this paper.
+SHAM-Bench contains 6,461 examples span-
+ning six tasks sourced from six datasets (Table 1).
+Summarization is the largest category, consisting of
+56% of the total examples, while open_biography
+is comparatively small, being only 2.4% of the to-
+tal. Response lengths differ markedly by task; ma-
+chine_translation averages 27.5 words in response
+while open_qa averages 192 words. Hallucination
+rate is likewise highly non-uniform across tasks
+and datasets. At the task level, average hallucina-
+tion rates range from∼0.04 in data2txt and con-
+text_qa to 0.227 in open_biography and 0.294 in
+summarization. The dataset-level breakdown fur-
+ther reveals within-task differences; summarization
+contains hallucinated content in 3% of token on
+RAGTruth but 46.6% on Zhou, and open_qa hallu-
+cinates 14.2% of tokens on FA V ABench vs. 32.6%
+on Mushroom. Differences in annotation guide-
+lines and the model used to generate responses
+likely contribute to the variation in hallucination
+rates across tasks and datasets.
+3.3 Metrics and Evaluation
+We use F1 score as the primary evaluation metric.
+This choice follows prior span-level hallucination
+detection work including Mishra et al. (2024); Niu
+et al. (2024); Zhou et al. (2021). Moreover, since
+SHAM-Bench standardizes detector outputs into
+binary token-level labels, hallucination detection
+can be naturally evaluated as a binary classification
+problem. F 1 score balances precision and recall
+and is therefore not dominated by the majority non-
+hallucinated class. Appendix B provides further
+discussion of alternative metrics
+SHAM-Bench supports evaluation at two lev-
+els of granularity: token-level and sentence-level.
+Each sample in the dataset consists of a query q,
+a model-generated response r, and human-labeled
+hallucinated spans S⊂r . A detector predicts ei-
+ther hallucinated spans ˆS or sentence-level labels ˆz.
+We convert all outputs to token-level binary labels.
+Given tokenizationT(r) = (t 1, . . . , tn), we de-
+fine ground-truth labels y∈{0,1} n and predicted
+labels ˆy∈{0,1} n as:
+yi =I[∃s∈S:t i overlaps withs].
+ˆyi =I
+h
+∃ˆs∈ ˆS:t i overlaps withˆs
+i
+.
+For sentence-level evaluation, given segmenta-
+tionU(r) = (u 1, . . . , um), we project span annota-
+tions onto sentences to obtain ground-truth labels
+z∈{0,1} m and predicted labels ˆz∈{0,1} m:
+zj =I[∃s∈S:u j overlaps withs]
+ˆzj =I
+h
+∃ˆs∈ ˆS:u j overlaps withˆs
+i
+Methods that directly output sentence labels use
+them as ˆz without projection. We report F1 at both
+the span and sentence-level, aggregated by task and
+by dataset. We additionally report precision and
+recall scores in Appendix D.
+3.4 The SHAM-Bench Leaderboard
+The SHAM-Bench leaderboard is publicly avail-
+able at: tbd1, allowing research groups to submit
+their systems for automated evaluation. As aliv-
+ing benchmark, SHAM-Bench will evolve with
+new tasks and annotated datasets contributed by
+1Submissions must not include links to non-anonymous
+repositories. Will add in the camera-ready version.
+the community. Its open-source dataset and evalu-
+ation code provide a unified platform for tracking
+progress in hallucination detection across diverse
+NLG tasks and domains.
+4 Hallucination Detection Methods
+Using SHAM-Bench, we evaluate seven existing
+high-performing hallucination detection methods
+in three major categories, namely discriminatively
+trained, generatively trained, and prompt-based
+methods. Appendix A provides detailed method
+descriptions.
+Discriminatively trained methods. MiniCheck
+(Tang et al., 2024), which is trained on synthetic
+data to judge whether claims are supported, and
+AlignScore(Zha et al., 2023), which is trained
+on multiple datasets to score alignment, both de-
+tect hallucination at the sentence level.PsiloQA
+(Rykov et al., 2025), trained on synthetic data, and
+LettuceDetect(Ádám Kovács and Recski, 2025),
+trained on human-annotated data, instead detect
+hallucination at the token level. These methods
+fundamentally treat hallucination detection as a bi-
+nary classification problem whether at the sentence
+or token level.
+Generatively trained methods. FA V A(Mishra
+et al., 2024) andRAGTruth(Niu et al., 2024) are
+train using the language modeling objective with
+FA V A using synthetic data and RAGTruth using
+human annotated data. They both identify hal-
+lucinated content by generating the unsupported
+content as text spans.
+Prompt-based methods.Prompt-based detec-
+tors use an LLM as a direct hallucination span
+extractor by providing the relevant information and
+instruction to the LLM as prompt. We evaluate both
+hand-crafted and automatically optimized prompts
+(Huang et al., 2025b). Prompt templates are pro-
+vided in Appendix F.
+5 Benchmarking Results
+5.1 Prompt-based methods are robust across
+different tasks
+Results in Table 2 indicate prompted GPT-5-mini
+(with reasoning, no prompt optimization) is the
+most balanced method across all tasks. At span-
+level F1, the prompted method achieves an overall
+score of 0.498, placing second only to RAGTruth
+(0.518). It ranks first on three of the six tasks:
+open_qa (0.402), open_bio (0.525), and mt (0.435),
+while falling behind RAGTruth or LettuceDetect
+on the three tasks that those models were directly
+trained on, which is further discussed in §5.2. At
+sentence level, it achieves the highest overall score
+(0.691), surpassing all discriminatively and gen-
+eratively fine-tuned methods. It outperforms all
+discriminatively trained methods on four tasks,
+falling slightly behind MiniCheck on summariza-
+tion and LettuceDetect on context_qa. The prompt-
+based method also shows the most consistent per-
+formance across tasks, with the lowest standard
+deviation in task-level F1 scores (0.07), suggesting
+that prompting is less prone to large task-specific
+performance swings.
+5.2 Finetuned methods can perform well in
+narrow domains but struggle to generalize
+PsiloQA: strong where hallucinations are fre-
+quent, but over-predicts elsewhere.PsiloQA
+obtains its best span-F1 on Mushroom QA (0.556)
+and Zhou summarization (0.547), two datasets with
+high hallucination rates, but it performs poorly on
+context_qa (0.072) and data2txt (0.089), where hal-
+lucinations are rare. The same pattern holds for
+sentence-level F 1: PsiloQA achieves its highest
+score on Zhou summarization, where 91% of re-
+sponses are labeled as containing hallucinations.
+However, this over-prediction leads it to classify
+nearly all examples as hallucinated, dragging down
+its overall performance.
+RAGTruth and LettuceDetect: dominant in-
+domain, weak elsewhere.Although RAGTruth
+achieves the highest overall span-F1 (0.518), this
+aggregate masks a sharp split between its training
+tasks and everything else. Table 3 makes this split
+explicit: RAGTruth scores 0.835 on the RAGTruth
+summarization partition and 0.865 on RAGTruth
+QA at the span level, but is only mediocre on other
+datasets. The same pattern appears at sentence
+level, where it leads on its own partitions yet ranks
+among the worst on summarization Zhou and QA
+Mushroom. LettuceDetect, fine-tuned on the same
+data, behaves similarly: strong on RAGTruth parti-
+tions but weak elsewhere, except on Zhou summa-
+rization, where over-flagging is less costly because
+most responses contain annotated hallucinations.
+FA V A: surprisingly weak on its own dataset.
+Table 3 shows FA V A performs competitively on
+datasets where the evidence–response structure
+closely resembles FA V A’s Wikipedia-grounded
+Method Overall (std) open_qa ctx_qa data2txt open_bio summ mt
+Span-level
+PsiloQA (ModernBERT-base) 0.239 (0.12) 0.338 0.072 0.089 0.363 0.359 0.216
+LettuceDetect (lettuce-large) 0.482 (0.21) 0.324 0.833 0.614 0.1980.5410.382
+RAGTruth (ft-llama2-13B) 0.518(0.19) 0.367 0.865 0.6540.354 0.469 0.398
+FA V A (ft-llama2-7B) 0.381 (0.15) 0.319 0.696 0.243 0.244 0.376 0.411
+Prompt (GPT-5-mini) 0.498 (0.07)0.4020.603 0.5280.5250.495 0.435
+Sentence-level
+MiniCheck (Bespoke-7B) 0.632 (0.12) 0.603 0.466 0.492 0.777 0.7370.715
+AlignScore (roberta-large) 0.595 (0.16) 0.609 0.492 0.290 0.745 0.699 0.734
+PsiloQA (ModernBERT-base) 0.484 (0.24) 0.572 0.094 0.214 0.754 0.599 0.671
+LettuceDetect (lettuce-large) 0.638 (0.15) 0.586 0.842 0.717 0.342 0.714 0.625
+RAGTruth (ft-llama2-13B) 0.638 (0.13) 0.5790.869 0.7520.533 0.590 0.507
+FA V A (ft-llama2-7B) 0.540 (0.16) 0.539 0.701 0.268 0.435 0.572 0.728
+Prompt (GPT-5-mini) 0.691(0.07)0.6330.610 0.6350.7840.726 0.759
+Table 2: Average span- and sentence-level F1 scores on SHAM-Bench by task. Prompt method uses gpt-5-mini
+with reasoning but no prompt optimization.Overallreports the unweighted mean and standard deviation of six task
+scores. Highest scores are inbold; second highest are underlined . The full results can be found in Appendix D.
+Method summ qa
+faithbench zhou ragtruth favabench mushroom ragtruth
+Span-level
+PsiloQA (ModernBERT-base) 0.225 0.547 0.053 0.210 0.556 0.072
+LettuceDetect (lettuce-large) 0.3070.5590.695 0.242 0.463 0.833
+RAGTruth (ft-llama2-13B) 0.323 0.3570.835 0.3270.4350.865
+FA V A (ft-llama2-7B) 0.310 0.228 0.761 0.235 0.463 0.695
+Prompt (GPT-5-mini) 0.3870.514 0.541 0.260 0.6420.603
+Sentence-level
+MiniCheck (Bespoke-7B) 0.378 0.875 0.730 0.413 0.926 0.466
+AlignScore (roberta-large) 0.348 0.864 0.626 0.428 0.915 0.492
+PsiloQA (ModernBERT-base) 0.389 0.9060.092 0.379 0.898 0.094
+LettuceDetect (lettuce-large) 0.363 0.845 0.713 0.410 0.885 0.842
+RAGTruth (ft-llama2-13B) 0.349 0.5660.8450.437 0.8190.869
+FA V A (ft-llama2-7B) 0.334 0.570 0.773 0.392 0.788 0.701
+Prompt (GPT-5-mini) 0.4930.885 0.5690.450 0.9440.610
+Table 3: Average span- and sentence-level F1 scores on SHAM-Bench summarization and open/context_qa tasks by
+dataset. Prompt method uses gpt-5-mini with reasoning but no prompt optimization. Highest scores are inbold;
+second highest are underlined.
+training format. FA V A achieves span-F 1 of
+0.761 on RAGTruth summarization and 0.695 on
+RAGTruth context_qa. However, it performs unex-
+pectedly poorly on FA V ABench (span-F1 of 0.235),
+the benchmark derived from the same work that
+introduced FA V A.
+MiniCheck and AlignScore: strong on text-only
+tasks, brittle on structured data.Table 2 shows
+the two sentence-level methods, MiniCheck and
+AlignScore, exhibit similar performance profiles
+despite the differences in architecture and training
+data. Similar to the PsiloQA, AlignScore is weak
+on data2txt, with a precision of 0.247 and recall
+of 0.429. On this dataset it over-predicts halluci-
+nated sentences when the input context contains
+structured JSON records, likely because it hasn’t
+seen any JSON record grounding during claim-
+verification training, thus flagging response sen-
+tences as unsupported when JSON records are en-
+countered. MiniCheck performs better on data2txt
+likely because it is fine-tuned from a larger base
+model which brings broader pre-training coverage
+of structured data formats though still lags behind
+prompted method by a significant margin.
+5.3 Reasoning plays a significant role in
+prompt-based hallucination detection
+Reasoning is the single most impactful factor.
+Enabling reasoning in prompt-based approaches
+improves accuracy across every model and task.
+The gain is largest for Qwen3-4B, whose overall
+span-level F1 jumps from 0.298 to 0.442 (+0.144)
+Method Reason Opt Overall (std) open_qa ctx_qa data2txt open_bio summ mt
+Span-level
+prompt (GPT-5-mini)✗ ✗ 0.425 (0.09) 0.386 0.553 0.321 0.486 0.471 0.331
+prompt (GPT-5-mini)✓ ✗ 0.498(0.07)0.4020.603 0.528 0.5250.495 0.435
+prompt (GPT-5-mini)✓ ✓ 0.497 (0.09) 0.364 0.6360.5360.4760.532 0.437
+prompt (Qwen3-4B)✗ ✗ 0.298 (0.07) 0.343 0.176 0.255 0.362 0.306 0.347
+prompt (Qwen3-4B)✓ ✗ 0.442 (0.11) 0.369 0.647 0.511 0.328 0.457 0.338
+prompt (Qwen3-4B)✓ ✓ 0.446 (0.15) 0.329 0.748 0.490 0.328 0.462 0.316
+prompt (Olmo3-7B-Inst)✗ ✗ 0.383 (0.14) 0.322 0.670 0.346 0.261 0.422 0.278
+prompt (Olmo3-7B-Think)✓ ✗ 0.425 (0.07) 0.355 0.539 0.495 0.384 0.442 0.338
+prompt (Olmo3-7B-Think)✓ ✓ 0.435 (0.16) 0.3480.7900.360 0.317 0.451 0.343
+Table 4: Average span-level F1 scores of prompt-based detectors on SHAM-Bench by task.Reasonandoptindicate
+whether reasoning and prompt optimization are used.Overallreports the unweighted mean and standard deviation
+of six task scores. Highest scores are inbold; second highest are underlined. Complete span- and sentence-level
+results are in Table 5.
+and sentence-level F1 from 0.504 to 0.631 (+0.127).
+GPT-5-mini improves more modestly (0.425 →
+0.498 span-F 1), consistent with its stronger no-
+reasoning baseline; OLMo-3-7B similarly gains
++0.042 span-F1.
+Reasoning substantially reduces false positives
+and false negatives. On exampleswithoutanno-
+tated hallucinations, Qwen3-4B with no reasoning
+averages only 0.13 span-F1 because it often marks
+spans as hallucinated when they are not; reason-
+ing raises this to 0.67. OLMo-3-7B-Instruct with-
+out reasoning is instead over-conservative. It only
+scores 0.28 span-F1 on all-hallucinated samples by
+rarely predicting any spans, leaving most hallucina-
+tions undetected. Reasoning raises it to 0.39. Rea-
+soning better balances over- and under-prediction,
+reducing both false positives and missed hallucina-
+tions.
+Prompt optimization has mixed effects.
+MiPROv2 optimization improves performance on
+ctx_qa and summarization, but it also consistently
+degrades open_qa performance. With only five
+examples per task used during optimization, the
+optimizer appears to over-adapt to these samples
+and generalize poorly. This highlights the risk of
+prompt optimization with very small development
+sets.
+6 Challenges in Hallucination Detection
+To better understand the system behavior observed
+in §5, we examine two complementary sources
+of difficulty. First, using RAGTruth and PsiloQA
+as representative cases, we analyze how the dis-
+tribution of fine-tuning data shapes detector pre-
+dictions. Second, we analyze failure cases from
+prompt-based methods and identify several factors
+that continue to limit span-level hallucination de-
+tection.
+6.1 Fine-tuned models tend to follow their
+training data distribution.
+As shown in Figure 1, hallucination rates in the
+RAGTruth summarization training set are concen-
+trated near the low end. The model fine-tuned on
+this data closely follows the training distribution,
+regardless of the distribution of the evaluation set.
+This behavior of output distribution aligns well
+with the RAGTruth test set, but not with Faith-
+Bench, whose distribution is less skewed, or Zhou
+et al., which has an additional mode at the high end.
+As a result, the RAGTruth-trained model places
+disproportionate weight on low hallucination rates
+and tends to under-predict hallucinations. The Psil-
+oQA model exhibits the opposite bias. Although
+hallucination rates in the PsiloQA training set are
+more evenly distributed, 96% of its training exam-
+ples contain hallucinations. Consequently, when
+evaluated on QA datasets whose hallucination rates
+are concentrated near the low end, the model tends
+to over-predict hallucinations, resulting in system-
+atically inflated hallucination estimates.
+Fundamentally, these results reflect a train-test
+distribution shift, in which the training distribution
+does not match the evaluation setting. For prac-
+titioners, this suggests that class balancing alone
+is insufficient. Instead, training data should be
+curated to ensure adequate representation of hal-
+lucination cases, especially rare error types, while
+preserving or explicitly modeling the expected de-
+ployment distribution.
+0.31
+0.68
+0.08
+0.91
+0.51
+0.22
+0.11
+RAGTruth train
+FaithBench
+Zhou
+RAGTruth
+RAGTruth on Summarization
+0.00 0.25 0.50 0.75 1.00
+        hallu_rate distribution             hallu_rate > 0
+0.96
+0.69
+1.00
+0.97
+0.99
+0.18
+1.00
+PsiloQA train
+FavaBench
+Mushroom
+RAGTruth
+PsiloQA on QA
+Annotations Predicted
+Figure 1: Distribution of hallucination rates as predicted
+by RAGTruth on summarization (top) and PsiloQA on
+QA (bottom). The first distribution in each plot is the
+distribution of the corresponding model’s training set.
+To the right of each distribution is the proportion of
+examples that contain any hallucinated spans.
+6.2 Prompt-based methods exhibit mixed
+failure modes
+To characterize prompt-based failure modes, we
+divide ground-truth spans into two groups: those
+that overlap with at least one prediction and those
+with no overlapping prediction. The first group
+captures cases in which the detector identifies the
+relevant factual issue, even if its predicted bound-
+ary differs from the human annotation. The second
+captures hallucinations that are missed entirely. For
+these missed spans, we use GPT-5.4 to assign one
+of five error categories:labeling error,overgener-
+alization,unsupported detail,misattribution, and
+subjective language; category definitions appear in
+Appendix C.
+Figure 2 shows that the prompt-based detector re-
+covers 7,542 of 10,066 ground-truth spans (74.9%)
+with at least some overlap. This suggests that many
+apparent span-level errors arise from boundary dis-
+agreement rather than complete failure to recognize
+the underlying hallucination. Among overlapping
+T otal ground truth spans
+Ground truth spans 7542
+(74.9%)
+2524
+(25.1%)
+0 250 500 750 1000 1250 1500 1750 2000
+Missed spans
+Subjective language
+Misattribution
+Unsupported detail
+Overgeneralization
+Labeling error
+77 (3.1%)
+177 (7.0%)
+287 (11.4%)
+360 (14.3%)
+1623 (64.3%)
+Ground truth spans that overlap with predictions
+Ground truth spans with no overlap with predictions
+Figure 2: Top: ground-truth span recovery by GPT-5-
+mini reasoning prompt-based detector. Bottom: error
+categories for spans received no overlapping prediction.
+spans, predicted spans are on average 23 words
+longer than the corresponding ground-truth span
+when they over-predict, and 31 words shorter when
+they under-predict. Over-prediction distribution
+shown in Appendix Figure 3.
+For the 2,524 ground-truth spans with no over-
+lapping prediction, human labeling error accounts
+for the largest share (64%). The remaining missed
+spans correspond to more substantive detector fail-
+ures: overgeneralization accounts for 14%, unsup-
+ported details for 11%, misattribution for 7%, and
+subjective language for 3%. Except for misattri-
+bution, these categories generally involve subtle
+departures from the reference document, which
+remain difficult for prompt-based detectors to iden-
+tify reliably.
+These results suggest that improving span-level
+hallucination detection requires progress on annota-
+tion and modeling. Accurate annotations and stan-
+dardized span definitions would reduce evaluation
+noise, while greater emphasis on subtle semantic
+departures from the reference could help detectors
+address the remaining missed hallucinations.
+7 Conclusion
+We presented SHAM-Bench, a unified benchmark
+for span-level hallucination detection across di-
+verse generation tasks. Our evaluation shows that
+fine-tuned detectors often perform well in-domain
+but degrade sharply outside their training distribu-
+tions, whereas prompt-based methods with reason-
+ing are more robust and consistent across tasks.
+At the same time, ambiguous span boundaries,
+noisy labels, and subtle unsupported content re-
+main open challenges for reliable span-level eval-
+uation. SHAM-Bench provides a foundation for
+future research on accurate, broadly generalizable
+hallucination detection.
+8 Limitations
+Task coverage.SHAM-Bench covers a diverse
+set of NLG tasks, but it does not exhaustively
+represent all useful language generation settings.
+Many important tasks are still missing because the
+benchmark is built from currently available human-
+annotated span-level hallucination resources. Our
+goal is therefore not to provide a complete taxon-
+omy of NLG tasks, but to establish a first extensible
+multi-task benchmark for span-level hallucination
+detection. As more human-annotated span-level
+datasets become available, additional tasks and do-
+mains can be incorporated into SHAM-Bench.
+RAGTruth over-representation.RAGTruth
+contributes 2,675 examples to SHAM-Bench
+across context QA, data-to-text, and part of the
+summarization task, accounting for approximately
+41% of the benchmark. This over representation
+provides an advantage to detectors fine-tuned on
+the RAGTruth training set, meaning that strong
+overall performance does not necessarily reflect
+broad generalization. As additional tasks and
+datasets are contributed to SHAM-Bench in the
+future this imbalance will diminish.
+Legacy model outputs.A substantial portion of
+the Zhou data was generated by pre-LLM-era mod-
+els. The resulting errors differ significantly from
+hallucinations produced by modern LLMs. This
+limits the extent to which performance on this sub-
+set reflects detector behavior in contemporary set-
+tings.
+Annotation inconsistency.The source datasets
+used in SHAM-Bench were annotated by different
+groups following different annotation guidelines,
+which leads to substantial variation in how hal-
+lucination spans are defined and marked. Some
+datasets favor minimal spans, while others use
+broader spans. In aggregate, however, we believe
+that the rank of the hallucination detection meth-
+ods will not be affected by variation in annotation
+styles across the individual the datasets.
+Annotation quality.In this work, we did not per-
+form quality control of the annotations provided
+in the source datasets. The quality of annotations
+across the datasets are known to vary widely, which
+limits the extent to which the benchmark can faith-
+fully measure a model’s ability to identify halluci-
+nations. However, again in aggregate, we believe
+that the relative ranking of hallucination detection
+methods is unlikely to be affected by the annotation
+quality of individual datasets.
+Automated failure classification.The error cate-
+gories used in our prompt-based failure analysis are
+assigned by GPT-5.4 rather than manually verified
+by expert annotators. As a result, the category pro-
+portions should be interpreted as an approximate
+diagnostic analysis rather than as definitive class
+labels.
+Coverage of evaluated methods.In this work,
+we did not evaluate methods that require knowledge
+of or internal access to the generating model, such
+as hidden-state-based detectors or self-consistency
+methods. To ensure faithful implementation and ac-
+curate evaluation, we encourage researchers devel-
+oping such techniques to evaluate them on SHAM-
+Bench and submit their results to the SHAM-Bench
+Leaderboard.
+Potential risks.Although SHAM-Bench is in-
+tended as a research benchmark, it may still intro-
+duce downstream risks if used incautiously. Im-
+perfect hallucination detectors can be over-trusted
+in deployment; false negatives may allow unsup-
+ported content to pass as reliable, while false pos-
+itives may incorrectly flag factual content and re-
+duce the usefulness of model outputs. In addi-
+tion, some benchmark instances involve generation
+about real people (e.g., the open_biography task),
+so detector outputs may affect how biographical
+or factual claims are interpreted in downstream ap-
+plications. We therefore view SHAM-Bench as
+a research evaluation resource and not as a suffi-
+cient basis for high-stakes real-world deployment
+decisions.
+References
+Vaibhav Adlakha, Parishad BehnamGhader, Xing Han
+Lu, Nicholas Meade, and Siva Reddy. 2024. Eval-
+uating correctness and faithfulness of instruction-
+following models for question answering.Trans-
+actions of the Association for Computational Linguis-
+tics, 12:681–699.
+Forrest Sheng Bao, Miaoran Li, Renyi Qu, Ge Luo,
+Erana Wan, Yujia Tang, Weisi Fan, Manveer Singh
+Tamber, Suleman Kazi, Vivek Sourabh, Mike Qi,
+Ruixuan Tu, Chenyu Xu, Matthew Gonzales, Ofer
+Mendelevitch, and Amin Ahmad. 2025. FaithBench:
+A diverse hallucination benchmark for summariza-
+tion by Modern LLMs. InProceedings of the 2025
+Conference of the Nations of the Americas Chap-
+ter of the Association for Computational Linguistics:
+Human Language Technologies (Volume 2: Short Pa-
+pers), pages 448–461, Albuquerque, New Mexico.
+Association for Computational Linguistics.
+Erik Brynjolfsson, Danielle Li, and Lindsey R Raymond.
+2023. Generative ai at work. Working Paper 31161,
+National Bureau of Economic Research.
+Alexander R. Fabbri, Wojciech Kry´sci´nski, Bryan Mc-
+Cann, Caiming Xiong, Richard Socher, and Dragomir
+Radev. 2021. SummEval: Re-evaluating summariza-
+tion evaluation.Transactions of the Association for
+Computational Linguistics, 9:391–409.
+Sebastian Farquhar, Jannik Kossen, Lorenz Kuhn, and
+Yarin Gal. 2024. Detecting hallucinations in large
+language models using semantic entropy.Nature,
+630(8017):625–630.
+Kait Healy, Bharathi Srinivasan, Visakh Madathil, and
+Jing Wu. 2026. Internal representations as indicators
+of hallucinations in agent tool selection.Preprint,
+arXiv:2601.05214.
+Lei Huang, Weijiang Yu, Weitao Ma, Weihong Zhong,
+Zhangyin Feng, Haotian Wang, Qianglong Chen,
+Weihua Peng, Xiaocheng Feng, Bing Qin, and Ting
+Liu. 2025a. A survey on hallucination in large lan-
+guage models: Principles, taxonomy, challenges, and
+open questions.ACM Transactions on Information
+Systems, 43(2):1–55.
+Sicong Huang, Jincheng He, Shiyuan Huang,
+Karthik Raja Anandan, Arkajyoti Chakraborty,
+and Ian Lane. 2025b. UCSC at SemEval-2025
+task 3: Context, models and prompt optimization
+for automated hallucination detection in LLM
+output. InProceedings of the 19th International
+Workshop on Semantic Evaluation (SemEval-2025),
+pages 1981–1992, Vienna, Austria. Association for
+Computational Linguistics.
+Junyi Li, Xiaoxue Cheng, Xin Zhao, Jian-Yun Nie, and
+Ji-Rong Wen. 2023. HaluEval: A large-scale hal-
+lucination evaluation benchmark for large language
+models. InProceedings of the 2023 Conference on
+Empirical Methods in Natural Language Processing,
+pages 6449–6464, Singapore. Association for Com-
+putational Linguistics.
+Stephanie Lin, Jacob Hilton, and Owain Evans. 2022.
+TruthfulQA: Measuring how models mimic human
+falsehoods. InProceedings of the 60th Annual Meet-
+ing of the Association for Computational Linguistics
+(Volume 1: Long Papers), pages 3214–3252, Dublin,
+Ireland. Association for Computational Linguistics.
+Xixun Lin, Yucheng Ning, Jingwen Zhang, Yan Dong,
+Yilong Liu, Yongxuan Wu, Xiaohua Qi, Nan Sun,
+Yanmin Shang, Kun Wang, Pengfei Cao, Qingyue
+Wang, Lixin Zou, Xu Chen, Chuan Zhou, Jia Wu,
+Peng Zhang, Qingsong Wen, Shirui Pan, and 5 oth-
+ers. 2025. Llm-based agents suffer from hallucina-
+tions: A survey of taxonomy, methods, and directions.
+Preprint, arXiv:2509.18970.
+Tianyu Liu, Yizhe Zhang, Chris Brockett, Yi Mao,
+Zhifang Sui, Weizhu Chen, and Bill Dolan. 2022.
+A token-level reference-free hallucination detection
+benchmark for free-form text generation. InProceed-
+ings of the 60th Annual Meeting of the Association
+for Computational Linguistics (Volume 1: Long Pa-
+pers), pages 6723–6737, Dublin, Ireland. Association
+for Computational Linguistics.
+Yinhan Liu, Jiatao Gu, Naman Goyal, Xian Li, Sergey
+Edunov, Marjan Ghazvininejad, Mike Lewis, and
+Luke Zettlemoyer. 2020. Multilingual denoising pre-
+training for neural machine translation.Transac-
+tions of the Association for Computational Linguis-
+tics, 8:726–742.
+Potsawee Manakul, Adian Liusie, and Mark Gales. 2023.
+SelfCheckGPT: Zero-resource black-box hallucina-
+tion detection for generative large language models.
+InProceedings of the 2023 Conference on Empiri-
+cal Methods in Natural Language Processing, pages
+9004–9017, Singapore. Association for Computa-
+tional Linguistics.
+Joshua Maynez, Shashi Narayan, Bernd Bohnet, and
+Ryan McDonald. 2020. On faithfulness and factu-
+ality in abstractive summarization. InProceedings
+of the 58th Annual Meeting of the Association for
+Computational Linguistics, pages 1906–1919, On-
+line. Association for Computational Linguistics.
+Sewon Min, Kalpesh Krishna, Xinxi Lyu, Mike Lewis,
+Wen-tau Yih, Pang Koh, Mohit Iyyer, Luke Zettle-
+moyer, and Hannaneh Hajishirzi. 2023. FActScore:
+Fine-grained atomic evaluation of factual precision
+in long form text generation. InProceedings of the
+2023 Conference on Empirical Methods in Natural
+Language Processing, pages 12076–12100, Singa-
+pore. Association for Computational Linguistics.
+Abhika Mishra, Akari Asai, Vidhisha Balachandran,
+Yizhong Wang, Graham Neubig, Yulia Tsvetkov, and
+Hannaneh Hajishirzi. 2024. Fine-grained hallucina-
+tion detection and editing for language models. In
+First Conference on Language Modeling.
+Shashi Narayan, Shay B. Cohen, and Mirella Lapata.
+2018. Don’t give me the details, just the summary!
+topic-aware convolutional neural networks for ex-
+treme summarization. InProceedings of the 2018
+Conference on Empirical Methods in Natural Lan-
+guage Processing, pages 1797–1807, Brussels, Bel-
+gium. Association for Computational Linguistics.
+Cheng Niu, Yuanhao Wu, Juno Zhu, Siliang Xu,
+KaShun Shum, Randy Zhong, Juntong Song, and
+Tong Zhang. 2024. RAGTruth: A hallucination cor-
+pus for developing trustworthy retrieval-augmented
+language models. InProceedings of the 62nd An-
+nual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pages 10862–
+10878, Bangkok, Thailand. Association for Compu-
+tational Linguistics.
+Yuya Ogasa and Yuki Arase. 2025. Hallucinated span
+detection with multi-view attention features. InPro-
+ceedings of the 14th Joint Conference on Lexical and
+Computational Semantics (*SEM 2025), pages 381–
+394, Suzhou, China. Association for Computational
+Linguistics.
+Krista Opsahl-Ong, Michael J Ryan, Josh Purtell, David
+Broman, Christopher Potts, Matei Zaharia, and Omar
+Khattab. 2024. Optimizing instructions and demon-
+strations for multi-stage language model programs.
+InProceedings of the 2024 Conference on Empiri-
+cal Methods in Natural Language Processing, pages
+9340–9366, Miami, Florida, USA. Association for
+Computational Linguistics.
+Sascha Rothe, Shashi Narayan, and Aliaksei Severyn.
+2020. Leveraging pre-trained checkpoints for se-
+quence generation tasks.Transactions of the Associ-
+ation for Computational Linguistics, 8:264–280.
+Elisei Rykov, Kseniia Petrushina, Maksim Savkin,
+Valerii Olisov, Artem Vazhentsev, Kseniia Titova,
+Alexander Panchenko, Vasily Konovalov, and Julia
+Belikova. 2025. When models lie, we learn: Multilin-
+gual span-level hallucination detection with PsiloQA.
+InFindings of the Association for Computational Lin-
+guistics: EMNLP 2025, pages 11663–11682, Suzhou,
+China. Association for Computational Linguistics.
+Abigail See, Peter J. Liu, and Christopher D. Manning.
+2017. Get to the point: Summarization with pointer-
+generator networks. InProceedings of the 55th An-
+nual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pages 1073–
+1083, Vancouver, Canada. Association for Computa-
+tional Linguistics.
+Karan Singhal, Shekoofeh Azizi, Tao Tu, S. Sara Mah-
+davi, Jason Wei, Hyung Won Chung, Nathan Scales,
+Ajay Tanwani, Heather Cole-Lewis, Stephen Pfohl,
+Perry Payne, Martin Seneviratne, Paul Gamble, Chris
+Kelly, Nathaneal Scharli, Aakanksha Chowdhery,
+Philip Mansfield, Blaise Aguera y Arcas, Dale Web-
+ster, and 11 others. 2023. Large language models
+encode clinical knowledge.Nature, 620(7972):172–
+180.
+Gaurang Sriramanan, Siddhant Bharti, Vinu Sankar
+Sadasivan, Shoumik Saha, Priyatham Kattakinda,
+and Soheil Feizi. 2024. LLM-check: Investigating
+detection of hallucinations in large language models.
+InThe Thirty-eighth Annual Conference on Neural
+Information Processing Systems.
+Liyan Tang, Tanya Goyal, Alex Fabbri, Philippe La-
+ban, Jiacheng Xu, Semih Yavuz, Wojciech Kryscin-
+ski, Justin Rousseau, and Greg Durrett. 2023. Un-
+derstanding factual errors in summarization: Errors,
+summarizers, datasets, error detectors. InProceed-
+ings of the 61st Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers),
+pages 11626–11644, Toronto, Canada. Association
+for Computational Linguistics.
+Liyan Tang, Philippe Laban, and Greg Durrett. 2024.
+MiniCheck: Efficient fact-checking of LLMs on
+grounding documents. InProceedings of the 2024
+Conference on Empirical Methods in Natural Lan-
+guage Processing, pages 8818–8847, Miami, Florida,
+USA. Association for Computational Linguistics.
+S. M Towhidul Islam Tonmoy, S M Mehedi Zaman,
+Vinija Jain, Anku Rani, Vipula Rawte, Aman Chadha,
+and Amitava Das. 2024. A comprehensive survey of
+hallucination mitigation techniques in large language
+models.Preprint, arXiv:2401.01313.
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob
+Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz
+Kaiser, and Illia Polosukhin. 2017. Attention is all
+you need. InAdvances in Neural Information Pro-
+cessing Systems (NeurIPS), pages 5998–6008.
+Raul Vazquez, Timothee Mickus, Elaine Zosa, Teemu
+Vahtola, Jörg Tiedemann, Aman Sinha, Vincent
+Segonne, Fernando Sanchez Vega, Alessandro Ra-
+ganato, Jindˇrich Libovický, Jussi Karlgren, Shaox-
+iong Ji, Jindˇrich Helcl, Liane Guillou, Ona De Gib-
+ert, Jaione Bengoetxea, Joseph Attieh, and Mari-
+anna Apidianaki. 2025. SemEval-2025 task 3: Mu-
+SHROOM, the multilingual shared-task on halluci-
+nations and related observable overgeneration mis-
+takes. InProceedings of the 19th International Work-
+shop on Semantic Evaluation (SemEval-2025), pages
+2472–2497, Vienna, Austria. Association for Compu-
+tational Linguistics.
+Alex Wang, Kyunghyun Cho, and Mike Lewis. 2020.
+Asking and answering questions to evaluate the fac-
+tual consistency of summaries. InProceedings of the
+58th Annual Meeting of the Association for Compu-
+tational Linguistics, pages 5008–5020, Online. Asso-
+ciation for Computational Linguistics.
+Benjamin Warner, Antoine Chaffin, Benjamin Clavié,
+Orion Weller, Oskar Hallström, Said Taghadouini,
+Alexis Gallagher, Raja Biswas, Faisal Ladhak, Tom
+Aarsen, Nathan Cooper, Griffin Adams, Jeremy
+Howard, and Iacopo Poli. 2024. Smarter, better,
+faster, longer: A modern bidirectional encoder for
+fast, memory efficient, and long context finetuning
+and inference.Preprint, arXiv:2412.13663.
+Xueru Wen, Jie Lou, Xinyu Lu, Yuqiu Ji, Xinyan Guan,
+Yaojie Lu, Hongyu Lin, Ben He, Xianpei Han, De-
+bing Zhang, and Le Sun. 2025. On-policy self-
+alignment with fine-grained knowledge feedback for
+hallucination mitigation. InFindings of the Asso-
+ciation for Computational Linguistics: ACL 2025,
+pages 5215–5231, Vienna, Austria. Association for
+Computational Linguistics.
+Min-Hsuan Yeh, Max Kamachee, Seongheon Park, and
+Yixuan Li. 2025. Halluentity: Benchmarking and
+understanding entity-level hallucination detection.
+Transactions on Machine Learning Research.
+Weizhe Yuan, Graham Neubig, and Pengfei Liu. 2021.
+BARTScore: Evaluating generated text as text gener-
+ation. InAdvances in Neural Information Processing
+Systems.
+Yuheng Zha, Yichi Yang, Ruichen Li, and Zhiting Hu.
+2023. AlignScore: Evaluating factual consistency
+with a unified alignment function. InProceedings
+of the 61st Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers),
+pages 11328–11348, Toronto, Canada. Association
+for Computational Linguistics.
+Tianyi Zhang*, Varsha Kishore*, Felix Wu*, Kilian Q.
+Weinberger, and Yoav Artzi. 2020. Bertscore: Eval-
+uating text generation with bert. InInternational
+Conference on Learning Representations.
+Yue Zhang, Yafu Li, Leyang Cui, Deng Cai, Lemao Liu,
+Tingchen Fu, Xinting Huang, Enbo Zhao, Yu Zhang,
+Yulong Chen, Longyue Wang, Anh Tuan Luu, Wei
+Bi, Freda Shi, and Shuming Shi. 2025. Siren’s
+song in the ai ocean: A survey on hallucination in
+large language models.Computational Linguistics,
+51(4):1373–1418.
+Chunting Zhou, Graham Neubig, Jiatao Gu, Mona Diab,
+Francisco Guzmán, Luke Zettlemoyer, and Marjan
+Ghazvininejad. 2021. Detecting hallucinated content
+in conditional neural sequence generation. InFind-
+ings of the Association for Computational Linguis-
+tics: ACL-IJCNLP 2021, pages 1393–1404, Online.
+Association for Computational Linguistics.
+Ádám Kovács and Gábor Recski. 2025. Lettucedetect:
+A hallucination detection framework for rag applica-
+tions.Preprint, arXiv:2502.17125.
+A Hallucination Detection Method Details
+Discriminatively trained methods. MiniCheck
+(Tang et al., 2024) frames hallucination detection
+asevidence-grounded claim verification: given a
+generated sentence and supporting context, it pre-
+dicts whether the sentence is supported. The mod-
+els are trained with two synthetic data pipelines:
+Claim-to-Doc (C2D), which decomposes claims
+into atomic facts and builds multi-sentence evi-
+dence, and Doc-to-Claim (D2C), which derives
+summaries as claims from real documents and con-
+structs unsupported pairs by removing sentences
+from the original document. This yields sentence-
+level fact-checking models.
+AlignScore(Zha et al., 2023) frames hallucina-
+tion detection as aninformation alignmentproblem:
+for a text pair (a, b), a unified alignment function
+f: (a, b)→y estimates whether all information
+in b is present in, and non-contradictory with, a.
+The model is trained with multi-task learning on
+15 datasets spanning seven NLP task families, and
+training is further augmented with synthetic posi-
+tives from back translation and synthetic negatives
+from masking/infilling. At inference time, it splits
+the output into sentence-level claims and chunks
+evidence into segments, computes the alignment
+score of each claim against all evidence chunks,
+and aggregates these scores into an overall score;
+sentences with low alignment are treated as likely
+hallucinated.
+PsiloQA(Rykov et al., 2025) is an en-
+coder token-level hallucination detector based on
+ModernBERT (Warner et al., 2024). It takes in
+context–question–response triples and predicts a
+binary classification label for each response token.
+The model is trained on the English subset of the
+PsiloQA (Rykov et al., 2025) training data, which is
+synthetically generated from a three-stage pipeline:
+creating question-answer pairs from Wikipedia,
+eliciting potentially hallucinated answers from di-
+verse LLMs in a no-context setting, and automati-
+cally annotating hallucinated spans by comparing
+responses to the golden answers and retrieved con-
+text using GPT-4o.
+LettuceDetect(Ádám Kovács and Recski, 2025)
+is a token-level hallucination detection model built
+on ModernBERT (Warner et al., 2024). Similar
+to PsiloQA, it processes concatenated context–
+question–response triples and predicts whether
+each response token is hallucinated. In con-
+trast to PsiloQA, LettuceDetect is trained using
+RAGTruth’s dataset, which is labeled by human
+annotators.
+Generatively trained methods. FA V A(Mishra
+et al., 2024) frames hallucination detection as a
+generation problem. Given an LLM response and
+retrieved evidence, the model generates the re-
+sponse with markers that wrap unsupported content.
+FA V A is trained on synthetic data generated by first
+creating factually grounded seed passages from
+Wikipedia and then injecting errors while mark-
+ing corrupted spans. An LLM is trained on the
+resulting input–output pairs (erroneous input + evi-
+dence→ marked output). Hallucinated spans are
+identified by marking them as unsupported content
+during generation.
+RAGTruth(Niu et al., 2024) adopts a simpler
+generative approach by fine-tuning an LLM to di-
+rectly output hallucinated text spans when given a
+context–response pair. The LLM is fine-tuned on a
+large-scale training set (∼18,000 examples) includ-
+ing context_qa, data2text, and summarization tasks,
+which consists of human-annotated span-level la-
+bels of hallucinated content.
+Prompt-based methods.We also evaluate
+prompt-based detection methods that treat an LLM
+as a direct hallucination span extractor. Following
+Huang et al. (2025b), given a task question, evi-
+dence context, and generated response, the prompt
+asks the LLM to compare the response against
+the evidence and output hallucinated text as ex-
+plicit spans, i.e. substrings of the response. This
+approach requires no additional model training
+while still producing span-level outputs suitable for
+SHAM-Bench evaluation. Beyond a hand-crafted
+instruction prompt, we apply prompt optimization
+(Huang et al., 2025b) using MiPROv2 (Opsahl-Ong
+et al., 2024) to maximizeF 1 scores.
+B Metric Choice
+F1 score is intentionally simple, but it is well
+aligned with the span-detection task evaluated in
+SHAM-Bench. Because gold annotations and
+model predictions are represented as sets of hal-
+lucinated response tokens, precision measures how
+many predicted hallucinated tokens are correct and
+recall measures how many gold hallucinated tokens
+are identified. F 1 combines these quantities into
+a single positive-class overlap score while avoid-
+ing the inflated performance that can arise from
+metrics dominated by the much larger set of non-
+hallucinated tokens.
+Other overlap-based metrics would capture
+closely related information. For example, Vazquez
+et al. (2025) uses intersection-over-union (IoU);
+for a fixed predicted token set and gold token set,
+IoU and F1 are monotonic transformations of the
+same overlap counts, so they are expected to pro-
+duce similar rankings. Threshold-independent met-
+rics such as AUPRC and AUROC used in Yeh
+et al. (2025) can be useful when systems output
+calibrated confidence scores, but several SHAM-
+Bench systems, including prompt-based and gen-
+erative span-extraction methods, output discrete
+spans without comparable scores. Balanced accu-
+racy and macro-F1 that provide balanced weighting
+of positive and negative classes reported in Bao
+et al. (2025) are also less directly aligned with our
+goal of measuring detection quality for the positive
+hallucinated-token class. We therefore use token-
+level F1 as the primary span-level metric and report
+sentence-level F1 as a complementary view when
+methods operate at sentence granularity.
+C Failure Category Definitions
+We classify missed ground-truth spans into five
+categories for the prompt-based failure analysis in
+Section 6. These categories are intended to distin-
+guish likely annotation artifacts from substantive
+detector failures, and to separate different types of
+unsupported content.
+Labeling error.This category covers cases in
+which the missed “ground-truth hallucination” is
+not clearly a detector failure because the gold an-
+notation itself is questionable. The annotated span
+may be directly supported by the source, may con-
+stitute an acceptable paraphrase or modest infer-
+ence, or may reflect an annotation-boundary arti-
+fact, such as a fragment, duplicate span, discourse
+marker, or non-factual token. In such cases, the de-
+tector may have appropriately ignored the span or
+identified the substantive hallucination with a dif-
+ferent boundary. This category therefore captures
+annotation-side noise rather than a clear failure to
+detect unsupported content.
+Unsupported detail.This category covers gen-
+uine hallucination misses in which the response in-
+troduces concrete information that is not supported
+by the source. The unsupported content may be
+an added attribute, procedural step, recommenda-
+tion, purpose, causal explanation, exact descriptor,
+or schema-derived claim. It also includes cases in
+which missing or null metadata is converted into an
+affirmative factual assertion, such as treating an un-
+known ambience field as evidence that a restaurant
+is “casual” or treating an unspecified amenity as
+absent. The defining property is that the response
+adds a specific fact-like detail that is not licensed
+by the available evidence.
+Overgeneralization.Overgeneralization errors
+occur when the response remains loosely connected
+to the source but changes the strength, scope, cer-
+tainty, or characterization of the supported claim.
+The response may turn narrow evidence into a
+broader rule, extrapolate from a single example to
+a general conclusion, or replace a source-supported
+description with a stronger or subtly different one.
+Unlike unsupported-detail errors, these cases often
+do not introduce a wholly fabricated fact; instead,
+they overextend or semantically drift from what the
+source establishes.
+Misattribution.This category covers cases in
+which content may be related to the available evi-
+dence but is assigned to the wrong source, entity,
+task direction, comparison frame, status, or eviden-
+tial basis. For example, a response may claim that
+a detail comes from a particular passage when it
+does not, merge information from separate cases,
+apply facts about one entity to another, or answer
+the reverse of the intended task. The central error
+is therefore not merely a lack of support, but the
+placement of otherwise plausible information in
+the wrong evidential or contextual frame.
+Subjective language.This category covers un-
+supported evaluative, promotional, sentimental, or
+ambience-related wording. The response may add
+judgments such as “friendly,” “cozy,” “popular,”
+“beautiful,” or other claims about reception, service
+quality, or atmosphere that are not grounded in the
+source. Although these spans may sound plausible
+and are often softer than concrete factual fabrica-
+tions, they still introduce unsupported characteri-
+zations. We separate this category because such
+language reflects a distinct form of embellishment
+rather than a specific factual addition.
+D Full Experiment Results
+The complete prompt-based method results with
+sentence-level F1 scores is given in Table 5. The
+full set of experimental results for span-level label-
+ing with dataset breakdown can be found in Table 6,
+sentence-level results in Table 7, span-level preci-
+sion/recall results in Table 8, and sentence-level
+precision/recall results in Table 9.
+0
+10
+20
+30Count
+n=219, median=-7.00, omitted=3
+faithbench / summarization
+0
+5
+10
+15Count
+n=160, median=0.00, omitted=21
+favabench / open_qa
+0
+2
+4
+6
+8Count
+n=146, median=75.50, omitted=62
+halluentity / open_biography
+0
+10
+20
+30Count
+n=149, median=4.00, omitted=10
+mushroom / open_qa
+0
+10
+20
+30Count
+n=144, median=-4.50, omitted=17
+ragtruth / context_qa
+0
+25
+50
+75
+100Count
+n=542, median=-1.00, omitted=1
+ragtruth / data2txt
+0
+20
+40Count
+n=181, median=-1.00, omitted=1
+ragtruth / summarization
+0
+20
+40
+60Count
+n=325, median=1.00, omitted=2
+zhou / mt
+100
+ 80
+ 60
+ 40
+ 20
+ 0 20 40 60 80 100
+Overprediction words
+0
+50
+100
+150Count
+n=1636, median=-1.00, omitted=16
+zhou / summarization
+Prompt GPT-5-mini reasoning overprediction distribution
+Examples Zero overprediction
+Figure 3: Distribution of over-prediction lengths for
+overlapping spans predicted by prompting GPT-5-mini
+with reasoning, grouped by dataset and query type. Neg-
+ative values indicate under-prediction.
+Method Reason Opt Overall (std) open_qa ctx_qa data2txt open_bio summ mt
+Span-level
+prompt (GPT-5-mini)✗ ✗ 0.425 (0.09) 0.386 0.553 0.321 0.486 0.471 0.331
+prompt (GPT-5-mini)✓ ✗ 0.498(0.07)0.4020.603 0.528 0.5250.495 0.435
+prompt (GPT-5-mini)✓ ✓ 0.497 (0.09) 0.364 0.6360.5360.4760.532 0.437
+prompt (Qwen3-4B)✗ ✗ 0.298 (0.07) 0.343 0.176 0.255 0.362 0.306 0.347
+prompt (Qwen3-4B)✓ ✗ 0.442 (0.11) 0.369 0.647 0.511 0.328 0.457 0.338
+prompt (Qwen3-4B)✓ ✓ 0.446 (0.15) 0.329 0.748 0.490 0.328 0.462 0.316
+prompt (Olmo3-7B-Inst)✗ ✗ 0.383 (0.14) 0.322 0.670 0.346 0.261 0.422 0.278
+prompt (Olmo3-7B-Think)✓ ✗ 0.425 (0.07) 0.355 0.539 0.495 0.384 0.442 0.338
+prompt (Olmo3-7B-Think)✓ ✓ 0.435 (0.16) 0.3480.7900.360 0.317 0.451 0.343
+Sentence-level
+prompt (GPT-5-mini)✗ ✗ 0.641 (0.11) 0.620 0.561 0.447 0.772 0.705 0.740
+prompt (GPT-5-mini)✓ ✗ 0.691 (0.07)0.6330.610 0.635 0.784 0.726 0.759
+prompt (GPT-5-mini)✓ ✓ 0.705(0.06) 0.631 0.6400.662 0.787 0.731 0.779
+prompt (Qwen3-4B)✗ ✗ 0.504 (0.16) 0.557 0.197 0.391 0.615 0.569 0.693
+prompt (Qwen3-4B)✓ ✗ 0.631 (0.06) 0.573 0.659 0.625 0.541 0.667 0.720
+prompt (Qwen3-4B)✓ ✓ 0.630 (0.09) 0.560 0.758 0.591 0.524 0.610 0.736
+prompt (Olmo3-7B-Inst)✗ ✗ 0.559 (0.12) 0.530 0.675 0.354 0.484 0.612 0.697
+prompt (Olmo3-7B-Think)✓ ✗ 0.620 (0.05) 0.566 0.554 0.616 0.609 0.673 0.699
+prompt (Olmo3-7B-Think)✓ ✓ 0.587 (0.14) 0.5530.7900.362 0.500 0.614 0.702
+Table 5: Average span- and sentence-level F1 scores of prompt-based hallucination detection methods on SHAM-
+Bench aggregated by task.Reasonandoptindicate whether reasoning and prompt optimization are used. The
+overallcolumn shows the unweighted mean and standard deviation of six task scores. Highest score in each column
+inboldand the second highest score is underlined .
+Method Reasoning Prompt
+Optimization
+context_qa data2txt mt open_bio open_qa summ
+ragtruth ragtruth zhou halluentity favabench mushroom faithbench ragtruth zhou
+PsiloQA (ModernBERT-base) – – 0.072 0.089 0.216 0.363 0.210 0.556 0.225 0.053 0.547
+LettuceDetect (lettuce-large) – – 0.833 0.614 0.382 0.198 0.242 0.463 0.307 0.6950.559
+RAGTruth (ft-llama2-13B) – – 0.865 0.6540.398 0.3540.3270.435 0.3230.8350.357
+FA V A (ft-llama2-7B) – – 0.695 0.243 0.411 0.244 0.235 0.463 0.310 0.761 0.228
+Prompt (GPT-5-mini)✗ ✗ 0.553 0.321 0.331 0.486 0.261 0.597 0.353 0.497 0.504
+Prompt (GPT-5-mini)✓ ✗ 0.603 0.528 0.435 0.5250.2600.6420.387 0.541 0.514
+Prompt (GPT-5-mini)✓ ✓ 0.636 0.5360.4370.476 0.271 0.5200.4220.575 0.554
+Prompt (Qwen3-4B)✗ ✗ 0.176 0.255 0.347 0.362 0.180 0.620 0.178 0.176 0.413
+Prompt (Qwen3-4B)✓ ✗ 0.647 0.511 0.338 0.328 0.234 0.597 0.333 0.720 0.385
+Prompt (Qwen3-4B)✓ ✓ 0.748 0.490 0.316 0.328 0.262 0.442 0.353 0.753 0.372
+Prompt (Olmo-3-7B-Instruct)✗ ✗ 0.670 0.346 0.277 0.261 0.199 0.532 0.251 0.592 0.409
+Prompt (Olmo-3-7B-Think)✓ ✗ 0.538 0.495 0.338 0.384 0.214 0.595 0.327 0.594 0.416
+Prompt (Olmo-3-7B-Think)✓ ✓ 0.790 0.360 0.343 0.317 0.275 0.471 0.329 0.746 0.363
+Table 6: Average span-level F1 of hallucination detection methods on SHAM-Bench grouped by task and dataset. Highest score in each column inboldand the second highest
+score is underlined.
+Method Reasoning Prompt
+Optimization
+context_qa data2txt mt open_bio open_qa summ
+ragtruth ragtruth zhou halluentity favabench mushroom faithbench ragtruth zhou
+MiniCheck (Bespoke-7B) – – 0.466 0.493 0.715 0.777 0.413 0.926 0.378 0.730 0.875
+AlignScore (roberta-large) – – 0.492 0.290 0.734 0.745 0.428 0.915 0.348 0.626 0.864
+PsiloQA (ModernBERT-base) – – 0.094 0.214 0.671 0.754 0.379 0.898 0.389 0.0920.906
+LettuceDetect (lettuce-large) – – 0.842 0.716 0.625 0.342 0.410 0.885 0.363 0.713 0.845
+RAGTruth (ft-llama2-13B) – – 0.869 0.7520.507 0.533 0.437 0.819 0.3490.8450.566
+FA V A (ft-llama2-7B) – – 0.701 0.268 0.728 0.435 0.392 0.788 0.334 0.773 0.570
+Prompt (GPT-5-mini)✗ ✗ 0.561 0.447 0.740 0.772 0.445 0.917 0.454 0.522 0.882
+Prompt (GPT-5-mini)✓ ✗ 0.610 0.635 0.759 0.784 0.450 0.944 0.4930.569 0.885
+Prompt (GPT-5-mini)✓ ✓ 0.640 0.6620.779 0.7870.447 0.943 0.492 0.603 0.878
+Prompt (Qwen3-4B)✗ ✗ 0.197 0.391 0.693 0.615 0.370 0.875 0.341 0.215 0.813
+Prompt (Qwen3-4B)✓ ✗ 0.659 0.625 0.720 0.541 0.400 0.867 0.391 0.744 0.735
+Prompt (Qwen3-4B)✓ ✓ 0.758 0.591 0.736 0.524 0.414 0.808 0.391 0.774 0.618
+Prompt (Olmo-3-7B-Instruct)✗ ✗ 0.675 0.354 0.697 0.484 0.354 0.827 0.334 0.605 0.719
+Prompt (Olmo-3-7B-Think)✓ ✗ 0.554 0.616 0.699 0.609 0.402 0.843 0.424 0.618 0.790
+Prompt (Olmo-3-7B-Think)✓ ✓ 0.790 0.361 0.701 0.500 0.414 0.788 0.382 0.757 0.636
+Table 7: Average sentence-level F1 of hallucination detection methods on SHAM-Bench grouped by task and dataset. Highest score in each column is inboldand the second
+highest score is underlined.
+Method Reasoning Prompt
+Optimization
+context_qa data2txt mt open_bio open_qa summ
+ragtruth ragtruth zhou halluentity favabench mushroom faithbench ragtruth zhou
+PsiloQA (ModernBERT-base) – – 0.05 / 0.17 0.05 / 0.58 0.15 / 0.65 0.24 / 0.99 0.16 / 0.62 0.46 / 0.92 0.16 / 0.62 0.03 / 0.22 0.47 / 0.89
+LettuceDetect (lettuce-large) – – 0.84 / 0.84 0.63 / 0.67 0.36 / 0.53 0.16 / 0.31 0.22 / 0.45 0.37 / 0.88 0.35 / 0.31 0.70 / 0.72 0.52 / 0.75
+RAGTruth (ft-llama2-13B) – – 0.87 / 0.87 0.72 / 0.67 0.42 / 0.43 0.39 / 0.41 0.34 / 0.46 0.37 / 0.76 0.35 / 0.32 0.85 / 0.84 0.40 / 0.42
+FA V A (ft-llama2-7B) – – 0.71 / 0.69 0.26 / 0.25 0.43 / 0.47 0.46 / 0.23 0.27 / 0.35 0.49 / 0.63 0.34 / 0.31 0.77 / 0.76 0.40 / 0.22
+Prompt (GPT-5-mini)✗ ✗ 0.55 / 0.58 0.27 / 0.58 0.26 / 0.66 0.42 / 0.67 0.26 / 0.41 0.51 / 0.90 0.40 / 0.37 0.49 / 0.55 0.50 / 0.65
+Prompt (GPT-5-mini)✓ ✗ 0.61 / 0.62 0.51 / 0.64 0.38 / 0.66 0.49 / 0.64 0.26 / 0.42 0.55 / 0.94 0.51 / 0.36 0.55 / 0.56 0.55 / 0.61
+Prompt (GPT-5-mini)✓ ✓ 0.63 / 0.66 0.50 / 0.71 0.37 / 0.70 0.40 / 0.71 0.23 / 0.51 0.41 / 0.96 0.51 / 0.40 0.57 / 0.62 0.51 / 0.76
+Prompt (Qwen3-4B)✗ ✗ 0.21 / 0.18 0.32 / 0.28 0.31 / 0.55 0.58 / 0.32 0.28 / 0.22 0.75 / 0.63 0.32 / 0.16 0.20 / 0.18 0.51 / 0.46
+Prompt (Qwen3-4B)✓ ✗ 0.66 / 0.65 0.56 / 0.55 0.28 / 0.59 0.45 / 0.31 0.31 / 0.28 0.65 / 0.72 0.40 / 0.32 0.73 / 0.73 0.47 / 0.42
+Prompt (Qwen3-4B)✓ ✓ 0.76 / 0.75 0.51 / 0.53 0.25 / 0.63 0.36 / 0.36 0.30 / 0.34 0.40 / 0.76 0.39 / 0.35 0.76 / 0.77 0.37 / 0.49
+Prompt (Olmo-3-7B-Instruct)✗ ✗ 0.67 / 0.68 0.35 / 0.36 0.22 / 0.57 0.31 / 0.39 0.21 / 0.33 0.52 / 0.73 0.28 / 0.29 0.59 / 0.60 0.42 / 0.55
+Prompt (Olmo-3-7B-Think)✓ ✗ 0.56 / 0.54 0.57 / 0.51 0.29 / 0.54 0.53 / 0.36 0.29 / 0.25 0.64 / 0.71 0.43 / 0.32 0.61 / 0.59 0.51 / 0.46
+Prompt (Olmo-3-7B-Think)✓ ✓ 0.79 / 0.79 0.36 / 0.36 0.29 / 0.60 0.39 / 0.32 0.33 / 0.32 0.44 / 0.72 0.40 / 0.32 0.75 / 0.75 0.40 / 0.43
+Table 8: Average span-level precision/recall (P/R) of hallucination detection methods on SHAM-Bench grouped by task and dataset. Each cell reports precision followed by recall,
+rounded to two decimal places.
+Method Reasoning Prompt
+Optimization
+context_qa data2txt mt open_bio open_qa summ
+ragtruth ragtruth zhou halluentity favabench mushroom faithbench ragtruth zhou
+MiniCheck (Bespoke-7B) – – 0.45 / 0.52 0.43 / 0.67 0.71 / 0.73 0.84 / 0.77 0.35 / 0.64 0.92 / 0.96 0.42 / 0.37 0.72 / 0.75 0.88 / 0.88
+AlignScore (roberta-large) – – 0.48 / 0.53 0.25 / 0.43 0.74 / 0.74 0.79 / 0.76 0.36 / 0.67 0.91 / 0.94 0.38 / 0.34 0.62 / 0.64 0.86 / 0.86
+PsiloQA (ModernBERT-base) – – 0.07 / 0.18 0.13 / 0.64 0.66 / 0.69 0.65 / 1.00 0.29 / 0.71 0.88 / 0.95 0.30 / 0.68 0.06 / 0.23 0.91 / 0.91
+LettuceDetect (lettuce-large) – – 0.84 / 0.85 0.70 / 0.77 0.63 / 0.62 0.37 / 0.34 0.36 / 0.59 0.89 / 0.91 0.39 / 0.36 0.71 / 0.72 0.84 / 0.84
+RAGTruth (ft-llama2-13B) – – 0.88 / 0.87 0.78 / 0.75 0.51 / 0.51 0.78 / 0.45 0.45 / 0.52 0.85 / 0.81 0.36 / 0.34 0.85 / 0.84 0.57 / 0.57
+FA V A (ft-llama2-7B) – – 0.70 / 0.70 0.28 / 0.27 0.73 / 0.73 0.72 / 0.34 0.40 / 0.49 0.85 / 0.76 0.35 / 0.33 0.78 / 0.77 0.57 / 0.57
+Prompt (GPT-5-mini)✗ ✗ 0.56 / 0.59 0.37 / 0.67 0.73 / 0.75 0.82 / 0.77 0.42 / 0.57 0.92 / 0.94 0.46 / 0.48 0.50 / 0.57 0.88 / 0.88
+Prompt (GPT-5-mini)✓ ✗ 0.61 / 0.63 0.58 / 0.77 0.75 / 0.77 0.84 / 0.78 0.41 / 0.61 0.94 / 0.97 0.55 / 0.47 0.55 / 0.61 0.88 / 0.88
+Prompt (GPT-5-mini)✓ ✓ 0.64 / 0.66 0.62 / 0.79 0.78 / 0.79 0.86 / 0.77 0.39 / 0.63 0.94 / 0.96 0.55 / 0.47 0.59 / 0.63 0.88 / 0.88
+Prompt (Qwen3-4B)✗ ✗ 0.21 / 0.20 0.42 / 0.42 0.69 / 0.70 0.81 / 0.53 0.44 / 0.41 0.94 / 0.85 0.41 / 0.33 0.21 / 0.23 0.81 / 0.81
+Prompt (Qwen3-4B)✓ ✗ 0.67 / 0.66 0.65 / 0.64 0.72 / 0.73 0.81 / 0.45 0.48 / 0.42 0.94 / 0.84 0.43 / 0.38 0.75 / 0.75 0.74 / 0.73
+Prompt (Qwen3-4B)✓ ✓ 0.77 / 0.76 0.62 / 0.59 0.73 / 0.75 0.78 / 0.43 0.47 / 0.46 0.88 / 0.79 0.43 / 0.37 0.78 / 0.78 0.62 / 0.62
+Prompt (Olmo-3-7B-Instruct)✗ ✗ 0.68 / 0.68 0.35 / 0.36 0.69 / 0.71 0.62 / 0.47 0.35 / 0.45 0.88 / 0.83 0.35 / 0.35 0.60 / 0.61 0.72 / 0.72
+Prompt (Olmo-3-7B-Think)✓ ✗ 0.56 / 0.56 0.62 / 0.65 0.69 / 0.71 0.80 / 0.53 0.45 / 0.44 0.93 / 0.81 0.47 / 0.41 0.62 / 0.62 0.79 / 0.79
+Prompt (Olmo-3-7B-Think)✓ ✓ 0.79 / 0.79 0.36 / 0.36 0.70 / 0.71 0.77 / 0.40 0.48 / 0.44 0.87 / 0.76 0.42 / 0.37 0.76 / 0.76 0.64 / 0.64
+Table 9: Average sentence-level precision/recall (P/R) of hallucination detection methods on SHAM-Bench grouped by task and dataset. Each cell reports precision followed by
+recall, rounded to two decimal places.
+E Example Labeled Outputs
+Question
+Summarize the following text
+Context
+Lake Providence is a town in and the parish seat of East Carroll Parish in northeastern Louisiana, United States. University
+of Mississippi. About 55 percent of its undergraduates and 60 percent overall come from Mississippi, and 23 percent are
+minorities; international students come from 90 nations.
+Response with gold annotated spans
+Lake Providence is a town in Louisiana that is the parish seat of East Carroll Parish. The University of Mississippi has a
+student body that is 55% undergraduate and 60% overall from Mississippi. 23% of the student body are minorities and
+international students come from 90 nations.
+Response with predicted spans
+Lake Providence is a town in Louisiana that is the parish seat of East Carroll Parish. The University of Mississippi
+has a student body that is 55% undergraduate and 60% overall from Mississippi. 23% of the student body are
+minorities and international students come from 90 nations.
+Metrics
+Span: F1=0.5000, Precision=0.3333, Recall=1.0000
+Sentence: F1=1.0000, Precision=1.0000, Recall=1.0000
+Figure 4: Example FaithBench summarization output labeled by prompted GPT-5-mini with reasoning. The box
+shows the task question, grounding context, model response, gold hallucinated spans, model predicted spans, and
+the resulting metrics.
+Question
+Translate the following text from Chinese to English:
+附连插口10具有两个保持段11和12（图6显示了它们的截面），两个升离斜坡13，以及在保持段11和升离斜
+坡13之间的接合处的旋转止动部14。
+Context
+attachment socket 10 has two retaining segments 11 and 12 whose cross-section is shown in fig. 6, two lift-off ramps 13 and
+a rotational stop 14 at the junction between retaining segment 11 and a lift-off ramp 13.
+Response with gold annotated spans
+the attached plug 10 has two maintaining sections 11 and 12 (图 ) 6 shows their intersections, two uphill slopes 13, and
+a rotating stop unit 14 in the joints between the maintaining sections 11 and uphill slopes 13.
+Response with predicted spans
+the attached plug 10 has two maintaining sections 11 and 12 ( 图6 shows their intersections ), two uphill slopes 13 ,
+and a rotating stop unit 14 in the joints between the maintaining sections 11 and uphill slopes 13.
+Metrics
+Span: F1=0.0769, Precision=0.0417, Recall=0.5000
+Sentence: F1=1.0000, Precision=1.0000, Recall=1.0000
+Figure 5: Example Zhou machine-translation output labeled by prompted GPT-5-mini with reasoning. The box
+shows the task question, grounding context, model response, gold hallucinated spans, model predicted spans, and
+the resulting metrics.
+Question
+how to factory reset a htc one vx
+Context
+passage 1: 1 In order to switch off the device, hold down the Power button for a while. 2 Then press and hold the V olume
+Down + Power key for a couple of seconds. 3 When you see Bootloader Mode menu release held buttons. 4 From the menu
+choose option RECOVERY MODE by using V olume buttons to scroll and Power key to select options. 4 Congratulations! 5
+You should be right now in the expected mode.
+passage 2: 1 First of all, switch off the phone by using the Power rocker. 2 After that, press and hold V olume Down and
+Power buttons together for a couple of seconds. 3 You can release all keys when the Bootloader Mode appears on the screen.
+4 Choose the Factory Reset by pressing the V olume Down button to scroll and Power key to select.
+passage 3: Be sure to back up any data and files you want to keep before you do a factory reset. Hard reset your HTC One
+VX as follows: 1 Slide the Notifications panel open. 2 Tap Storage. 3 Tap Factory data reset. 4 Tap Reset phone, and then
+tap Erase everything.
+Response with gold annotated spans
+Based on the provided passages, here are the steps to factory reset an HTC One VX:
+1. Slide the Notifications panel open.
+2. Tap on Storage.
+3. Tap on Factory data reset.
+4. Tap on Reset phone.
+5. Tap on Erase everything.
+Alternatively, you can also perform a factory reset by following these steps:
+1. Hold down the Power button until the device shuts down.
+2. Press and hold the V olume Down and Power buttons together for a few seconds until the bootloader mode appears.
+3. Use the V olume down button to scroll to “Recovery Mode” and press the Power button to select.
+4. From the recovery menu, select “ wipe data /factory reset” and press the Power button to confirm.
+5. Wait for the process to complete.
+6. Once the reset is done, select “Reboot System” from the recovery menu and press the Power button to
+restart the device.
+Please note that performing a factory reset will erase all data on the device, so make sure to back up any important data
+before doing so.
+Response with predicted spans
+Based on the provided passages, here are the steps to factory reset an HTC One VX:
+1. Slide the Notifications panel open.
+2. Tap on Storage.
+3. Tap on Factory data reset.
+4. Tap on Reset phone.
+5. Tap on Erase everything.
+Alternatively, you can also perform a factory reset by following these steps:
+1. Hold down the Power button until the device shuts down.
+2. Press and hold the V olume Down and Power buttons together for a few seconds until the bootloader mode appears.
+3. Use the V olume down button to scroll to “Recovery Mode” and press the Power button to select.
+4. From the recovery menu, select “wipe Data/Factory Reset” and press the Power button to confirm.
+5. Wait for the process to complete.
+6. Once the reset is done, select “Reboot System” from the recovery menu and press the Power button to
+restart the device.
+Please note that performing a factory reset will erase all data on the device, so make sure to back up any important data
+before doing so.
+Metrics
+Span: F1=0.6750, Precision=0.5294, Recall=0.9310
+Sentence: F1=0.6667, Precision=0.6667, Recall=0.6667
+Figure 6: Example RAGTruth context_qa output labeled by prompted GPT-5-mini with reasoning. The box shows
+the task question, grounding passages, model response, gold hallucinated spans, model predicted spans, and the
+resulting metrics.
+F Prompt Templates
+System prompt
+Based on the provided information, identify incorrect spans in the given answer
+text.
+You will be provided with a question with some related information. You will also
+be given an answer to the question. Your task is to identify any specific parts of
+the answer that describes facts that are not supported by the provided information.
+If there are multiple incorrect segments, report each one separately.
+# Steps
+1. **Read the Question and Information**: Carefully read the provided question and
+information.
+2. **Analyze the Answer**: Carefully evaluate the given answer for accuracy
+regarding the question and the provided information.
+3. **Identify Incorrect Spans**: Mark the parts of the text that are incorrect,
+misleading, or irrelevant to the question and context provided in the question.
+# Output Format
+The output should be in JSON format as shown below:
+```json
+{
+"incorrect_spans": [
+"identified incorrect span",
+"another identified incorrect span"
+]
+}
+```
+If no incorrect spans are identified, return an empty list:
+```json
+{
+"incorrect_spans": []
+}
+```
+# Example 1
+**Input**:
+<question>
+What is the capital of France?
+Answer the question based on the following information:
+Paris, the capital city of France, is a metropolis steeped in history, culture, and
+global significance. This comprehensive analysis will delve into the city's current
+status, basic information, and historical importance, providing a thorough
+understanding of why Paris is not just the capital of France, but also one of the
+world's most influential cities.
+</question>
+<answer>
+The capital of France is Berlin.
+</answer>
+**Output**:
+```json
+{
+"incorrect_spans": [
+"Berlin"
+]
+}
+```
+# Example 2
+**Input**:
+<question>
+Answer the question: "What did Mara do?" based on the following paragraph:
+The train arrived at the platform without a sound, its windows glowing softly as if
+lit by bottled moonlight. Mara hesitated before stepping aboard, aware that
+everyone else seemed to know exactly where they were going, while she alone carried
+a ticket with no destination printed on it. As the doors closed, the city outside
+blurred into a ribbon of color and memory, and she realized with a quiet thrill that
+whatever waited at the end of the line would not be something she could ever return
+from--only something she could become.
+</question>
+<answer>
+Mara got off a train that arrived without a sound while holding a ticket to
+Copenhagen.
+</answer>
+**Output**:
+```json
+{
+"incorrect_spans": [
+"got off",
+"Copenhagen"
+]
+}
+```
+# Example 3
+**Input**:
+<question>
+Translate the following text from Chinese to English:
+请去帮我买点零食。
+The reference translation is:
+Please go and buy me buy some snacks.
+</question>
+<answer>
+Please help me buy groceries.
+</answer>
+**Output**:
+```json
+{
+"incorrect_spans": [
+"groceries"
+]
+}
+```
+# Example 4
+**Input**:
+<question>
+Summarize the following news:
+The Riverton City Council voted unanimously Tuesday night to approve a six-month
+pilot program that will introduce late-night bus service across five major routes.
+The program, scheduled to begin in March, is intended to support shift workers,
+expand transportation access, and reduce nighttime traffic incidents linked to
+fatigue and impaired driving.
+Under the plan, buses will run every 30 minutes between midnight and 4 a.m.,
+connecting downtown Riverton with several residential neighborhoods and the
+industrial district on the city's east side. Transportation Director Lena Morales
+said the routes were selected based on employment data, hospital locations, and
+feedback from residents collected during a public survey last fall.
+Funding for the pilot will come from a combination of state transit grants and
+unused funds from a postponed road expansion project. City officials emphasized
+that ridership levels, operating costs, and safety outcomes will be closely
+monitored throughout the trial period. At the end of six months, the council will
+vote on whether to make the service permanent, expand it, or discontinue the
+program altogether.
+</question>
+<answer>
+The Riverton City Council approved a six-month pilot program to run late-night
+buses on five major routes starting in March. The service will operate every 30
+minutes from midnight to 4 a.m., targeting shift workers and improving nighttime
+safety. Officials will monitor costs, ridership, and safety before deciding whether
+to continue or expand the program.
+</answer>
+**Output**:
+```json
+{
+"incorrect_spans": []
+}
+```
+# Notes
+- It is possible for multiple incorrect spans to exist in the same answer; make sure
+to capture each one.
+- If the answer is fully correct, return`"incorrect_spans": []`.
+- Try to identify short spans as short as possible that captures the incorrect part
+of the answer.
+- The spans should appear in the same order as they appear in the original answer.
+User prompt
+<question>
+{query}
+</question>
+<answer>
+{answer}
+</answer>
