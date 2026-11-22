@@ -2163,11 +2163,16 @@ def _fill_comparison_md(
         ),
         (
             "3.2 claim table: our P/R/F1",
-            r"\| \*\*Ours \(Step 8 \+ Step 9\)\*\* \| \*\*[\d.]+ / "
-            r"[\d.]+ / [\d.]+\*\* \|",
+            # The claim-level table gives each number its own column, so
+            # the row has to be matched and rewritten cell by cell. It
+            # used to be a single "P / R / F1" cell, but the cited works
+            # publish a precision and an F1 and no recall, so one
+            # combined column overstated what those rows carry.
+            r"\| \*\*Ours \(Step 8 \+ Step 9\)\*\* \| \*\*[\d.]+\*\* \| "
+            r"\*\*[\d.]+\*\* \| \*\*[\d.]+\*\* \|",
             lambda v, m: (
-                f"| **Ours (Step 8 + Step 9)** | **{v('claim_precision')} / "
-                f"{v('claim_recall')} / {v('claim_f1')}** |"
+                f"| **Ours (Step 8 + Step 9)** | **{v('claim_precision')}** | "
+                f"**{v('claim_recall')}** | **{v('claim_f1')}** |"
             ),
             ("claim_precision", "claim_recall", "claim_f1"),
         ),

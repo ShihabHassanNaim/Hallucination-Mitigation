@@ -13,7 +13,7 @@ Detection,Sentence Accuracy,"0.829 [0.809, 0.851]",-,0.7440 (ensemble),0.817 (mm
 Detection,Spearman rho,"0.736 [0.712, 0.762]",-,0.5285 (T5 + syn),0.737 (mm-linreg),0.770 (Halu-NLP),0.636 (Sent-T5 XL),0.693 (Voting),-,TPR at FPR,-,-,-
 Detection,End-to-End Accuracy,"0.424 [0.399, 0.447]",-,-,-,-,-,-,-,-,-,-,-
 Claim Level,F1,0.811,-,-,-,-,-,0.69 (Voting),-,-,-,-,-
-Claim Level,P/R,0.467 / 0.810,-,-,-,-,-,0.80 / 0.69,-,-,-,-,-
+Claim Level,P/R,0.467 / 0.810,-,-,-,-,-,0.80 / not reported,-,-,-,-,-
 Mitigation,Pre-mitigation Score,0.842 (BERTScore F1),-0.63,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a
 Mitigation,Post-mitigation Score,0.835 (BERTScore F1),-0.07 (LaBSE) / -0.14 (ALTI) / -0.12 (XNLI) / -0.03 (COMET-QE),n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a
 Mitigation,Delta,"-0.007 [-0.022, +0.007] (n=16 regenerated) — not positive",+0.56 / +0.49 / +0.51 / +0.60,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a

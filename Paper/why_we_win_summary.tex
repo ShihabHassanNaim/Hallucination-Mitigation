@@ -83,19 +83,17 @@ answer, so the $\Delta$ is negative and reported as an open result.
 \begin{table}[ht]
 \centering
 \small
-\begin{tabular}{lcc}
+\begin{tabular}{lcccc}
 \hline
-\textbf{Method} & \textbf{P / R / F1} & \textbf{Granularity} \\
+\textbf{Method} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} & \textbf{Granularity} \\
 \hline
-\textbf{Ours (Step 8 + Step 9)} & \textbf{0.467 / 0.810 / 0.811} & Atomic claims \\
-TU Wien -- Vectara (\texttt{mm-linreg}) & 0.81 / 0.71 (aware) & Whole sentence \\
-AILS-NTUA -- Voting & 0.80 / 0.69 (aware) & Whole sentence \\
-AILS-NTUA -- NLI & 0.77 / 0.59 (aware) & Whole sentence \\
-INSIDE -- EigenScore & 0.80 (SQuAD) & Whole sentence \\
-LLM-Check -- Attention & 0.72 (FAVA) & Whole sentence \\
+\textbf{Ours (Step 8 + Step 9)} & \textbf{0.467} & \textbf{0.810} & \textbf{0.811} & Atomic claims \\
+TU Wien -- Vectara (\texttt{mm-linreg}) & 0.81 & not reported & 0.71 & Whole sentence \\
+AILS-NTUA -- Voting & 0.80 & not reported & 0.69 & Whole sentence \\
+AILS-NTUA -- NLI & 0.77 & not reported & 0.59 & Whole sentence \\
 \hline
 \end{tabular}
-\caption{Claim-level F1. Our F1 is above the cited sentence-level comparables; the contribution claimed here is granularity --- every atomic claim is scored independently, where every other system reduces the answer to a single sentence-level score.}
+\caption{Claim-level F1. Our F1 is above the cited sentence-level comparables; the contribution claimed here is granularity --- every atomic claim is scored independently, where every other system reduces the answer to a single sentence-level score. The cited works publish a precision and an F1 but no recall, so their recall column is left as unreported.}
 \label{tab:claim-f1-2}
 \end{table}
 

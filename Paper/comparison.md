@@ -163,12 +163,16 @@ same data, and the gap there is much smaller.
 
 **Claim-level F1 is our clearest score win.**
 
-| System | P / R / F1 | Granularity |
-|---|---|---|
-| **Ours (Step 8 + Step 9)** | **0.467 / 0.810 / 0.811** | Atomic claims |
-| TU Wien — Vectara | 0.81 / 0.71 | Whole sentence |
-| AILS-NTUA — Voting | 0.80 / 0.69 | Whole sentence |
-| AILS-NTUA — NLI | 0.77 / 0.59 | Whole sentence |
+| System | Precision | Recall | F1 | Granularity |
+|---|---|---|---|---|
+| **Ours (Step 8 + Step 9)** | **0.467** | **0.810** | **0.811** | Atomic claims |
+| TU Wien — Vectara | 0.81 | not reported | 0.71 | Whole sentence |
+| AILS-NTUA — Voting | 0.80 | not reported | 0.69 | Whole sentence |
+| AILS-NTUA — NLI | 0.77 | not reported | 0.59 | Whole sentence |
+
+The cited works publish a precision and an F1 but no recall, so the recall column is
+left empty for them rather than filled with a guess. F1 is the column the comparison
+is made on, and it is the only one all four systems report.
 
 Our F1 of 0.811 is above the best cited comparable of 0.71. There is a second reason this
 row matters beyond the number. Every other system collapses the answer to one score for

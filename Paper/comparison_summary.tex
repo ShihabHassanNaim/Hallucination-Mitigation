@@ -77,17 +77,19 @@ paper's native test set.}
 \begin{table}[ht]
 \centering
 \small
-\begin{tabular}{lccc}
+\begin{tabular}{lcccc}
 \hline
-\textbf{Method} & \textbf{P / R / F1} & \textbf{Granularity} & \textbf{Dataset} \\
+\textbf{Method} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} & \textbf{Granularity} \\
 \hline
-\textbf{Ours (Steps 8 + 9)} & \textbf{0.467 / 0.810 / 0.811} & Atomic claims & HaluEval \\
-AILS-NTUA -- NLI & 0.77 / 0.59 (aware) & Sentence & SHROOM \\
-AILS-NTUA -- Voting & 0.80 / 0.69 (aware) & Sentence & SHROOM \\
-TU Wien -- Vectara & 0.81 / 0.71 (aware) & Sentence & SHROOM \\
+\textbf{Ours (Steps 8 + 9)} & \textbf{0.467} & \textbf{0.810} & \textbf{0.811} & Atomic claims \\
+AILS-NTUA -- NLI & 0.77 & not reported & 0.59 & Sentence \\
+AILS-NTUA -- Voting & 0.80 & not reported & 0.69 & Sentence \\
+TU Wien -- Vectara & 0.81 & not reported & 0.71 & Sentence \\
 \hline
 \end{tabular}
-\caption{Claim-level precision, recall, and F1.}
+\caption{Claim-level precision, recall, and F1. The cited works publish a
+precision and an F1 but no recall, so their recall column is left as
+unreported rather than filled with a guess.}
 \label{tab:claim-f1}
 \end{table}
 
