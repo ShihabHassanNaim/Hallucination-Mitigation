@@ -16,6 +16,20 @@ dataset-by-dataset score comparisons already live in
 (HaluEval). This file answers a different question: *who else built a
 pipeline shaped like ours?*
 
+**How to read this file.**
+
+| Section | Contents |
+|---|---|
+| §1 | The six architectural characteristics (C1–C6) and CRISP's implementation of each |
+| §2 | The landscape grid — one row per paper, one column per characteristic |
+| **§3** | **The detailed comparison tables** — stage-by-stage, per-characteristic, fusion, mitigation, abstention, verifier, head-to-head, what to borrow, and the gap |
+| §4 | The papers one at a time, each with its workflow diagram and match/differ analysis |
+| §5 | Where CRISP stands: the gap, concrete improvements, counter-arguments |
+| §6 | Reference list |
+
+**If you only read one section, read §3.** It is the quantitative version of
+the argument the whole document makes.
+
 ---
 
 ## 1. The six architectural characteristics
@@ -66,11 +80,308 @@ against them.
 
 ---
 
-# 3. The papers in detail
+# 3. Detailed comparison tables
+
+This section is the quantitative companion to §4. Every table here is
+derived from the same method-section readings as the per-paper sections
+below, so the two halves of the document cannot disagree.
+
+## 3.1 Stage-by-stage: what each paper actually does
+
+Read down each column to see how many papers implement a stage at all; read
+across each row to see what a given paper's pipeline is made of.
+
+**Legend.** ✓ = the stage is present. — = absent. **?** = present but *not
+confirmed from the paper itself* (only CoVe's retrieval, where the abstract
+does not state that external sources are used — see §4.16).
+
+| Paper | Query understanding | Retrieval | Rerank | Generation | Claim split | Verification | Fusion | Mitigation | Abstain |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| **CRISP (ours)** | ✓ | ✓ hybrid | ✓ cross-enc | ✓ | ✓ | ✓ NLI | ✓ fitted 7-comp | ✓ span edit | ✓ |
+| **RAGChecker** | — | ✓ | — | ✓ | ✓ | ✓ entail | — | — | — |
+| **FAVA** | — | ✓ | — | ✓ | — | ✓ learned tag | — | ✓ | — |
+| **FActScore** | — | ✓ | — | ✓ | ✓ | ✓ LM prompt | — | — | — |
+| **RAGAS** | — | ✓ | — | ✓ | ✓ | ✓ LLM judge | — | — | — |
+| **SAFE** | — | ✓ web | — | ✓ | ✓ | ✓ LLM judge | — | — | — |
+| **AlignScore** | — | — | — | — | — | ✓ align model | — | — | — |
+| **CRAG** | ✓ rewrite | ✓ | ✓ | ✓ | — | — | ✓ 1 signal | ✓ evidence | ✓ |
+| **Self-RAG** | ✓ | ✓ | — | ✓ | ✓ segments | ✓ self-reflect | ✓ token prob | — | — |
+| **Sufficient Context** | — | — | — | ✓ | — | — | ✓ 2 signals | — | ✓ |
+| **A Stitch in Time** | ✓ | ✓ Bing | — | ✓ | ✓ concepts | ✓ QA | ✓ token prob | ✓ sentence | — |
+| **Hybrid Retrieval** | ✓ expand | ✓ hybrid RRF | — | ✓ | — | — | — | — | ✓ reject |
+| **Semantic Uncertainty** | — | — | — | ✓ | — | ✓ entail cluster | ✓ entropy | — | ✓ |
+| **SelfCheckGPT** | — | — | — | ✓ | ✓ sentences | ✓ self-consist | ✓ 3 variants | — | — |
+| **Don't Hallucinate** | — | — | — | ✓ | — | — | ✓ multi-LLM | — | ✓ |
+| **ARES** | — | ✓ | — | ✓ | — | ✓ 3 judges | ✓ PPI | — | — |
+| **CoVe** | ✓ | ? | — | ✓ | ✓ questions | ✓ self-check | — | ✓ final answer | — |
+| **FLARE** | ✓ predict | ✓ | — | ✓ | — | ✓ token conf | — | ✓ revise | — |
+| **DRAGIN** | ✓ need | ✓ | — | ✓ | — | — | — | — | — |
+| **IRCoT** | ✓ CoT | ✓ | — | ✓ | ✓ | — | — | — | — |
+
+**Counting stage coverage** (counted from the table above: 19 papers, CRISP
+excluded):
+
+| Stage | Papers implementing it | Depth of the minority |
+|---|---:|---|
+| Generation | 18 / 19 | Only AlignScore is a standalone verifier |
+| Retrieval | 14 / 19 | Only CRAG and Hybrid Retrieval do hybrid + weighting |
+| Verification | 13 / 19 | Only SAFE and RAGAS use an LLM judge; the rest use entailment |
+| Claim-level split | 9 / 19 | FAVA and Self-RAG split for *editing*, the rest for *scoring* |
+| Query understanding | 8 / 19 | CRAG, Self-RAG, A Stitch in Time, CoVe, FLARE, DRAGIN, IRCoT, Hybrid Retrieval |
+| **Fusion** | **8 / 19** | **The thin one** — see §3.3 |
+| Mitigation | 5 / 19 | Only FAVA edits at *span* granularity; the rest edit evidence or the whole answer |
+| Abstention | 5 / 19 | Sufficient Context is the only one with a *fitted* gate |
+| Rerank | 1 / 19 | Only CRAG reranks; CRISP and Hybrid Retrieval do not |
+
+**The two thinnest rows are the ones CRISP contributes to** — fusion (8/19)
+and mitigation (5/19). Reranking is thinner still (1/19), but CRISP is in the
+same category as CRAG there rather than ahead of it.
+
+## 3.2 The six characteristics, itemised
+
+The ✓/— grid in §2 tells you *whether* a paper has a characteristic. This
+table says *what form* it takes, because "has fusion" means something very
+different in Self-RAG than in Sufficient Context.
+
+| Paper | C1 scope | C2 pipeline shape | C3 verification unit | C4 fusion mechanism | C5 mitigation target | C6 gate signal |
+|---|---|---|---|---|---|---|
+| **CRISP** | RAG answers | 13 steps, 6→7 before 2 | atomic claim vs premise | **logistic head, 7 z-scored features, fitted** | **claim span, re-verified** | **fused risk score** |
+| **RAGChecker** | RAG answers | offline diagnostic | claim vs chunk/GT | — | — | — |
+| **FAVA** | LM output | retrieve→tag→edit | tagged span + type | — | entity/relation/sentence/invented spans | — |
+| **FActScore** | long-form text | retrieve→split→verify | atomic fact | — | — | — |
+| **RAGAS** | RAG answers | extract→judge | statement | — | — | — |
+| **SAFE** | long-form text | split→search→judge | fact | — | — | — |
+| **AlignScore** | any text pair | single model | text pair | — | — | — |
+| **CRAG** | RAG answers | retrieve→gate→correct→gen | — | single relevance score, 3 bands | **evidence** (knowledge strips) | retrieval evaluator |
+| **Self-RAG** | RAG answers | reflect→retrieve→generate | segment | weighted token probs, `w^G` | — | — |
+| **Sufficient Context** | RAG answers | classify→generate→reject | — | logistic, 2 features | — | sufficiency + self-confidence |
+| **A Stitch in Time** | LM output | screen→validate→rewrite | concept | min token probability | **sentence**, instruction-based | — |
+| **Hybrid Retrieval** | RAG answers | expand→fuse→ground | — | — | — | retrieval adequacy prompt |
+| **Semantic Uncertainty** | LM output | sample→cluster→entropy | semantic cluster | entropy over clusters | — | semantic entropy |
+| **SelfCheckGPT** | LM output | sample→score | sentence | 3 score variants, merged | — | — |
+| **Don't Hallucinate** | LM output | multi-model→vote | — | cross-model vote | — | knowledge-gap vote |
+| **ARES** | RAG answers | annotate→judge→PPI | context/answer pair | prediction-powered inference | — | — |
+| **CoVe** | RAG answers | draft→plan→verify→answer | verification question | — | **whole answer** | — |
+| **FLARE** | LM output | predict→retrieve→revise | — | — | sentence | token confidence |
+| **DRAGIN** | LM output | need→retrieve→loop | — | — | — | — |
+| **IRCoT** | multi-hop QA | CoT→retrieve→loop | — | — | — | — |
+
+**The three rows that matter most for the thesis claim:**
+
+| Claim | CRISP's position | Strongest competing position | Verdict |
+|---|---|---|---|
+| "We fuse multiple signals into one risk score" | 7 z-scored features, fitted logistic head, explicit sign map | Self-RAG (learned token probs), Sufficient Context (logistic, 2 features), ARES (PPI) | **CRISP is stronger on feature count and sign discipline**; all three are stronger on *training rigor* — ARES especially |
+| "We mitigate by rewriting only what is unsupported" | per-claim span edit + re-verification loop | FAVA (learned span tagger), A Stitch in Time (instruction repair) | **CRISP is unique in re-verifying its own edit**; the others are stronger in *edit quality* — FAVA has a trained model, ours uses heuristics |
+| "We abstain when the answer is risky" | fused risk vs thresholds 0.30/0.70 | Sufficient Context (fitted logistic gate) | **CRISP has a richer gate signal**; Sufficient Context has a *fitted* gate and a *validated* rejection gain (2–10%) |
+
+## 3.3 The fusion comparison (C4) — the thinnest category
+
+Since C4 is where CRISP claims a contribution, here is every fusion
+mechanism found, in full detail.
+
+| Paper | Signals fused | How combined | Fitted or hand-set | Learned on |
+|---|---|---|---|---|
+| **CRISP** | similarity, retrieval_top1, nli, coverage, eedc, detector_trust, grounding | logistic head over z-scored features, explicit sign map | **fitted** (logistic regression, 496 rows) | labelled CRISP rows |
+| **Self-RAG** | IsRel, IsSup, IsUse | `S = Σ_G w^G · s_t^G`, normalised token probs | learned critic + hand-set `w^G` (1.0/1.0/0.5) | 4k–20k GPT-4-labelled examples per type |
+| **Sufficient Context** | context sufficiency, self-rated confidence | logistic regression → rejection | **fitted** | labelled RAG outputs |
+| **ARES** | context relevance, faithfulness, answer relevance | prediction-powered inference w/ human correction | trained judges + statistical correction | synthetic + small human set |
+| **A Stitch in Time** | min token probability per concept | threshold on the single minimum | threshold | — |
+| **CRAG** | retrieval relevance score | 3-band threshold (correct/ambiguous/incorrect) | thresholds, per dataset | — |
+| **Semantic Uncertainty** | samples → clusters | entropy over clusters | — | — |
+| **SelfCheckGPT** | BERTScore, QA, n-gram | normalised merge of 3 variants | — | n-gram model trained on R + samples |
+| **Don't Hallucinate** | multiple LLMs' verdicts | cooperative / competitive voting | — | — |
+
+**What CRISP has that nobody else has:** a *separately fitted* head over
+*heterogeneous* features, with the sign of every component stated explicitly
+in the config:
+
+| Component | Sign | Direction | Fitted weight | Component std |
+|---|:-:|---|---:|---:|
+| `similarity` | +1 | risk | 0.571052 | 0.139799 |
+| `retrieval_top1` | +1 | risk | 0.118817 | 0.365418 |
+| `nli` | −1 | trust | 1.249675 | 0.267181 |
+| `coverage` | −1 | trust | −1.034543 | 0.273714 |
+| `eedc` | +1 | risk | −0.074934 | 0.052152 |
+| `detector_trust` | −1 | trust | 0.322765 | 0.230007 |
+| `grounding` | −1 | trust | 0.588701 | 0.266188 |
+
+(The sign map records *direction*; the fitted weight records *magnitude*
+after z-scoring. The two are independent — which is why `eedc` has sign +1
+but a negative fitted weight: it is directionally right yet carries almost
+no information, `component_std` 0.052152, the smallest of the seven.)
+
+The sign map is not cosmetic — the earlier hand-set fusion scored
+ROC-AUC 0.360, i.e. *below chance*, precisely because the signs were wrong.
+
+**What CRISP lacks that the others have:** ARES's prediction-powered inference
+gives a statistical guarantee on a small human-labelled set; Sufficient
+Context's gate is fitted on data it did not generate; Self-RAG's critic is
+trained on 4k–20k GPT-4-labelled examples per reflection type. CRISP's head
+is fitted on 496 rows from CRISP's own pipeline. **That is the honest
+weakness of the fusion contribution** and it should be stated in the thesis
+rather than hidden.
+
+## 3.4 The mitigation comparison (C5) — the second thinnest category
+
+**Scope note.** Like §3.5, this table is broader than the "Mitigation" column
+of §3.1: it includes **evidence-side** correction (CRAG, Hybrid Retrieval)
+alongside **answer-side** repair (FAVA, A Stitch in Time, CoVe, FLARE,
+CRISP). The distinction is the whole point of the table — see the "What is
+changed" column.
+
+| Paper | What is changed | Granularity | Evidence used to fix | Re-verified after edit? | Reported gain |
+|---|---|---|---|:-:|---|
+| **CRISP** | the **answer** | claim span | retrieved premise + NLI | **✓ loop re-runs 3→5→8→4→9→10→11** | measured Δ ≈ −0.007 |
+| **FAVA** | the **answer** | tagged span + 6-way type | retrieved context | ✗ | trained tagger, strong edits |
+| **A Stitch in Time** | the **answer** | sentence | Bing / self-inquiry | ✗ | hallucination 47.5% → 14.5% |
+| **CoVe** | the **answer** | whole answer | verification answers | ✓ implicitly | +23% F1 (MultiSpanQA), +28% FactScore |
+| **CRAG** | the **evidence** | knowledge strip | web-search results | ✗ | corrects bad retrieval |
+| **FLARE** | the **answer** | sentence | re-retrieved context | ✗ | — |
+| **Hybrid Retrieval** | the **evidence** | doc set | — | ✗ | hallucination rate ↓ on all 4 metrics |
+| **ARES** | nothing (statistics) | — | — | — | — |
+| **Self-RAG** | nothing (decoding) | — | — | — | — |
+
+**The honest reading.** CRISP's `claim_edit` is the *only* design in the set
+that (a) edits at claim-span granularity, (b) preserves the rest of the
+answer byte-for-byte, and (c) re-runs verification on its own output. It is
+also the only one with a **measured mitigation delta that is ≈ zero**
+(−0.007). The mechanism is right; the effect size is not there yet. §5.2 of
+this document lists the concrete causes — a heuristic replacement source and
+an NLI whose false-positive rate drives unnecessary rewrites.
+
+## 3.5 The abstention comparison (C6)
+
+**Scope note.** This table is deliberately *broader* than the "Abstain" column
+of §3.1. §3.1 counts only systems that **refuse to produce an answer**;
+this table also counts systems that **gate or repair the answer in flight**
+(FLARE's per-token confidence, CRAG's three-band retrieval routing). Those
+are weaker forms of the same idea, and the distinction matters for the
+thesis claim — CRISP's `ABSTAIN` is a genuine refusal, not a redirect.
+
+| Paper | Gate input | Gate form | Fitted? | Reported benefit | Risk of over-abstention |
+|---|---|---|:-:|---|---|
+| **CRISP** | fused risk (7 features) | 2 thresholds: pass ≥ 0.70, abstain ≤ 0.30 | head fitted; thresholds hand-set | — | unknown |
+| **Sufficient Context** | sufficiency + self-confidence | logistic → reject below threshold | ✓ | +2–10% correct answers | paper reports fine-tuning to abstain *fails* to reduce hallucination |
+| **Semantic Uncertainty** | semantic entropy | entropy threshold | ✓ | standard | abstains on benign phrasing variation |
+| **Hybrid Retrieval** | retrieval adequacy | LLM prompt "insufficient information" | ✓ | rejection rate reported | — |
+| **CRAG** | retrieval score | 3-band threshold | per-dataset thresholds | corrects bad retrieval | — |
+| **Don't Hallucinate** | multi-LLM votes | vote threshold | ✓ | — | multi-model cost |
+| **FLARE** | token confidence | per-token | ✓ | — | — (redirects, not refuses) |
+
+**The key structural difference.** Sufficient Context gates on *evidence*
+sufficiency; CRISP gates on *answer* risk. These fail in different places:
+a system can have sufficient evidence and still produce a wrong answer (only
+CRISP's step 8 catches that), and it can have insufficient evidence while the
+answer happens to be correct (Sufficient Context rejects a good answer that
+CRISP would keep). CRISP's step 11 sits *after* verification, so it can
+distinguish these cases; Sufficient Context's gate sits *before* generation.
+
+## 3.6 The verifier comparison (step 8 and its equivalents)
+
+| Paper | Verifier | Type | Granularity | Truncation risk | Cost |
+|---|---|---|---|---|---|
+| **CRISP** | mDeBERTa-v3-base-xnli (278M) | entailment classifier | atomic claim vs premise | mitigated by claim-conditioned premise selection (1800 chars) | 1 forward pass / claim |
+| **AlignScore** | AlignScore 355M | trained alignment function | text pair | same mitigation applies | 1 forward pass / pair |
+| **RAGChecker** | Llama3-70B | LLM entailment | claim vs chunk | yes | very high |
+| **FActScore** | InstructGPT zero-shot | LLM prompt | atomic fact | yes | high |
+| **RAGAS** | LLM judge | LLM prompt | statement | yes | high |
+| **SAFE** | LLM + web search | LLM reasoning | fact | yes | very high |
+| **FAVA** | fine-tuned Llama2-7B tagger | generative tagger | span | no | high |
+| **A Stitch in Time** | QA over retrieved evidence | QA model | concept | no | medium |
+| **SelfCheckGPT** | BERTScore / QA / n-gram | self-consistency | sentence | no | N samples per answer |
+| **ARES** | fine-tuned small judges | classifier | context/answer | no | low |
+
+**CRISP's advantage:** a small off-the-shelf NLI classifier is far cheaper
+and more reproducible than a 70B LLM judge, and the entailment verdict is a
+*label*, which is what makes step 4's entropy over verdicts possible at all.
+
+**CRISP's weakness:** `unknown` verdicts are frequent and ambiguous, and the
+NLI's false-positive rate is the actual bottleneck on the mitigation side.
+AlignScore is trained on 4.7M examples *including* fact verification, so it
+is a plausible upgrade — and it is a drop-in, because the claim-conditioned
+premise selection happens upstream of the verifier.
+
+## 3.7 Head-to-head with the closest five
+
+The five papers a reviewer is most likely to put side by side with CRISP.
+
+| Dimension | **CRISP** | **FAVA** | **A Stitch in Time** | **Self-RAG** | **Sufficient Context** |
+|---|---|---|---|---|---|
+| Detection unit | atomic claim | tagged span | concept | segment | whole answer |
+| Detection signal | 7 fused features | learned tag | min token prob | reflection tokens | sufficiency + confidence |
+| Fusion | **7-component fitted head** | none | threshold | token-prob weights | 2-feature logistic |
+| Mitigates | ✓ claim span | ✓ span + type | ✓ sentence | ✗ | ✗ |
+| Re-verifies own edit | ✓ | ✗ | ✗ | ✗ | ✗ |
+| Abstains | ✓ | ✗ | ✗ | ✗ | ✓ |
+| Retrieval | hybrid + cross-enc | Contriever | Bing | learned | none (context given) |
+| Verifier | 278M NLI | 7B fine-tuned | QA | generator | LLM/FLAMe |
+| Cost | 4.18 s/query mean (3.96 median), detection path | high | high | high | high |
+| **C1–C6 covered** | **6 / 6** | 3 / 6 | 5 / 6 | 4 / 6 | 3 / 6 |
+
+### 3.7.1 RAGChecker
+
+| Dimension | **CRISP** | **RAGChecker** |
+|---|---|---|
+| Purpose | defend at inference | measure offline |
+| Claim unit | atomic claim (step 5) | claim (RefChecker framework) |
+| Failure separation | implicit (step 6 vs step 8) | **explicit** (retrieval vs generation) |
+| Fusion | 7-component fitted head | none |
+| Mitigates | ✓ | ✗ |
+| Metrics | ROC-AUC, AUPR, claim F1, VSR, PR@90 | Faithfulness, noise sensitivity, self-knowledge, context utilisation, overall P/R/F1 |
+| Overlap with CRISP's metric set | — | **Relevant/Irrelevant Noise Sensitivity** map to CRISP's `grounding` feature |
+
+### 3.7.2 Hybrid Retrieval (Mala et al.)
+
+| Dimension | **CRISP** | **Hybrid Retrieval** |
+|---|---|---|
+| Retrieval | BGE-M3 dense + BM25 + RRF + cross-encoder rerank | dense + sparse + query expansion + **dynamic** RRF weighting |
+| Weighting | **inert** (`weight_dense`/`weight_bm25` never read) | per-query specificity score |
+| Reranker | bge-reranker-v2-m3 | none |
+| Verification | NLI per claim | none |
+| Mitigation | claim-span edit | prompt the model to refuse (evidence-side) |
+| Ablation | not run | **sparse 0.724 → dense 0.768 → hybrid 0.897 MAP@3** |
+| **Threat to CRISP** | — | shows hybrid retrieval alone cuts hallucination on all 4 metrics across 6 datasets |
+
+## 3.8 What CRISP borrows from each paper
+
+Concrete, actionable — each row is a change to CRISP's code or evaluation.
+
+| Paper | What to adopt | Where it goes | Effort | Changes published numbers? |
+|---|---|---|---|---|
+| **Hybrid Retrieval** | per-query RRF weighting from specificity | `src/retrieval/hybrid.py` (currently inert) | medium | **yes** |
+| **AlignScore** | swap the step-8 verifier | `src/models/nli_deberta.py` → align scorer | low | **yes** |
+| **Semantic Uncertainty / SelfCheckGPT** | real multi-sample self-consistency | step 4's `self_consistency` proxy | high | **yes** |
+| **DRAGIN** | apply the discarded query rewrite | step 1 (`variants[0]` → best variant) | low | **yes** |
+| **RAGChecker** | report relevant vs irrelevant noise sensitivity | step 13 metrics | medium | no (new metric) |
+| **FActScore** | exclude abstentions from the model-level average | step 13 aggregation | low | no (reporting change) |
+| **FAVA** | six-type hallucination taxonomy | step 8 verdict labelling | medium | partly |
+| **A Stitch in Time** | rewrite using the retrieved premise as the replacement source | step 10 `_replacement_for` | medium | **yes** |
+| **Sufficient Context** | fit the step-11 thresholds instead of hand-setting 0.30/0.70 | step 11 config | low | **yes** |
+| **ARES** | prediction-powered inference on the detection metric | step 13 + evaluation | high | **yes** |
+
+## 3.9 The gap, stated as a table
+
+| # | Combination | Who has it |
+|---|---|---|
+| 1 | RAG detection + multi-stage pipeline + claim-level verification | RAGChecker, FActScore, RAGAS, SAFE, ARES, Self-RAG |
+| 2 | … + learned multi-signal fusion | Self-RAG, ARES, Sufficient Context, A Stitch in Time |
+| 3 | … + post-hoc span rewriting | FAVA, A Stitch in Time |
+| 4 | … + abstention | CRAG, Sufficient Context |
+| 5 | **RAG detection + multi-stage pipeline + claim-level verification + learned multi-signal fusion + post-hoc span rewriting + abstention** | **nobody — CRISP is the only one** |
+
+**The defensible thesis sentence:** *CRISP is, to the best of this survey's
+knowledge, the only published RAG pipeline that combines claim-level NLI
+verification, a separately fitted multi-signal fusion head, span-level
+post-hoc rewriting with self-re-verification, and answer-side abstention in
+a single pipeline.* Every word of that sentence is backed by §3.1–§3.5.
 
 ---
 
-## 3.1 RAGChecker — the closest in *diagnosis*
+# 4. The papers in detail
+
+---
+
+## 4.1 RAGChecker — the closest in *diagnosis*
 
 > *"RAGChecker: A Fine-grained Framework for Diagnosing Retrieval-Augmented
 > Generation"* — Dongyu Ru, Lin Qiu, Xiangkun Hu, Tianhang Zhang, Peng Shi,
@@ -121,7 +432,7 @@ dense retrievers**, which is directly comparable to CRISP's hybrid design.
 
 ---
 
-## 3.2 FAVA — the closest in *detection and editing*
+## 4.2 FAVA — the closest in *detection and editing*
 
 > *"Fine-grained Hallucination Detection and Editing for Language Models"* —
 > Abhika Mishra, Akari Asai, Vidhisha Balachandran, Yizhong Wang, Graham
@@ -172,7 +483,7 @@ supported/contradicted/unknown scheme, which is strictly coarser.
 
 ---
 
-## 3.3 FActScore — the closest in *claim decomposition and verification*
+## 4.3 FActScore — the closest in *claim decomposition and verification*
 
 > *"FActScore: Fine-grained Atomic Evaluation of Factual Precision in Long
 > Form Text Generation"* — Sewon Min et al. **EMNLP 2023** ·
@@ -217,7 +528,7 @@ failures. CRISP's step 13 currently has no such treatment.
 
 ---
 
-## 3.4 RAGAS — the closest in *the claim-extraction idiom*
+## 4.4 RAGAS — the closest in *the claim-extraction idiom*
 
 > *"RAGAS: Automated Evaluation of Retrieval Augmented Generation"* — Shahul
 > Es, James, Luis Espinosa-Anke, Steven Schockaert.
@@ -247,7 +558,7 @@ evaluation framework in the RAG space.
 
 ---
 
-## 3.5 SAFE — the closest in *long-form verification*
+## 4.5 SAFE — the closest in *long-form verification*
 
 > *"LongFact: Long-Form Factuality in Large Language Models"* — Wei et al.
 > **NeurIPS 2024** · **arXiv:2403.18802**
@@ -274,7 +585,7 @@ without network access. No mitigation, no abstention.
 
 ---
 
-## 3.6 AlignScore — the strongest drop-in for CRISP's step 8
+## 4.6 AlignScore — the strongest drop-in for CRISP's step 8
 
 > *"AlignScore: Evaluating Factual Consistency with a Unified Alignment
 > Function"* — Zha, Yang, Li, Hu. **ACL 2023** · **arXiv:2305.16739**
@@ -306,7 +617,7 @@ before the verifier.
 
 ---
 
-## 3.7 Corrective RAG (CRAG) — the closest in *confidence-gated retrieval*
+## 4.7 Corrective RAG (CRAG) — the closest in *confidence-gated retrieval*
 
 > *"Corrective Retrieval Augmented Generation"* — Yan, Gu, Zhu, Ling.
 > **arXiv:2401.15884**
@@ -364,7 +675,7 @@ passage does not by itself earn trust.
 
 ---
 
-## 3.8 Self-RAG — the closest in *fusion*
+## 4.8 Self-RAG — the closest in *fusion*
 
 > *"Self-RAG: Learning to Retrieve, Generate, and Critique through Self-
 > Reflection"* — Asai, Wu, Wang, Sil, Hajishirzi. **ICLR 2024** ·
@@ -416,7 +727,7 @@ scale — is the same problem CRISP's z-scoring solves in step 9, and CRISP's
 
 ---
 
-## 3.9 Sufficient Context — the closest in *abstention*
+## 4.9 Sufficient Context — the closest in *abstention*
 
 > *"Sufficient Context: A New Lens on Retrieval Augmented Generation Systems"* —
 > Hailey Joren, Jianyi Zhang, Chun-Sung Ferng, Da-Cheng Juan, Ankur Taly,
@@ -471,7 +782,7 @@ thresholding a calibrated risk score.
 
 ---
 
-## 3.10 A Stitch in Time Saves Nine — the closest in *mitigation*
+## 4.10 A Stitch in Time Saves Nine — the closest in *mitigation*
 
 > *"A Stitch in Time Saves Nine: Detecting and Mitigating Hallucinations of
 > LLMs by Validating Low-Confidence Generation"* — Neeraj Varshney, Wenlin
@@ -517,7 +828,7 @@ is instruction-based at the sentence level.
 
 ---
 
-## 3.11 Hybrid Retrieval for Hallucination Mitigation — the closest in *retrieval*
+## 4.11 Hybrid Retrieval for Hallucination Mitigation — the closest in *retrieval*
 
 > *"Hybrid Retrieval for Hallucination Mitigation in Large Language Models:
 > A Comparative Analysis"* — Chandana sree Mala, Gizem Gezici, Fosca
@@ -585,7 +896,7 @@ closes the gap.
 
 ---
 
-## 3.12 Semantic Uncertainty — the closest in *entropy and abstention*
+## 4.12 Semantic Uncertainty — the closest in *entropy and abstention*
 
 > *"Semantic Uncertainty: Linguistic Invariance for Uncertainty Estimation in
 > Natural Language Generation"* — Kuhn, Gal, Farquhar. **ICLR 2023
@@ -619,7 +930,7 @@ This is *uncertainty estimation*, not RAG verification.
 
 ---
 
-## 3.13 SelfCheckGPT — the closest in *sampling-based consistency*
+## 4.13 SelfCheckGPT — the closest in *sampling-based consistency*
 
 > *"SelfCheckGPT: Zero-Resource Black-Box Hallucination Detection for
 > Generative Large Language Models"* — Manakul, Liusie, Gales. **EMNLP 2023**
@@ -673,7 +984,7 @@ for.
 
 ---
 
-## 3.14 ARES — the methodological precedent for CRISP's fitted head
+## 4.14 ARES — the methodological precedent for CRISP's fitted head
 
 > *"ARES: An Automated Evaluation Framework for Retrieval-Augmented Generation
 > Systems"* — Saad-Falcon, Khattab, Potts, Zaharia. **NAACL 2024** ·
@@ -701,7 +1012,7 @@ rather than an editing operation.
 
 ---
 
-## 3.15 Don't Hallucinate, Abstain — multi-model abstention
+## 4.15 Don't Hallucinate, Abstain — multi-model abstention
 
 > *"Don't Hallucinate, Abstain: Multi-LLM Collaboration for Hallucination
 > Detection"* — Feng, Shi, Wang, Ding, Balachandran, Tsvetkov. **ACL 2024**
@@ -732,7 +1043,7 @@ is an obvious extension.
 
 ---
 
-## 3.16 The retrieval-side family (no verification stage)
+## 4.16 The retrieval-side family (no verification stage)
 
 These match CRISP's steps 1, 6 and 7 but have **no detection, fusion,
 mitigation, or abstention**.
@@ -740,15 +1051,15 @@ mitigation, or abstention**.
 | Paper | Workflow | Relevance to CRISP |
 |---|---|---|
 | **FLARE** (Jiang et al., EMNLP 2023, [arXiv:2305.06983](https://arxiv.org/abs/2305.06983)) | 1. Predict the next sentence → 2. Detect low-confidence tokens → 3. Use the predicted sentence as the retrieval query → 4. Retrieve and revise the sentence | Parallels CRISP's confidence-gated retrieval but at token level *during* generation. CRISP verifies *after* generation. |
-| **DRAGIN** (Su et al., ACL 2024, [arXiv:2403.10081](https://arxiv.org/abs/2403.10081)) | 1. Awareness: does the generator lack the info to continue? → 2. Represent the need from the *full* context → 3. Active retrieval from that need → 4. Feed back, forming a need↔retrieval loop | CRISP's step 1 is the analogue of DRAGIN's information-need module. **DRAGIN's design is the answer to CRISP's known weakness** — the query rewrite that is computed and then discarded (§3.17). |
+| **DRAGIN** (Su et al., ACL 2024, [arXiv:2403.10081](https://arxiv.org/abs/2403.10081)) | 1. Awareness: does the generator lack the info to continue? → 2. Represent the need from the *full* context → 3. Active retrieval from that need → 4. Feed back, forming a need↔retrieval loop | CRISP's step 1 is the analogue of DRAGIN's information-need module. **DRAGIN's design is the answer to CRISP's known weakness** — the query rewrite that is computed and then discarded (see §3.8). |
 | **IRCoT** (Trivedi et al., ACL 2023, [arXiv:2212.10509](https://arxiv.org/abs/2212.10509)) | 1. Sample a sentence from the current chain-of-thought → 2. Retrieve with it → 3. Retrieve again with the original question → 4. Append to the CoT → repeat | The classic precedent for reasoning-conditioned retrieval — CRISP's steps 1–3 at reasoning-step rather than query level. |
 | **CoVe** (Dhuliawala et al., [arXiv:2309.11495](https://arxiv.org/abs/2309.11495)) | 1. Draft an answer → 2. Plan verification questions targeting the draft → 3. Answer each independently → 4. Produce a final answer conditioned on the results | CRISP's mitigation stage descends from this. **Caveat: the abstract does not state that CoVe retrieves external sources** — do not claim source-grounded verification for it. |
 
 ---
 
-# 4. What this survey says about CRISP's position
+# 5. What this survey says about CRISP's position
 
-## 4.1 The genuine gap
+## 5.1 The genuine gap
 
 No paper found combines all six characteristics. The two sparse categories:
 
@@ -764,7 +1075,10 @@ No paper found combines all six characteristics. The two sparse categories:
 **CRISP's claim should be framed as the combination**, not as any single
 component.
 
-## 4.2 Concrete improvements these papers suggest
+## 5.2 Concrete improvements these papers suggest
+
+**This table is the short version. §3.8 gives the same list with the exact
+file each change would land in.**
 
 | Suggestion | Source | Effort | Would it invalidate current numbers? |
 |---|---|---|---|
@@ -777,19 +1091,19 @@ component.
 | Report noise-sensitivity split (relevant vs irrelevant chunk) | RAGChecker | Medium | No — an additional metric |
 | Exclude abstentions from the model-level average | FActScore | Low | No — a reporting change |
 
-## 4.3 The strongest counter-arguments to anticipate
+## 5.3 The strongest counter-arguments to anticipate
 
 These are the objections a reviewer is most likely to raise, and the papers
 that support them.
 
-1. **"Better retrieval alone fixes this."** Mala et al. (§3.11) show hybrid
+1. **"Better retrieval alone fixes this."** Mala et al. (§4.11) show hybrid
    retrieval beating sparse and dense on all four overall metrics across
    six datasets. CRISP must argue that detection-layer work is *additional*,
    not substitutable.
 
 2. **"Uncertainty is not error."** The NLI's `unknown` verdict drives
    abstention, so the pipeline refuses good answers. Sufficient Context
-   (§3.9) demonstrates the same tension from the retrieval side.
+   (§4.9) demonstrates the same tension from the retrieval side.
 
 3. **"Your EEDC weights were never fitted."** `data/eedc_weights.json` does
    not exist; the defaults are hand-set. The script to fix this already
@@ -799,14 +1113,14 @@ that support them.
    It survives only as one weighted component of seven.
 
 5. **"Your mitigation delta is negative."** The `claim_edit` rewrite is a
-   design fix whose measured benefit is ≈ −0.007. FAVA (§3.2) and "A Stitch
-   in Time" (§3.10) both report large, positive mitigation results — so the
+   design fix whose measured benefit is ≈ −0.007. FAVA (§4.2) and "A Stitch
+   in Time" (§4.10) both report large, positive mitigation results — so the
    question "why does yours not work?" is live.
 
 6. **"RAGChecker already does the decomposition."** It separates retrieval
-   from generation failure with a richer metric set (§3.1).
+   from generation failure with a richer metric set (§4.1).
 
-## 4.4 Papers that must not be miscounted
+## 5.4 Papers that must not be miscounted
 
 Two categories to be careful about in any related-work count:
 
@@ -820,7 +1134,7 @@ Two categories to be careful about in any related-work count:
 
 ---
 
-# 5. Reference list
+# 6. Reference list
 
 | # | Paper | Venue | arXiv | Role here |
 |---|---|---|---|---|
