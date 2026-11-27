@@ -36,7 +36,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--out",
-        default=str(ROOT / "CRISP_Thesis_Book.docx"),
+        # The default is the file the verification script and the book
+        # tests read. Writing anywhere else by default means a plain
+        # `python scripts/build_thesis_book.py` produces a document that
+        # no test looks at, and the stale copy goes unnoticed.
+        default=str(ROOT / "Book" / "CRISP_test.docx"),
         help="output .docx path",
     )
     ap.add_argument(

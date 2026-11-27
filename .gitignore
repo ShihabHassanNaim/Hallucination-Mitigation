@@ -32,3 +32,15 @@ data/ragtruth_test.parquet
 # durable results are committed under scripts/thesis/ and docs/.
 .work/
 scratchpad/
+
+# Word owner-lock files. Word writes these next to a document while it is
+# open, and they contain the local account name, so they are never meant
+# to leave the machine.
+~$*.docx
+
+# Superseded builds of the thesis book. Book/CRISP_test.docx is the
+# current one and is the file the verification tests read; the others are
+# earlier builds kept as working copies.
+Book/_new_book.docx
+Book/*.docx.bak
+CRISP_Thesis_Book.docx
