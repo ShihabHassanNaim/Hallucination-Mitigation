@@ -26,3 +26,9 @@ data/ragtruth_test.parquet
 .vscode/
 .idea/
 *.swp
+
+# Working directories for one-off scripts and intermediate artefacts.
+# The book build and the literature review both leave these behind; the
+# durable results are committed under scripts/thesis/ and docs/.
+.work/
+scratchpad/
