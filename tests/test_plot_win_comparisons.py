@@ -1,7 +1,13 @@
-"""The three win-comparison charts must agree with the measurements.
+"""The win-comparison charts must agree with the measurements.
 
 ``scripts/plot_win_comparisons.py`` draws one diagram per metric where
-the paper claims a win: Detection AUPR, P@R90 and claim-level F1.
+the paper claims a win: P@R90 and claim-level F1.
+
+Detection AUPR used to have a diagram too, drawn against Decoding
+Memories' 0.840. That paper reports AUROC, not AUPR, so the chart was
+comparing our AUPR against somebody else's AUROC. No published paper
+reports AUPR on HaluEval, so there is nothing to draw it against and
+the chart was removed rather than re-pointed.
 
 Each chart carries a verdict badge, so each one can overclaim. These
 tests check that the numbers the chart would draw are the numbers the
@@ -27,10 +33,10 @@ GRAPH_DIR = Path("data/graphs")
 
 
 # ---------------------------------------------------------------------------
-# The three charts exist and are configured against real metrics
+# The two charts exist and are configured against real metrics
 # ---------------------------------------------------------------------------
 
-SLUGS = ["win_aupr", "win_pr90", "win_claim_f1"]
+SLUGS = ["win_pr90", "win_claim_f1"]
 
 
 @pytest.fixture(scope="module")
@@ -40,9 +46,22 @@ def agg():
     return json.loads(METRICS_PATH.read_text(encoding="utf-8"))["aggregate"]
 
 
-def test_there_are_three_charts_one_per_metric():
-    assert len(pwc.CHARTS) == 3, "there must be one diagram per winning metric"
+def test_there_are_two_charts_one_per_metric():
+    assert len(pwc.CHARTS) == 2, "there must be one diagram per winning metric"
     assert [c["slug"] for c in pwc.CHARTS] == SLUGS
+
+
+def test_no_chart_is_drawn_for_a_metric_with_no_published_comparable():
+    """Detection AUPR has no published comparable, so it has no chart.
+
+    A chart for it would have to draw our AUPR against somebody else's
+    AUROC, which is the comparison that was removed.
+    """
+    assert "win_aupr" not in [c["slug"] for c in pwc.CHARTS]
+    assert not (GRAPH_DIR / "win_aupr.png").exists(), (
+        "win_aupr.png still exists; there is no published AUPR to draw it "
+        "against"
+    )
 
 
 @pytest.mark.parametrize("slug", SLUGS)
@@ -83,7 +102,7 @@ def test_each_chart_has_a_win_matrix_row(cfg):
 
 def test_the_verdict_rule_works_in_both_directions():
     """A win needs the whole interval above; a loss needs it all below."""
-    assert pwc._verdict(0.922, (0.9057, 0.9383), 0.840) == "WIN"
+    assert pwc._verdict(0.800, (0.7732, 0.8443), 0.703) == "WIN"
     assert pwc._verdict(0.925, (0.9113, 0.9401), 0.987) == "LOSS"
     # Straddling is a tie, not a win.
     assert pwc._verdict(0.829, (0.8090, 0.8510), 0.847) == "TIE"
@@ -108,10 +127,10 @@ def test_a_metric_with_no_interval_is_compared_on_the_point_estimate():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("cfg", pwc.CHARTS, ids=[c["slug"] for c in pwc.CHARTS])
-def test_the_chart_computes_a_win_for_each_of_the_three_metrics(cfg, agg):
-    """Each of these three metrics must actually come out as a win.
+def test_the_chart_computes_a_win_for_each_of_the_two_metrics(cfg, agg):
+    """Each of these two metrics must actually come out as a win.
 
-    The paper claims three score wins. If a re-measurement stopped
+    The paper claims two score wins. If a re-measurement stopped
     clearing the comparable, this test fails rather than letting a chart
     keep saying WIN.
     """
@@ -137,23 +156,23 @@ def test_the_gap_the_chart_draws_is_the_real_gap(cfg, agg):
     assert gap > 0, f"{cfg['slug']} draws a gap but is not ahead"
     # The gap is printed to three decimals on the chart.
     assert f"+{gap:.3f}" in {
-        "+0.082", "+0.097", "+0.101",
+        "+0.097", "+0.101",
     }, f"{cfg['slug']} has an unexpected gap {gap:.3f}"
 
 
-def test_the_published_comparables_are_read_from_the_artefacts():
-    """The AUPR chart must draw the comparables the CSV actually holds."""
+def test_the_aupr_row_has_no_published_comparable():
+    """No published paper reports AUPR on HaluEval.
+
+    Decoding Memories was previously cited here at 0.840, but its
+    Table 1 reports AUROC -- "AUPR", "AUC-PR" and "PR-AUC" do not
+    appear in that paper -- and the 0.840 was EigenScore-B's HaluEval
+    AUROC. The CSV row must therefore hold no published AUPR at all.
+    """
     published = pwc._published_scores("AUPR")
-    names = [p[0] for p in published]
-    values = {p[0]: p[1] for p in published}
-    assert any("Decoding Memories" in n for n in names), (
-        "the AUPR chart has no Decoding Memories comparable"
+    assert published == [], (
+        "the AUPR row of the comparison table has published comparables "
+        f"again: {published}"
     )
-    dm = next(v for n, v in values.items() if "Decoding Memories" in n)
-    assert dm == 0.840, f"the Decoding Memories AUPR changed to {dm}"
-    # The band is kept so the chart can show that 0.840 is the lower end.
-    band = next(p[3] for p in published if "Decoding Memories" in p[0])
-    assert band == 0.850, f"the Decoding Memories AUPR band changed to {band}"
 
 
 def test_the_pr90_chart_reads_the_dale_comparable():

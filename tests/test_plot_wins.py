@@ -28,7 +28,19 @@ METRICS_PATH = Path("data/metrics_halueval.json")
 
 
 @pytest.fixture(scope="module")
-def verdict_rows():
+def matrix_rows():
+    """Every numbered row of the win matrix, with or without a verdict.
+
+    The verdict is read by column position. Some rows carry a mark in
+    an earlier column -- row 15 reads "Dale 2023 only | ✓ | ✓ | ≈",
+    because both systems do active mitigation -- and a non-greedy
+    pattern would pick up the comparable's mark and count that tie as
+    a win.
+
+    A row whose verdict is a dash is kept: it means the metric has no
+    published comparable, which is a different kind of row, not a
+    missing one.
+    """
     if not VERDICT_PATH.exists():
         pytest.skip("verdict matrix not present")
     text = VERDICT_PATH.read_text(encoding="utf-8")
@@ -37,14 +49,7 @@ def verdict_rows():
         if not re.match(r"^\|\s*\d+\s*\|", line):
             continue
         cells = [c.strip() for c in line.split("|")]
-        # The verdict is read by column position. Some rows carry a mark in
-        # an earlier column -- row 15 reads "Dale 2023 only | ✓ | ✓ | ≈",
-        # because both systems do active mitigation -- and a non-greedy
-        # pattern would pick up the comparable's mark and count that tie as
-        # a win.
         if len(cells) < 8:
-            continue
-        if cells[6] not in ("✓", "✗", "≈"):
             continue
         rows.append((int(cells[1]), cells[2].strip().strip("*"), cells[6]))
     if not rows:
@@ -52,7 +57,17 @@ def verdict_rows():
     return rows
 
 
-def test_the_verdict_matrix_parses(verdict_rows):
+@pytest.fixture(scope="module")
+def verdict_rows(matrix_rows):
+    """The subset of the matrix rows that carry a verdict.
+
+    Detection AUPR carries a dash, because no published paper reports
+    AUPR on HaluEval, so there is nothing for it to be compared against.
+    """
+    return [r for r in matrix_rows if r[2] in ("✓", "✗", "≈")]
+
+
+def test_the_verdict_matrix_parses(matrix_rows):
     """The matrix must be non-empty and its rows consecutively numbered.
 
     The count is not pinned to a fixed number. It was 18 when the matrix
@@ -62,16 +77,37 @@ def test_the_verdict_matrix_parses(verdict_rows):
     the chart reads the count from the matrix, so the only thing worth
     checking is that the matrix is internally consistent.
     """
-    assert len(verdict_rows) >= 18, (
-        f"the matrix has only {len(verdict_rows)} rows; it should have "
+    assert len(matrix_rows) >= 18, (
+        f"the matrix has only {len(matrix_rows)} rows; it should have "
         "grown, not shrunk, since the comparison was consolidated"
     )
 
 
-def test_the_matrix_covers_every_dimension(verdict_rows):
-    numbers = [n for n, _, _ in verdict_rows]
-    assert numbers == list(range(1, len(verdict_rows) + 1)), (
+def test_the_matrix_covers_every_dimension(matrix_rows):
+    numbers = [n for n, _, _ in matrix_rows]
+    assert numbers == list(range(1, len(matrix_rows) + 1)), (
         "the matrix rows must be numbered consecutively from 1"
+    )
+
+
+def test_exactly_one_row_has_no_verdict():
+    """Detection AUPR is the one metric with no published comparable.
+
+    It must not be counted as a win, a tie or a loss, and it must still
+    be present as a numbered row so the matrix reads 1..21.
+    """
+    if not VERDICT_PATH.exists():
+        pytest.skip("verdict matrix not present")
+    text = VERDICT_PATH.read_text(encoding="utf-8")
+    no_verdict = [
+        line for line in text.splitlines()
+        if re.match(r"^\|\s*\d+\s*\|", line)
+        and "**Detection AUPR**" in line
+        and "| — |" in line
+    ]
+    assert len(no_verdict) == 1, (
+        f"expected exactly one AUPR row with no verdict, found "
+        f"{len(no_verdict)}: {no_verdict}"
     )
 
 
@@ -119,11 +155,11 @@ def test_a_score_win_requires_the_interval_to_exclude_the_comparable():
     comparable.
 
     This is the rule the chart applies. It replaced a point-estimate
-    comparison, which claimed AUPR and CCR were wins: our AUPR of 0.853 is
-    above Decoding Memories' 0.84-0.85, but our own 95% CI of
-    [0.833, 0.874] covers that whole range, so the two are not separated.
-    CCR's comparable of 0.55 is implied from another metric rather than
-    published, so there is nothing to be separated from.
+    comparison, which claimed AUPR and CCR were wins on the strength of
+    their midpoints. CCR's comparable of 0.55 is implied from another
+    metric rather than published, so there is nothing to be separated
+    from; and AUPR has no published comparable at all, because the paper
+    that was cited for it reports AUROC.
     """
     if not METRICS_PATH.exists() or not CSV_PATH.exists():
         pytest.skip("metrics or comparison table not present")
@@ -200,35 +236,52 @@ def test_the_chart_does_not_mark_a_metric_as_a_win_when_the_ci_overlaps():
 
     The rule is symmetric: a metric is a win only when our 95% CI clears
     the published comparable, and it is not a win while the intervals
-    intersect. The test used to pin the AUPR side of that rule to the
-    superseded measurement -- our CI [0.833, 0.874] covered Decoding
-    Memories' 0.84-0.85, so AUPR was a tie. The corrected instrument
-    moved AUPR to 0.922 with CI [0.906, 0.938], which clears it, so the
-    row is now a genuine win and the prose says so.
+    intersect. The rule is checked on P@R90, which has a published
+    comparable (Dale 2023's LaBSE baseline at 0.703).
 
-    What must hold either way is that the verdict the paper prints
-    agrees with the interval that was measured.
+    Detection AUPR used to be the metric this test was written against.
+    It no longer has a published comparable at all: Decoding Memories
+    reports AUROC, not AUPR, so the AUPR row carries no verdict. The
+    chart therefore has to say "not comparable" for AUPR, which is what
+    the first assertion checks.
     """
     if not METRICS_PATH.exists() or not CSV_PATH.exists():
         pytest.skip("metrics or comparison table not present")
     agg = json.loads(METRICS_PATH.read_text(encoding="utf-8"))["aggregate"]
-    aupr_ci = agg.get("detection_aupr_ci95") or []
-    if len(aupr_ci) != 2:
-        pytest.skip("no AUPR interval")
-    lo, hi = float(aupr_ci[0]), float(aupr_ci[1])
 
     comparison_md = Path("Paper/comparison.md")
     if not comparison_md.exists():
         pytest.skip("comparison.md not present")
-    row = next(
-        (l for l in comparison_md.read_text(encoding="utf-8").splitlines()
+    lines = comparison_md.read_text(encoding="utf-8").splitlines()
+
+    # AUPR has no published comparable, so the row has no verdict.
+    aupr_row = next(
+        (l for l in lines
          if "**Detection AUPR**" in l and l.startswith("|")),
         None,
     )
-    assert row is not None, "the AUPR row is missing from comparison.md"
-    low = row.lower()
+    assert aupr_row is not None, "the AUPR row is missing from comparison.md"
+    assert "✓" not in aupr_row and "✗" not in aupr_row, (
+        f"the AUPR row carries a verdict; no published paper reports AUPR "
+        f"on HaluEval: {aupr_row}"
+    )
 
-    if lo > 0.85:
+    # P@R90 does have one, and the rule decides the verdict.
+    pr_ci = agg.get("precision_at_recall_90_ci95") or []
+    if len(pr_ci) != 2:
+        pytest.skip("no P@R90 interval")
+    lo, hi = float(pr_ci[0]), float(pr_ci[1])
+    comparable = 0.703
+
+    pr_row = next(
+        (l for l in lines
+         if "**P@R90**" in l and l.startswith("|")),
+        None,
+    )
+    assert pr_row is not None, "the P@R90 row is missing from comparison.md"
+    low = pr_row.lower()
+
+    if lo > comparable:
         # Separated: the row may claim the win, and must name the
         # interval as the reason. The wording has changed as the
         # document was consolidated ("excludes" became "above their
@@ -236,14 +289,14 @@ def test_the_chart_does_not_mark_a_metric_as_a_win_when_the_ci_overlaps():
         # interval clears the comparable.
         assert "above" in low and ("excludes" in low or "bottom" in low
                                    or "clears" in low), (
-            f"our AUPR CI [{lo:.3f}, {hi:.3f}] clears Decoding Memories' "
-            f"0.85, so the row should say so: {row}"
+            f"our P@R90 CI [{lo:.3f}, {hi:.3f}] clears {comparable}, so "
+            f"the row should say so: {pr_row}"
         )
     else:
         # Overlapping: the row must not claim a win.
         assert "overlap" in low or "tie" in low, (
-            f"our AUPR CI [{lo:.3f}, {hi:.3f}] covers Decoding Memories' "
-            f"0.85, so the row should report the tie: {row}"
+            f"our P@R90 CI [{lo:.3f}, {hi:.3f}] covers {comparable}, so "
+            f"the row should report the tie: {pr_row}"
         )
 
 

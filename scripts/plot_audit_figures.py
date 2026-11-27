@@ -703,7 +703,6 @@ def fig_datasets() -> None:
     """How each dataset was built and how many rows and queries it holds."""
     rows = []
     for name, rel in [("halueval_matched", "data/halueval_eval_1000_matched.jsonl"),
-                      ("truthfulqa", "data/truthfulqa_eval_1000.jsonl"),
                       ("ragtruth_matched", "data/ragtruth_eval_1000_matched.jsonl")]:
         p = ROOT / rel
         if not p.exists():
@@ -721,39 +720,40 @@ def fig_datasets() -> None:
         rows.append((name, rel, n, len(q), labs))
 
     CORP = {"halueval_matched": ("data/halueval_corpus.jsonl", 9936),
-            "truthfulqa": ("data/truthfulqa_corpus.jsonl", 778),
             "ragtruth_matched": ("data/ragtruth_corpus.jsonl", 298)}
     META = {
         "halueval_matched": ("HaluEval QA", "length-matched", "retrieved",
                              "BGE-M3 + FAISS\n+ BM25"),
-        "truthfulqa": ("TruthfulQA", "closed-book", "none",
-                       "none -- the corpus\nwas the answer key"),
         "ragtruth_matched": ("RAGTruth", "length-matched", "retrieved",
                              "BGE-M3 + FAISS\n+ BM25"),
     }
 
-    fig, ax = plt.subplots(figsize=(14.5, 6.4))
+    fig, ax = plt.subplots(figsize=(13.5, 6.4))
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
 
-    cols = ["Dataset", "Rows", "Unique queries", "Hallucinated / faithful",
+    cols = ["Dataset", "Rows", "Unique\nqueries", "Hallucinated /\nfaithful",
             "Retrieval", "Corpus", "Retriever"]
     widths = [0.15, 0.075, 0.115, 0.165, 0.115, 0.09, 0.20]
     xs = np.cumsum([0] + widths)[:-1]
 
     # The header has to clear the figure title, so it sits lower than the
-    # top of the axes and the title is placed above it.
-    y_head = 0.80
+    # top of the axes and the title is placed above it. Two of the column
+    # labels wrap onto a second line, so the header band is tall enough to
+    # hold both lines without clipping them.
+    y_head = 0.58
+    head_h = 0.105
     for x, c, w in zip(xs, cols, widths):
-        ax.add_patch(FancyBboxPatch((x + 0.004, y_head), w - 0.008, 0.075,
+        ax.add_patch(FancyBboxPatch((x + 0.004, y_head), w - 0.008, head_h,
                                     boxstyle="round,pad=0.004,rounding_size=0.012",
                                     facecolor=INK, edgecolor="none"))
-        ax.text(x + w / 2, y_head + 0.037, c, ha="center", va="center",
-                fontsize=9.4, fontweight="bold", color="white")
+        ax.text(x + w / 2, y_head + head_h / 2, c, ha="center", va="center",
+                fontsize=9.0, fontweight="bold", color="white",
+                linespacing=1.35)
 
     for i, (name, rel, n, nq, labs) in enumerate(rows):
-        y = y_head - 0.09 - i * 0.155
+        y = y_head - 0.115 - i * 0.155
         disp, split, retr, retriever = META[name]
         corp_rel, corp_n = CORP[name]
         vals = [
@@ -765,6 +765,7 @@ def fig_datasets() -> None:
             f"{corp_n:,} docs",
             retriever,
         ]
+        del corp_rel, retr
         for x, v, w in zip(xs, vals, widths):
             ax.add_patch(FancyBboxPatch((x + 0.004, y), w - 0.008, 0.115,
                                         boxstyle="round,pad=0.004,rounding_size=0.012",
@@ -773,7 +774,7 @@ def fig_datasets() -> None:
             ax.text(x + w / 2, y + 0.057, v, ha="center", va="center",
                     fontsize=8.9, color=INK, linespacing=1.35)
 
-    ax.text(0.5, 0.945, "How each evaluation set was built",
+    ax.text(0.5, 0.845, "How each evaluation set was built",
             ha="center", va="center", fontsize=14, fontweight="bold", color=INK)
     ax.text(0.5, 0.055,
             "Every set is balanced: exactly half the rows are hallucinated and half are "
@@ -781,6 +782,9 @@ def fig_datasets() -> None:
             "score well by always guessing the majority class, which is how a "
             "length shortcut hides.",
             ha="center", va="bottom", fontsize=8.7, color=GREY, linespacing=1.5)
+    # The table occupies the upper half of the axes; without this the two
+    # data rows floated in a large empty box.
+    ax.set_ylim(0.0, 1.0)
     save(fig, "audit_08_datasets.png")
 
 

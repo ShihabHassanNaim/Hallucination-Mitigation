@@ -133,18 +133,18 @@ def plot_win_dimensions() -> None:
         print("  [skip] 9 win_dimensions")
         return
 
-    verdict_label = {"✓": "Win", "✗": "Loss", "≈": "Tie"}
-    counts = {"Win": 0, "Tie": 0, "Loss": 0}
+    verdict_label = {"✓": "Higher", "✗": "Lower", "≈": "Tie"}
+    counts = {"Higher": 0, "Tie": 0, "Lower": 0}
     for _, _, v in rows:
-        counts[verdict_label.get(v, "Loss")] += 1
+        counts[verdict_label.get(v, "Lower")] += 1
 
     fig, (ax1, ax2) = plt.subplots(
         1, 2, figsize=(13.5, 6.4), gridspec_kw={"width_ratios": [1, 1.45]}
     )
 
     # -- left: the tally --------------------------------------------------
-    order = ["Win", "Tie", "Loss"]
-    colors = {"Win": WIN, "Tie": TIE, "Loss": LOSS}
+    order = ["Higher", "Tie", "Lower"]
+    colors = {"Higher": WIN, "Tie": TIE, "Lower": LOSS}
     vals = [counts[k] for k in order]
     bars = ax1.bar(order, vals, color=[colors[k] for k in order],
                    edgecolor="white", linewidth=1.5, width=0.62)
@@ -152,12 +152,12 @@ def plot_win_dimensions() -> None:
         ax1.text(b.get_x() + b.get_width() / 2, v + 0.15, str(v),
                  ha="center", va="bottom", fontsize=13, fontweight="bold")
     ax1.set_ylim(0, max(vals) + 1.6)
-    _style(ax1, f"Verdict across the {len(rows)} compared dimensions",
+    _style(ax1, f"Relation across the {len(rows)} compared dimensions",
            ylabel="Number of dimensions")
     ax1.text(
         0.5, -0.16,
-        "Wins are structural (granularity, provenance, backend, scale);\n"
-        "score dimensions are losses or at par.",
+        "The higher values are structural (granularity, provenance, backend, scale);\n"
+        "the score dimensions are lower or at parity.",
         transform=ax1.transAxes, ha="center", va="top",
         fontsize=8.5, color="#475569",
     )
@@ -167,7 +167,7 @@ def plot_win_dimensions() -> None:
     verdicts = [r[2] for r in rows]
     xs = np.arange(len(names))
     ax2.barh(xs, [1] * len(names),
-             color=[colors[verdict_label.get(v, "Loss")] for v in verdicts],
+             color=[colors[verdict_label.get(v, "Lower")] for v in verdicts],
              edgecolor="white", linewidth=0.8, height=0.68)
     ax2.set_yticks(xs)
     ax2.set_yticklabels(names, fontsize=8.5)
@@ -176,7 +176,7 @@ def plot_win_dimensions() -> None:
     ax2.set_xticks([])
     for spine in ("top", "right", "bottom"):
         ax2.spines[spine].set_visible(False)
-    ax2.set_title("Every dimension, by verdict", fontsize=12, fontweight="bold")
+    ax2.set_title("Every dimension, by relation", fontsize=12, fontweight="bold")
     ax2.grid(False)
 
     from matplotlib.patches import Patch
@@ -190,7 +190,7 @@ def plot_win_dimensions() -> None:
     )
 
     fig.suptitle(
-        "Where the 13-Step Pipeline Wins — and Where It Does Not",
+        "Where the 13-Step Pipeline Attains a Higher Value — and Where It Does Not",
         fontsize=14, fontweight="bold", y=0.98,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.95))
@@ -435,8 +435,9 @@ def plot_score_wins() -> None:
         # point estimate to be higher. Comparing point estimates against a
         # published value whose interval we do not have is how a chart ends
         # up claiming a win that the confidence interval contradicts: our
-        # AUPR is 0.853 against Decoding Memories' 0.84-0.85, but our own
-        # 95% CI [0.833, 0.874] covers that whole range.
+        # P@R90 is 0.800 against Dale's 0.703, but a chart that compared
+        # midpoints would also have called a win when our CI sat across
+        # their number.
         #
         # So the rule is: our lower CI bound must sit strictly above the
         # comparable. With no interval available there is no separation to
@@ -557,9 +558,11 @@ def plot_score_wins() -> None:
     # has to name which metrics fall short of it. The previous version
     # asserted "AUPR and CCR are the two metrics where we are ahead",
     # which was true of the point estimates and false of the intervals:
-    # our AUPR CI [0.833, 0.874] covers Decoding Memories' 0.84-0.85, and
+    # our AUPR CI [0.833, 0.874] covered Decoding Memories' 0.84-0.85, and
     # the CCR baseline of 0.55 is implied from another metric rather than
-    # published.
+    # published. The AUPR row itself is now dropped, because no published
+    # paper reports AUPR on HaluEval -- the 0.84-0.85 was an AUROC from a
+    # different metric family.
     wins = [m["label"] for m in metrics if m["win"]]
     overlaps = [m["label"] for m in metrics if m.get("overlap")]
     losses = [m["label"] for m in metrics if m.get("loss")]
@@ -584,14 +587,14 @@ def plot_score_wins() -> None:
     if overlaps:
         win_txt += ("\nOn " + _short(overlaps) + " the 95% CI overlaps the "
                     "published value, so "
-                    + ("this is a tie rather than a win."
+                    + ("this is at parity rather than separated."
                        if len(overlaps) == 1
-                       else "these are ties rather than wins."))
+                       else "these are at parity rather than separated."))
     if losses:
         win_txt += ("\nOn " + _short(losses) + " the 95% CI sits entirely "
                     "below the published value, so "
-                    + ("we are behind." if len(losses) == 1
-                       else "we are behind on these."))
+                    + ("this project attains a lower value." if len(losses) == 1
+                       else "this project attains a lower value on these."))
     if no_comp:
         win_txt += ("\n" + _short(no_comp) + " has no published comparable "
                     "to test against.")
@@ -601,8 +604,8 @@ def plot_score_wins() -> None:
     # bbox_inches="tight" it stretches the saved figure to several times
     # the intended width.
     caption = (
-        "Black bars are the 95% bootstrap CI on our value. A metric counts "
-        "as a win only when our interval sits entirely above\n"
+        "Black bars are the 95% bootstrap CI on our value. A metric is "
+        "separated only when our interval sits entirely above\n"
         "the published comparable. " + win_txt + "\n"
         "Every metric is shown so the comparison is not cherry-picked."
     )

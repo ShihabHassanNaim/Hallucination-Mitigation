@@ -1,15 +1,23 @@
-"""Three individual comparison charts for the metrics where we win.
+"""Two individual comparison charts for the metrics where we win.
 
 The report's result analysis (§3.2.5) says we beat the published
-comparables on exactly three scores:
+comparables on exactly two scores:
 
-    Detection AUPR    0.840  ->  0.922
     P@R90             0.703  ->  0.800
     Claim-level F1    0.710  ->  0.811
 
-Each one gets its own diagram here. The point of a separate diagram per
-metric is that a reader can look at a single comparison without
-scanning a combined chart for the row that concerns them.
+Detection AUPR used to have a chart of its own, drawn against
+Decoding Memories' 0.840. That paper reports AUROC, not AUPR -- the
+strings "AUPR", "AUC-PR" and "PR-AUC" do not appear in it -- and
+0.840 was EigenScore-B's HaluEval AUROC, so the chart was comparing
+our AUPR against somebody else's AUROC. No published paper reports
+AUPR on HaluEval, so there is nothing to chart it against and the
+chart was removed rather than re-pointed at a different metric.
+
+Each remaining metric gets its own diagram here. The point of a
+separate diagram per metric is that a reader can look at a single
+comparison without scanning a combined chart for the row that concerns
+them.
 
 Every number is read out of an artefact at render time:
 
@@ -239,25 +247,10 @@ def _verdict(ours: float, ci: tuple[float, float] | None, comparable: float) -> 
 
 
 # ---------------------------------------------------------------------------
-# The three metrics
+# The two metrics
 # ---------------------------------------------------------------------------
 
 CHARTS = [
-    {
-        "slug": "win_aupr",
-        "title": "Detection AUPR",
-        "metric_key": "detection_aupr",
-        "ci_key": "detection_aupr_ci95",
-        "source": "csv",
-        "csv_label": "AUPR",
-        "dimension": "Detection AUPR",
-        "question": "When the detector says a hallucination, how often is it right?",
-        "explain": ("AUPR asks one plain question: when the detector claims an answer is "
-                    "hallucinated, how often is that claim correct? A detector that fires "
-                    "rarely can still look good on ROC-AUC, but not on AUPR. This is the "
-                    "metric that punishes false alarms."),
-        "unit": "AUPR",
-    },
     {
         "slug": "win_pr90",
         "title": "Precision at 90% recall (P@R90)",
@@ -479,7 +472,7 @@ def _draw(cfg: dict) -> None:
     # ---- the rule, stated on the figure ----
     if ci:
         rule = (f"Our 95% interval is [{ci[0]:.4f}, {ci[1]:.4f}]. "
-                f"A win needs the whole interval above {comparable:.3f}.")
+                f"A higher value requires the whole interval above {comparable:.3f}.")
     else:
         rule = (f"No confidence interval is published for this metric, so this "
                 f"is a point comparison against {comparable:.3f}.")
@@ -492,11 +485,14 @@ def _draw(cfg: dict) -> None:
         fig.text(0.5, 0.082 - 0.032 * i, note, ha="center", va="center",
                  fontsize=9.2, color=GREY, style="italic")
 
-    # ---- verdict badge ----
-    badge = {"WIN": (WIN_C, "WIN"), "TIE": (TIE_C, "TIE"),
-             "LOSS": (LOSS_C, "LOSS")}[verdict]
+    # ---- the relation badge ----
+    # The internal verdicts stay "WIN"/"TIE"/"LOSS" because the rule
+    # returns them; only the text drawn on the figure uses the journal
+    # register.
+    badge = {"WIN": (WIN_C, "HIGHER"), "TIE": (TIE_C, "AT PARITY"),
+             "LOSS": (LOSS_C, "LOWER")}[verdict]
     ax.text(0.985, 0.965, badge[1], transform=ax.transAxes, ha="right",
-            va="top", fontsize=13.5, fontweight="bold", color="white",
+            va="top", fontsize=12.5, fontweight="bold", color="white",
             bbox=dict(boxstyle="round,pad=0.55", facecolor=badge[0],
                       edgecolor="none"))
 

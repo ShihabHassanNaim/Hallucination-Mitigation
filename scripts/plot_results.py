@@ -29,18 +29,25 @@ import numpy as np  # noqa: E402
 
 OUT_DIR = Path("data/graphs")
 
+# The two benchmarks the work is reported on. TruthfulQA is deliberately
+# absent: its closed-book setting supplies no corpus to retrieve from,
+# which makes the mitigation and verification rates degenerate, so it is
+# not a benchmark this work reports on. The raw HaluEval split and the
+# synthetic set are kept below for the transparency chart, where the
+# length confound is the point.
 DATASETS = [
     ("halueval", "HaluEval QA (length-matched)", "data/metrics_halueval.json", "#2563eb"),
-    # TruthfulQA is plotted from the CLOSED-BOOK run. The retrieval-on file
-    # (data/metrics_truthfulqa.json) measured against an answer-key corpus
-    # and leaked; it is not plotted.
-    ("truthfulqa", "TruthfulQA (closed-book)", "data/metrics_truthfulqa_closedbook.json", "#059669"),
     ("ragtruth", "RAGTruth (length-matched)", "data/metrics_ragtruth_fitted.json", "#7c3aed"),
     ("halueval_raw", "HaluEval QA (raw)", "data/metrics_halueval_raw.json", "#f59e0b"),
     ("synth", "Synthetic", "data/metrics.json", "#a855f7"),
 ]
 
-PRIMARY = ("halueval", "truthfulqa")
+PRIMARY = ("halueval", "ragtruth")
+
+# The datasets the book's figures draw. The transparency chart uses the
+# full list above, because the raw split and the synthetic set are shown
+# there deliberately.
+BOOK_DATASETS = ("halueval", "ragtruth")
 
 
 def _load(path: str) -> dict:
@@ -147,6 +154,8 @@ def plot_custom_metrics() -> None:
     ]
     data = {}
     for slug, lbl, path, _ in DATASETS:
+        if slug not in BOOK_DATASETS:
+            continue
         agg = _load(path).get("aggregate", {})
         if any(k in agg for k, _ in keys):
             data[slug] = agg
@@ -380,9 +389,9 @@ def plot_literature_comparison() -> None:
         "mitigation scores/deltas and the efficiency rows (latency, GPU "
         "memory, cost) are reported on their own charts, because they are "
         "not scores on a 0-1 scale.\n"
-        f"A ✓ marks a separated win: our 95% CI sits entirely above the "
+        f"A ✓ marks a separated higher value: our 95% CI sits entirely above the "
         f"published value ({n_wins} of {len(labels)}). Where the interval "
-        "overlaps, the metric is a tie, not a win.",
+        "overlaps, the metric is at parity rather than separated.",
         transform=ax.transAxes, ha="center", va="top",
         fontsize=8.5, color="#475569",
     )
@@ -399,6 +408,8 @@ def plot_literature_comparison() -> None:
 def plot_decision_distribution() -> None:
     counts = {}
     for slug, lbl, path, _ in DATASETS:
+        if slug not in BOOK_DATASETS:
+            continue
         rows = _rows_of(_load(path))
         if not rows:
             continue
@@ -409,10 +420,10 @@ def plot_decision_distribution() -> None:
         print("  [skip] 4 decision_distribution")
         return
 
-    # The dataset names are long ("HaluEval QA (length-matched)"), and at
-    # the old figure width the tick labels ran into each other: the
-    # "length-matched)" of the first bar sat on top of "TruthfulQA".
-    fig, ax = plt.subplots(figsize=(13, 5.8))
+    # The dataset names are long ("HaluEval QA (length-matched)"), so the
+    # figure is wide enough for the tick labels not to run into each
+    # other.
+    fig, ax = plt.subplots(figsize=(9.5, 5.8))
     slugs = list(counts)
     totals = [sum(counts[s].values()) for s in slugs]
     xlabels = [f"{_label(s)}\n(n={t})" for s, t in zip(slugs, totals)]
@@ -450,6 +461,8 @@ def plot_roc_curves() -> None:
 
     data = {}
     for slug, lbl, path, _ in DATASETS:
+        if slug not in BOOK_DATASETS:
+            continue
         rows = _rows_of(_load(path))
         if not rows:
             continue
@@ -695,6 +708,8 @@ def plot_latency_breakdown() -> None:
 def plot_confidence_calibration() -> None:
     data = {}
     for slug, lbl, path, _ in DATASETS:
+        if slug not in BOOK_DATASETS:
+            continue
         rows = _rows_of(_load(path))
         if not rows:
             continue

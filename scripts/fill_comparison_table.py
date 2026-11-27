@@ -43,6 +43,18 @@ MITIGATION_PATH = Path("data/mitigation_results.json")
 # two can never be confused.
 MITIGATION_INVESTIGATION_PATH = Path("data/mitigation_investigation.json")
 
+# The docs/ tree holds hand-written survey chapters, but it also held
+# hand-copied mirrors of three generated paper surfaces. A hand copy is a
+# promise nobody keeps: the next regeneration rewrites the original and the
+# copy keeps the old number. The mirrors are refreshed from their source by
+# this script instead, so they cannot drift.
+DOCS_MIRRORS = {
+    "Paper/comparison.md": "docs/comparison.md",
+    "Paper/halueval_papers.md": "docs/halueval_papers.md",
+    "Paper/ragtruth_comparison.md": "docs/ragtruth_comparison.md",
+    "data/RESULTS.md": "docs/RESULTS.md",
+}
+
 # Metric row label in the CSV -> (aggregate key, CI key)
 DETECTION_ROWS = {
     "ROC-AUC": ("detection_roc_auc", "detection_roc_auc_ci95"),
@@ -306,9 +318,10 @@ def _separation_verdict(
 
     The verdict is derived from the confidence interval, not from the point
     estimate. Comparing point estimates is what produced the claim that we
-    lead on AUPR: our 0.853 is above Decoding Memories' reported 0.84-0.85,
-    but our own 95% CI [0.833, 0.874] covers that whole range, so the two
-    are not separated and the comparison is a tie.
+    lead on P@R90: our point estimate is above Dale 2023's reported 0.703,
+    but the rule that decides the verdict is the interval's, and a point
+    estimate that beats a published number whose interval still overlaps is
+    not a separation.
 
     Three outcomes are possible:
 
@@ -791,7 +804,14 @@ def _latency_verdict(lookup) -> tuple[str, str]:
 _VISUAL_COMPARABLES = [
     # (row label, our metric key, published comparable, published value)
     ("Claim F1", "claim_f1", 0.710, None),
-    ("Detection AUPR", "detection_aupr", 0.840, "detection_aupr_ci"),
+    # Detection AUPR is measured but has no published comparable, so it
+    # is not charted against anything. Decoding Memories was cited here
+    # at 0.840, but its Table 1 reports AUROC only -- "AUPR", "AUC-PR"
+    # and "PR-AUC" do not appear in that paper -- and the 0.840 was
+    # EigenScore-B's HaluEval AUROC. Its best HaluEval AUROC is 84.9
+    # (Semantic Entropy+DMP, Mistral-7B); the range across its
+    # baselines is 61.2-84.9. That number is a ROC-AUC and appears in
+    # the ROC-AUC row instead.
     ("Detection ROC-AUC", "detection_roc_auc", 0.987, "detection_roc_auc_ci"),
     ("Sentence accuracy", "detection_accuracy", 0.847,
      "detection_accuracy_ci"),
@@ -918,6 +938,10 @@ def _headline_read(text: str) -> str:
     paragraph was written by hand and P@R90 became a win after it was
     written. The counts come from the rows, so the reading cannot
     disagree with the table it reads.
+
+    The same is true of the AUPR row: it carries a dash rather than a
+    verdict, because no published paper reports AUPR on HaluEval, so
+    it is not counted as a win, a tie or a loss.
     """
     rows = _win_matrix_rows(text)
     if not rows:
@@ -1021,7 +1045,21 @@ def _verdict_tally(text: str) -> str | None:
 # is measured against; the key is the metric that holds our score.
 _WIN_MATRIX_SCORES = {
     "Claim-level F1": ("claim_f1", 0.71),
-    "Detection AUPR": ("detection_aupr", 0.840),
+    # Detection AUPR has NO published comparable. Decoding Memories
+    # (arXiv 2508.21228) was previously cited here at 0.840, but its
+    # Table 1 reports AUROC only -- the strings "AUPR", "AUC-PR" and
+    # "PR-AUC" do not appear in the paper -- and the 0.840 was
+    # EigenScore-B's HaluEval AUROC. Comparing an AUPR against an AUROC
+    # is the metric-family error this project has already made once
+    # (see Rule 1 in docs/metric_and_benchmark_reference.md), so the
+    # row is measured and reported, but no win is claimed against it.
+    "Detection AUPR": ("__no_comparable__", 0.0),
+    # Decoding Memories is a second ROC-AUC comparable. Its best
+    # HaluEval AUROC is 84.9 (Semantic Entropy+DMP, Mistral-7B); the
+    # range across its baselines is 61.2-84.9. It evaluates 400
+    # examples of the QA subset and relabels them with GPT-4o, so it
+    # is not a like-for-like comparison, but it is the only other
+    # AUROC on HaluEval in the literature.
     "Detection ROC-AUC": ("detection_roc_auc", 0.987),
     "Sentence accuracy": ("detection_accuracy", 0.847),
     "P@R90": ("precision_at_recall_90", 0.703),
@@ -1057,6 +1095,24 @@ def _win_matrix_row(v, m) -> str:
         return m.group(0)
 
     key, threshold = key_and_threshold
+    if key == "__no_comparable__":
+        # The metric was measured, but no published paper reports the
+        # same metric on the same data, so there is nothing to compare
+        # it against and no verdict to reach. The row reports the
+        # measurement and says why it is not a comparison, rather than
+        # borrowing a number from a different metric family.
+        try:
+            measured = v("detection_aupr")
+        except KeyError:
+            return m.group(0)
+        if measured is None:
+            return m.group(0)
+        return (
+            f"| {number} | **{dimension}** | {best_paper} | {best_score} | "
+            f"{ours} | — | No published paper reports AUPR on HaluEval. "
+            "Decoding Memories reports AUROC, so this row is a measurement "
+            "with no published comparable. |"
+        )
     if key == "__mitigation__":
         # The mitigation delta is a win only when the measurement is
         # positive and its interval excludes zero. The helper is the
@@ -1270,6 +1326,14 @@ def _ragtruth_heldout_prose(lookup) -> str:
     the full split is measured on data the head has seen. The held-out
     figure -- scored on the half the fit never saw -- is the honest
     generalisation estimate, and the paragraph reports both.
+
+    The held-out tally is computed anchor by anchor with the paper's
+    own rule: a win needs the held-out lower bound strictly above the
+    published value, so the held-out interval can still clear the
+    weaker anchors even when it no longer clears the strongest one.
+    The paragraph used to report "a tie against all five" because it
+    only compared the lower bound with the strongest anchor, which
+    understates the held-out comparison.
     """
     def _get(key: str):
         try:
@@ -1294,6 +1358,63 @@ def _ragtruth_heldout_prose(lookup) -> str:
     direction = (
         "below" if (heldout_lower and float(heldout_lower) < anchor) else "above"
     )
+
+    # The held-out tally, anchor by anchor, using the same interval rule
+    # the rest of the paper uses. The anchors are sorted by their
+    # published value so the sentence reads from the strongest to the
+    # weakest, which is the order the paper's own table uses.
+    holdout_wins = 0
+    holdout_ties = 0
+    holdout_losses = 0
+    won_anchors: list[str] = []
+    tied_anchors: list[str] = []
+    if heldout_lower:
+        lower = float(heldout_lower)
+        ordered = sorted(
+            _PUBLISHED_AUROC.items(), key=lambda kv: float(kv[1]), reverse=True
+        )
+        for system, published in ordered:
+            threshold = float(published)
+            if lower > threshold:
+                holdout_wins += 1
+                won_anchors.append(f"{system} ({threshold:.4f})")
+            else:
+                holdout_ties += 1
+                tied_anchors.append(f"{system} ({threshold:.4f})")
+    tally = (
+        f"{holdout_wins} win{'' if holdout_wins == 1 else 's'}, "
+        f"{holdout_ties} tie{'' if holdout_ties == 1 else 's'}"
+    )
+    if holdout_losses:
+        tally += f", {holdout_losses} loss{'' if holdout_losses == 1 else 'es'}"
+
+    # The in-sample tally, computed with the same rule against the
+    # in-sample lower bound, so the "rather than N wins" clause quotes
+    # the number the paragraph is contrasting with.
+    insample_wins = 0
+    insample_lower = ""
+    if isinstance(holdout_ci, str):
+        pass
+    sample_ci = _get("rag_detection_roc_auc_ci")
+    if isinstance(sample_ci, str):
+        try:
+            insample_lower = float(sample_ci.strip("[]").split(",")[0])
+        except (ValueError, IndexError):
+            insample_lower = ""
+    if insample_lower != "":
+        for _system, published in _PUBLISHED_AUROC.items():
+            if insample_lower > float(published):
+                insample_wins += 1
+
+    detail = ""
+    if won_anchors:
+        detail += " It still clears " + ", ".join(won_anchors) + "."
+    if tied_anchors:
+        detail += (
+            " It does not clear "
+            + ", ".join(tied_anchors)
+            + ", so those turn from wins into ties."
+        )
     return (
         "The detection head was fitted on 496 rows of the\nRAGTruth split, "
         "so the " + str(fitted) + " above was measured on data the model "
@@ -1304,7 +1425,12 @@ def _ragtruth_heldout_prose(lookup) -> str:
         "reassuring.\nBut the held-out lower bound (" + (heldout_lower or "n/a")
         + ") sits **" + direction + "** LLM-Check's strongest anchor\n("
         + f"{anchor:.4f}" + "), so on the held-out figure alone the RAGTruth "
-        "comparison would be a tie against\nall five rather than three wins."
+        "comparison is **" + tally + "**\n"
+        + "rather than "
+        + f"{insample_wins} wins."
+        + detail
+        + " Both numbers are reported. A reviewer who spots the\n"
+        "in-sample figure deserves to see the out-of-sample figure beside it."
     )
 
 
@@ -1696,8 +1822,16 @@ def _fill_comparison_md(
             r"(?:small|not small), which is reassuring\.\s*\n?But the held-out "
             r"lower bound\s*\n?\((?:[\d.]+|n/a)\) sits \*\*(?:below|above)\*\* "
             r"LLM-Check's strongest anchor\s*\n?\([\d.]+\), so on the held-out "
-            r"figure alone the RAGTruth comparison would be a tie against\s*\n?"
-            r"all five rather than three wins\.",
+            # The tail used to say the comparison would be "a tie against all
+            # five rather than three wins", which is what the paragraph
+            # claims when it only checks the lower bound against the
+            # strongest anchor. The pattern matches that wording and the
+            # wording this rule now writes, so a second pass finds the
+            # paragraph again and rewrites it to the same text.
+            r"figure alone the RAGTruth comparison [\s\S]*?"
+            r"Both numbers are reported\. A reviewer who spots the\s*\n?"
+            r"in-sample figure deserves to see the out-of-sample figure"
+            r"\s*\n?beside it\.",
             lambda v, m: (
                 _ragtruth_heldout_prose(v)
             ),
@@ -1950,6 +2084,31 @@ def _fill_comparison_md(
             ("detection_roc_auc", "detection_roc_auc_ci"),
         ),
         (
+            # The short version at the top of the document used to claim
+            # an AUPR win over "the best published comparable of
+            # 0.84-0.85". No published paper reports AUPR on HaluEval --
+            # Decoding Memories reports AUROC -- so the bullet now states
+            # the measurement and says there is no comparable, rather
+            # than borrowing a number from a different metric family.
+            #
+            # The pattern matches both the old wording and the wording
+            # this rule writes, so the fill stays idempotent: a second
+            # pass has to find the row again and rewrite it to the same
+            # text rather than silently failing to match.
+            "1. short version: the AUPR bullet",
+            r"(\*\*We win clearly on the metrics that come from checking claims "
+            r"one at a time\.\*\* Claim-level\s*\n?F1 [\d.]+, above the best cited "
+            r"comparable of [\d.]+\. AUPR )[\d.]+(, (?:above the best published\s*\n?"
+            r"comparable of [\d.]+[–\-][\d.]+ with the interval excluding it\.|"
+            r"with no published comparable[^\n]*))",
+            lambda v, m: (
+                m.group(1) + v("detection_aupr")
+                + ", with no published comparable -- no paper reports AUPR on "
+                "HaluEval"
+            ),
+            ("detection_aupr",),
+        ),
+        (
             # The HaluEval table has five columns: the metric, our value,
             # the interval, the best published comparable and the verdict.
             # The pattern has to reach the comparable column, otherwise it
@@ -1961,12 +2120,16 @@ def _fill_comparison_md(
             # too. It used to be copied through unchanged, so the
             # interval the paper printed could drift away from the
             # one the run measured.
+            #
+            # No published paper reports AUPR on HaluEval, so the
+            # comparable cell is rewritten to say so and the verdict
+            # becomes a dash. The row used to carry Decoding Memories'
+            # 0.840, which is an AUROC (see the note on
+            # _VISUAL_COMPARABLES).
             lambda v, m: (
                 m.group(1) + v('detection_aupr')
                 + " | " + v('detection_aupr_ci') + " | "
-                + m.group(3) + " | "
-                + (_verdict_from_ci(v, 'detection_aupr', 'detection_aupr_ci',
-                                 m.group(3)) or m.group(5).strip()) + " |"
+                + "no published comparable | — |"
             ),
             ("detection_aupr", "detection_aupr_ci"),
         ),
@@ -2283,10 +2446,10 @@ def _fill_comparison_md(
         ),
         (
             "7. win matrix: AUPR row",
-            r"\| 3 \| \*\*Detection AUPR\*\* \| Decoding Memories \| 0\.840 \| "
+            r"\| 3 \| \*\*Detection AUPR\*\* \| ([^|]+?) \| ([^|]+?) \| "
             r"\*\*[^*]+\*\* \|",
             lambda v, m: (
-                "| 3 | **Detection AUPR** | Decoding Memories | 0.840 | "
+                "| 3 | **Detection AUPR** | no published comparable | — | "
                 f"**{v('detection_aupr')}** |"
             ),
             ("detection_aupr",),
@@ -2647,19 +2810,17 @@ def _fill_comparison_tex(
             ("detection_roc_auc",),
         ),
         (
-            # The AUPR verdict follows the interval, not the point
-            # estimate. The row used to be pinned to the tie that the
-            # superseded measurement gave; the corrected instrument
-            # separates the intervals, so the verdict has to be able to
-            # flip without the rule going stale.
+            # No published paper reports AUPR on HaluEval, so the row
+            # has no comparable and no verdict. It used to name
+            # Decoding Memories' 0.84-0.85, which is an AUROC (see the
+            # note on _VISUAL_COMPARABLES) and the source of an
+            # unsupported win.
             "summary: AUPR",
             r"Detection AUPR & [^&]* & [^&]* & [^&]* \\\\",
             lambda v, m: (
-                r"Detection AUPR & 0.84--0.85 (Decoding Memories) & "
-                f"{v('detection_aupr')} & "
-                + (r"CI excludes the comparable (above it) \\"
-                   if _above_ci(v, "detection_aupr_ci95", 0.85)
-                   else r"CI overlaps the comparable (tie) \\")
+                r"Detection AUPR & no published comparable (Decoding "
+                r"Memories reports AUROC) & "
+                f"{v('detection_aupr')} & measured, not a comparison \\"
             ),
             ("detection_aupr", "detection_aupr_ci95"),
         ),
@@ -3997,6 +4158,36 @@ def _fill_why_we_win_tex(
     return replacements
 
 
+def refresh_docs_mirrors(
+    docs_dir: Path, dry_run: bool = False,
+) -> list[tuple[str, str, str]]:
+    """Copy each generated paper surface over its hand-copied docs/ twin.
+
+    The docs/ copies exist so a reader working from the survey chapters
+    sees the same numbers as the paper. They are copies, not sources: the
+    copy is rewritten from its source on every run, so the two can never
+    disagree. A mirror whose source has gone missing is left alone and
+    reported, because silently deleting a document is worse than having
+    a duplicate of it.
+    """
+    replacements: list[tuple[str, str, str]] = []
+    for source, mirror in DOCS_MIRRORS.items():
+        src = Path(source)
+        dst = docs_dir / Path(mirror).name
+        if not src.exists():
+            print(f"  {mirror}: source {source} is missing - left alone",
+                  file=sys.stderr)
+            continue
+        src_text = src.read_text(encoding="utf-8")
+        old_text = dst.read_text(encoding="utf-8") if dst.exists() else ""
+        if src_text == old_text:
+            continue
+        replacements.append((mirror, old_text, src_text))
+        if not dry_run:
+            dst.write_text(src_text, encoding="utf-8")
+    return replacements
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--csv", type=Path, default=CSV_PATH)
@@ -4012,6 +4203,17 @@ def main(argv: list[str] | None = None) -> int:
             "wrote that file's numbers into the real paper — which is how "
             "a superseded ROC-AUC kept reappearing. Pointing this at a "
             "temporary directory keeps a test off the real files."
+        ),
+    )
+    parser.add_argument(
+        "--docs-dir",
+        type=Path,
+        default=Path("docs"),
+        help=(
+            "directory holding the hand-copied twins of the generated "
+            "paper surfaces. Each twin is rewritten from its source on "
+            "every run, so the two cannot drift apart. Pass a temporary "
+            "directory to keep a test off the real files."
         ),
     )
     parser.add_argument(
@@ -4116,9 +4318,18 @@ def main(argv: list[str] | None = None) -> int:
     for label, old, new in readme_changes:
         print(f"  {args.readme.name} {label}: {_safe(old)} -> {_safe(new)}")
 
+    # The docs/ twins are refreshed last, so they pick up the paper
+    # surfaces as they stand after this run rather than as they stood
+    # before it.
+    mirror_changes = refresh_docs_mirrors(
+        args.docs_dir, dry_run=args.dry_run,
+    )
+    for label, old, new in mirror_changes:
+        print(f"  {label}: refreshed from its source")
+
     total_changes = (
         len(changed) + len(md_changes) + len(tex_changes)
-        + len(ww_tex_changes) + len(readme_changes)
+        + len(ww_tex_changes) + len(readme_changes) + len(mirror_changes)
     )
 
     if args.dry_run:
@@ -4139,6 +4350,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Updated {len(tex_changes)} row(s) in Paper/comparison_summary.tex")
     if ww_tex_changes:
         print(f"Updated {len(ww_tex_changes)} row(s) in Paper/why_we_win_summary.tex")
+    if mirror_changes:
+        print(f"Refreshed {len(mirror_changes)} docs/ twin(s) from their sources")
     return 0
 
 

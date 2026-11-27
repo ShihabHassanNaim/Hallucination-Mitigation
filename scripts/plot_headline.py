@@ -1,7 +1,7 @@
 """Journal-ready headline figure: detection performance with intervals.
 
 The single figure a reviewer will look for. It shows, for each of the
-three evaluated datasets, the detection metrics the paper reports --
+two evaluated datasets, the detection metrics the paper reports --
 ROC-AUC, AUPR, F1, accuracy, precision and recall -- each with its 95%
 bootstrap confidence interval, against the 0.50 chance line.
 
@@ -9,8 +9,7 @@ Two properties matter for this figure:
 
   * Every number is read from the metrics files. There is no typed-in
     value, so the figure cannot drift from the measurements.
-  * The TruthfulQA row is the closed-book run and the HaluEval and
-    RAGTruth rows are length-matched. The figure says so in the axis
+  * Both rows are length-matched. The figure says so in the axis
     labels, because the length-matched HaluEval number (0.925) is
     deliberately lower than the raw-split number (0.968) and a reader
     who mixed the two would draw the wrong conclusion.
@@ -38,9 +37,6 @@ DATASETS = [
     ("HaluEval QA\n(length-matched)",
      "data/metrics_halueval.json",
      "#2563eb"),
-    ("TruthfulQA\n(closed-book)",
-     "data/metrics_truthfulqa_closedbook.json",
-     "#059669"),
     ("RAGTruth\n(length-matched)",
      "data/metrics_ragtruth_fitted.json",
      "#7c3aed"),
@@ -149,17 +145,17 @@ def plot_headline() -> None:
     )
 
     fig.suptitle(
-        "Detection performance across three benchmarks, with 95% "
+        "Detection performance across two benchmarks, with 95% "
         "bootstrap confidence intervals",
         fontsize=14.5, fontweight="bold", y=0.985,
     )
     fig.text(
         0.5, 0.028,
         "1,000 rows per dataset; intervals are bootstrapped over unique "
-        "questions (500 for HaluEval and TruthfulQA, 277 for RAGTruth). "
-        "HaluEval and RAGTruth use length-matched splits — on the raw "
-        "split a detector can guess 94.7% of rows from answer length "
-        "alone, so the raw numbers are not shown here.",
+        "questions (500 for HaluEval, 277 for RAGTruth). Both benchmarks "
+        "use length-matched splits — on the raw split a detector can guess "
+        "94.7% of rows from answer length alone, so the raw numbers are not "
+        "shown here.",
         ha="center", va="bottom", fontsize=8.6, color="#64748b",
     )
 

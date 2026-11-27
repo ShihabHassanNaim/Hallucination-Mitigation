@@ -891,6 +891,76 @@ def test_why_we_win_verdict_rows_are_rewritten(tmp_path):
     assert "**0.745**" in out
     assert "0.76" not in out
     assert "0.85+" not in out
+    # The AUPR row carries no verdict: no published paper reports AUPR on
+    # HaluEval, so there is nothing for it to be compared against. The
+    # fixture's "Decoding Memories | 0.840" cell is an AUROC.
+    aupr = next(l for l in out.splitlines() if "**Detection AUPR**" in l)
+    assert "| — |" in aupr, f"the AUPR row must carry a dash, not a verdict: {aupr}"
+    assert "0.840" not in aupr
+
+
+def test_the_held_out_paragraph_tallies_every_anchor(tmp_path):
+    """The held-out tally is computed anchor by anchor, not from the best one.
+
+    The paragraph used to compare the held-out lower bound only with
+    LLM-Check's *strongest* anchor and conclude that the comparison was
+    "a tie against all five". That understates the result: the lower
+    bound still clears the two weakest anchors, so the held-out tally
+    is two wins and three ties.
+
+    The rule is the paper's own: a win needs the lower bound strictly
+    above the published value.
+    """
+    import scripts.fill_comparison_table as fill
+
+    values = {
+        "rag_detection_roc_auc": 0.613,
+        "rag_detection_roc_auc_ci": "[0.5494, 0.6581]",
+        "rag_holdout_roc_auc": 0.6185,
+        "rag_holdout_roc_auc_ci": "[0.5371, 0.6943]",
+    }
+    prose = fill._ragtruth_heldout_prose(lambda k: values[k])
+
+    # The recomputed tally: the lower bound 0.5371 clears 0.5327 and
+    # 0.5168, and does not clear 0.5458, 0.5724 or 0.5830.
+    assert "2 wins, 3 ties" in prose, prose
+    # The in-sample lower bound 0.5494 clears three anchors.
+    assert "rather than 3 wins" in prose, prose
+    # The old wording must not come back.
+    assert "tie against all five" not in prose, prose
+
+    # The paragraph is idempotent: the generator's rule has to match
+    # the text it writes, or a second run would leave the old wording
+    # in place. The RAGTruth numbers reach the rule through the
+    # ``cross`` argument, so the fixture passes them there.
+    cross = {"ragtruth": {
+        "detection_roc_auc": 0.612728,
+        "detection_roc_auc_ci95": [0.5493826089734734, 0.6581043509403893],
+        "holdout_roc_auc": 0.6185,
+        "holdout_roc_auc_ci95": [0.5371, 0.6943],
+    }}
+    md = tmp_path / "comparison.md"
+    md.write_text(
+        "**The caveat we have to state anyway.** The detection head was "
+        "fitted on 496 rows of the\nRAGTruth split, so the 0.613 above was "
+        "measured on data the model had already seen. The\nhonest "
+        "generalisation estimate is the **held-out** figure: **0.6185, "
+        "CI [0.5371, 0.6943]**,\nscored on a half of the fitting data it "
+        "never saw. The gap is small, which is reassuring.\nBut the "
+        "held-out lower bound (0.5371) sits **below** LLM-Check's "
+        "strongest anchor\n(0.5830), so on the held-out figure alone the "
+        "RAGTruth comparison would be a tie against\nall five rather than "
+        "three wins. Both numbers are reported. A reviewer who spots the\n"
+        "in-sample figure deserves to see the out-of-sample figure beside it.",
+        encoding="utf-8",
+    )
+    fill._fill_comparison_md(md, {}, dry_run=False, cross=cross)
+    out = md.read_text(encoding="utf-8")
+    assert "2 wins, 3 ties" in out, out
+    assert "tie against all five" not in out
+    # A second pass must not change anything.
+    fill._fill_comparison_md(md, {}, dry_run=False, cross=cross)
+    assert md.read_text(encoding="utf-8") == out
 
 
 
@@ -1034,21 +1104,15 @@ _PAPER_FILES = (
 )
 
 
-def test_the_aupr_row_verdict_follows_the_interval():
-    """The AUPR verdict must follow the interval, not the point estimate.
+def test_the_aupr_row_has_no_verdict_because_there_is_no_comparable():
+    """The AUPR row reports a measurement, not a comparison.
 
-    The row used to say "Above the general-purpose probes" on the strength
-    of a point estimate whose own 95% CI covered the published range -- a
-    claim of a lead that the interval did not support. The verdict is
-    derived from the CI: it may only say "above ... 95% CI excludes it"
-    when our lower bound clears the comparable, and it must say
-    "overlaps" when the intervals intersect.
-
-    The test does not hard-code which of the two applies. The measured
-    AUPR moved from 0.853 (CI [0.833, 0.874], which covered the published
-    0.84-0.85 range) to 0.922 (CI [0.906, 0.938], which clears it), and a
-    test that pinned the old conclusion would have failed for the right
-    number arriving.
+    No published paper reports AUPR on HaluEval. Decoding Memories was
+    previously cited here at 0.840, but its Table 1 reports AUROC -- the
+    strings "AUPR", "AUC-PR" and "PR-AUC" do not appear in that paper
+    -- and the 0.840 was EigenScore-B's HaluEval AUROC. Comparing our
+    AUPR against somebody else's AUROC compares two different
+    quantities, so the row must carry a dash rather than a verdict.
     """
     md = Path("Paper/comparison.md")
     if not md.exists():
@@ -1064,29 +1128,24 @@ def test_the_aupr_row_verdict_follows_the_interval():
     assert row is not None, "the AUPR row is missing from comparison.md"
     low = row.lower()
 
-    ci = agg.get("detection_aupr_ci95")
     value = agg.get("detection_aupr")
-    if not ci or len(ci) != 2 or value is None:
-        pytest.skip("the run has no AUPR interval to check the row against")
-    lo, hi = float(ci[0]), float(ci[1])
-    comparable = 0.84
+    if value is None:
+        pytest.skip("the run has no AUPR to check the row against")
 
-    if lo > comparable:
-        # Separated: the row may claim the lead.
-        assert "\u2713" in row, (
-            f"our AUPR CI [{lo:.3f}, {hi:.3f}] clears {comparable}, so the "
-            f"row should claim the win: {row}"
-        )
-    elif hi < comparable:
-        assert "\u2717" in row, (
-            f"our AUPR CI [{lo:.3f}, {hi:.3f}] sits under {comparable}, so "
-            f"the row should report the loss: {row}"
-        )
-    else:
-        assert "\u2248" in row, (
-            f"our AUPR CI [{lo:.3f}, {hi:.3f}] covers {comparable}, so the "
-            f"row should report the tie: {row}"
-        )
+    # The measurement is still reported.
+    assert f"{float(value):.3f}" in row, (
+        f"the AUPR row does not carry the measured value: {row}"
+    )
+    # But there is no verdict and no published comparable.
+    assert "\u2713" not in row, f"the AUPR row claims a win: {row}"
+    assert "\u2717" not in row, f"the AUPR row claims a loss: {row}"
+    assert "\u2248" not in row, f"the AUPR row claims a tie: {row}"
+    assert "no published comparable" in low, (
+        f"the AUPR row does not say there is no published comparable: {row}"
+    )
+    assert "0.840" not in row, (
+        f"the AUPR row still carries Decoding Memories' AUROC: {row}"
+    )
 
     # A tie may never be dressed up as a lead, whatever the interval says.
     for overclaim in ("above the general-purpose probes", "leads the field"):
@@ -1622,12 +1681,12 @@ def test_a_win_needs_the_interval_to_clear_the_comparable():
     from scripts.fill_comparison_table import _verdict_from_ci
 
     values = {
-        "detection_aupr": "0.900",
-        "detection_aupr_ci": "[0.700, 0.950]",
+        "precision_at_recall_90": "0.900",
+        "precision_at_recall_90_ci": "[0.700, 0.950]",
     }
     verdict = _verdict_from_ci(
-        _lookup_for(values), "detection_aupr", "detection_aupr_ci",
-        "0.840 (Decoding Memories)",
+        _lookup_for(values), "precision_at_recall_90",
+        "precision_at_recall_90_ci", "0.703 (Dale 2023 — LaBSE)",
     )
     assert verdict != "✓", (
         "a metric whose 95% interval overlaps the published number was "
@@ -1640,12 +1699,12 @@ def test_a_win_is_claimed_when_the_interval_clears_the_comparable():
     from scripts.fill_comparison_table import _verdict_from_ci
 
     values = {
-        "detection_aupr": "0.920",
-        "detection_aupr_ci": "[0.906, 0.938]",
+        "precision_at_recall_90": "0.800",
+        "precision_at_recall_90_ci": "[0.7732, 0.8443]",
     }
     verdict = _verdict_from_ci(
-        _lookup_for(values), "detection_aupr", "detection_aupr_ci",
-        "0.840 (Decoding Memories)",
+        _lookup_for(values), "precision_at_recall_90",
+        "precision_at_recall_90_ci", "0.703 (Dale 2023 — LaBSE)",
     )
     assert verdict == "✓"
 
@@ -1765,11 +1824,12 @@ def test_every_surface_uses_the_same_verdict_for_the_same_metric():
     }
 
     # The metric table's verdict for each row, read from the same helper
-    # the rule uses.
+    # the rule uses. Detection AUPR is not in the list: no published
+    # paper reports AUPR on HaluEval, so there is no comparable for the
+    # rule to measure against and the row carries no verdict.
     rows = [
         ("detection_roc_auc", "detection_roc_auc_ci",
          "0.987 (Dale 2023 — ALTI+)"),
-        ("detection_aupr", "detection_aupr_ci", "0.840 (Decoding Memories)"),
         ("precision_at_recall_90", "precision_at_recall_90_ci",
          "0.703 (Dale 2023 — LaBSE)"),
         ("detection_accuracy", "detection_accuracy_ci",
@@ -1788,7 +1848,6 @@ def test_every_surface_uses_the_same_verdict_for_the_same_metric():
     block = _visual_headline_block(_lookup_for(values))
     labels = {
         "detection_roc_auc": "Detection ROC-AUC",
-        "detection_aupr": "Detection AUPR",
         "precision_at_recall_90": "P@R90",
         "detection_accuracy": "Sentence accuracy",
         "spearman_rho": "Spearman ρ",
