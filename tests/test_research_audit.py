@@ -237,8 +237,8 @@ def test_the_win_matrix_tally_matches_the_paper():
     )
     assert tally, "the paper's verdict tally could not be parsed"
     wins, ties, losses = (int(g) for g in tally.groups())
-    assert (wins, ties, losses) == (8, 5, 8)
-    assert "8 wins / 5 ties / 8 losses" in md
+    assert (wins, ties, losses) == (7, 5, 8)
+    assert "7 wins / 5 ties / 8 losses" in md
 
 
 def test_the_ragtruth_head_to_head_is_quoted_correctly():
@@ -284,12 +284,6 @@ def test_the_result_analysis_section_exists():
 def test_the_result_analysis_quotes_the_winning_scores_exactly():
     sec = _section_325()
     hal = _agg("data/metrics_halueval.json")
-    # AUPR 0.922 -- the interval's bottom must be above Decoding Memories' 0.840.
-    assert f"{hal['detection_aupr']:.3f}" == "0.922"
-    assert "0.922" in sec
-    low, high = hal["detection_aupr_ci95"]
-    assert f"[{low:.4f}, {high:.4f}]" == "[0.9057, 0.9383]"
-    assert "[0.9057, 0.9383]" in sec
     # P@R90 0.800 vs Dale's 0.703.
     assert f"{hal['precision_at_recall_90']:.3f}" == "0.800"
     assert "0.800" in sec and "0.703" in sec
@@ -302,12 +296,45 @@ def test_the_result_analysis_quotes_the_winning_scores_exactly():
     assert "0.467" in sec and "0.810" in sec
 
 
+def test_detection_aupr_is_reported_as_a_measurement_not_a_win():
+    """No published paper reports AUPR on HaluEval.
+
+    Decoding Memories was previously cited here at 0.840, but its
+    Table 1 reports AUROC -- "AUPR", "AUC-PR" and "PR-AUC" do not
+    appear in that paper -- and the 0.840 was EigenScore-B's HaluEval
+    AUROC. Comparing our AUPR against somebody else's AUROC is
+    comparing two different quantities, so the row reports the
+    measurement and says there is no comparable.
+    """
+    sec = _section_325()
+    hal = _agg("data/metrics_halueval.json")
+    assert f"{hal['detection_aupr']:.3f}" == "0.922"
+    assert "0.922" in sec
+    low, high = hal["detection_aupr_ci95"]
+    assert f"[{low:.4f}, {high:.4f}]" == "[0.9057, 0.9383]"
+    assert "[0.9057, 0.9383]" in sec
+    # The row must name the metric, say there is no comparable, and say
+    # why -- not carry a verdict.
+    assert "AUPR" in sec
+    assert "no published comparable" in sec.lower() or \
+        "no published paper reports AUPR" in sec
+    # The old AUROC number must not be back as a comparable for AUPR. It
+    # may still appear in the paragraph that explains why the comparison
+    # was removed, so the check looks for it in a table cell rather than
+    # anywhere in the section.
+    for line in sec.splitlines():
+        if not line.startswith("|"):
+            continue
+        assert "0.840" not in line, (
+            f"a table row still quotes Decoding Memories' 0.840 against "
+            f"our AUPR: {line}"
+        )
+
+
 def test_the_result_analysis_states_the_gaps_it_claims():
     sec = _section_325()
     hal = _agg("data/metrics_halueval.json")
-    # The AUPR gap and the P@R90 gap are stated as differences.
-    assert "0.082" in sec, "the AUPR gap must be stated"
-    assert f"{hal['detection_aupr'] - 0.840:.3f}" == "0.082"
+    # The P@R90 gap and the claim-F1 gap are stated as differences.
     assert "0.097" in sec, "the P@R90 gap must be stated"
     assert f"{hal['precision_at_recall_90'] - 0.703:.3f}" == "0.097"
     assert "0.101" in sec, "the claim-F1 gap must be stated"
@@ -347,8 +374,8 @@ def test_the_result_analysis_tally_matches_the_paper():
     )
     assert tally
     wins, ties, losses = (int(g) for g in tally.groups())
-    assert (wins, ties, losses) == (8, 5, 8)
-    assert "8 wins, 5 ties" in sec or "8 wins / 5 ties / 8 losses" in sec
+    assert (wins, ties, losses) == (7, 5, 8)
+    assert "7 wins, 5 ties" in sec or "7 wins / 5 ties / 8 losses" in sec
     assert "3 wins" in sec and "2 ties" in sec
 
 
@@ -379,21 +406,35 @@ def test_the_result_analysis_is_in_the_table_of_contents():
 
 
 # ---------------------------------------------------------------------------
-# The three win-comparison diagrams
+# The two win-comparison diagrams
 # ---------------------------------------------------------------------------
 
-WIN_FIGURES = ["win_aupr.png", "win_pr90.png", "win_claim_f1.png"]
+WIN_FIGURES = ["win_pr90.png", "win_claim_f1.png"]
 
 
 @pytest.mark.parametrize("name", WIN_FIGURES)
 def test_the_win_diagrams_are_embedded_and_exist(name):
-    """Each of the three wins has its own diagram, and the report shows it."""
+    """Each of the two wins has its own diagram, and the report shows it."""
     path = ROOT / "data" / "graphs" / name
     assert path.exists(), f"{name} was not generated"
     assert name in _text(), f"{name} is not embedded in the report"
 
 
-def test_the_three_diagrams_are_in_the_score_wins_subsection():
+def test_there_is_no_diagram_for_a_metric_with_no_published_comparable():
+    """Detection AUPR has no published comparable, so it has no diagram.
+
+    A diagram for it would have to draw our AUPR against somebody
+    else's AUROC, which is the comparison that was removed.
+    """
+    path = ROOT / "data" / "graphs" / "win_aupr.png"
+    assert not path.exists(), (
+        "win_aupr.png still exists; no published paper reports AUPR on "
+        "HaluEval, so there is nothing for it to be drawn against"
+    )
+    assert "win_aupr.png" not in _text()
+
+
+def test_the_two_diagrams_are_in_the_score_wins_subsection():
     """They belong with the score wins, not somewhere else in the report."""
     md = _text()
     start = md.index("##### 3.2.5.1 The wins")
@@ -409,8 +450,8 @@ def test_each_diagram_caption_explains_how_to_read_it():
     start = md.index("##### 3.2.5.1 The wins")
     end = md.index("##### 3.2.5.2", start)
     sec = md[start:end]
-    assert sec.count("*How to read it.*") == 3, (
-        "each of the three diagrams needs a plain-English reading guide"
+    assert sec.count("*How to read it.*") == 2, (
+        "each of the two diagrams needs a plain-English reading guide"
     )
 
 
@@ -418,9 +459,6 @@ def test_the_diagram_captions_quote_the_real_numbers():
     """The alt text must not drift from the measurements."""
     md = _text()
     hal = _agg("data/metrics_halueval.json")
-    # AUPR.
-    assert f"{hal['detection_aupr']:.3f}" == "0.922"
-    assert "0.922" in md and "[0.9057, 0.9383]" in md
     # P@R90.
     assert f"{hal['precision_at_recall_90']:.3f}" == "0.800"
     assert "[0.7732, 0.8443]" in md
@@ -428,7 +466,7 @@ def test_the_diagram_captions_quote_the_real_numbers():
     assert f"{hal['claim_f1']:.3f}" == "0.811"
     assert "0.811" in md
     # The published comparables the diagrams draw.
-    for comparable in ("0.840", "0.703", "0.710"):
+    for comparable in ("0.703", "0.710"):
         assert comparable in md, f"the comparable {comparable} is not quoted"
 
 

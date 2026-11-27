@@ -1,4 +1,4 @@
-# A Full Research Audit of the CRISP Hallucination-Detection Pipeline
+ # A Full Research Audit of the CRISP Hallucination-Detection Pipeline
 
 **Author:** Shihab Hassan Naim
 **Project:** CRISP — a 13-step retrieval-grounded hallucination-detection, verification and mitigation pipeline
@@ -128,7 +128,7 @@ survive the change.
 |---|---|---|
 | **RQ1** | How well does the pipeline detect hallucination on three datasets, with confidence intervals? | 0.925 / 0.635 / 0.635 ROC-AUC on HaluEval-matched / TruthfulQA-closed-book / RAGTruth-matched |
 | **RQ2** | How much of the commonly reported detector performance is a benchmark artefact? | 94.7% of the raw HaluEval labels are predictable from answer length alone; our own score falls 0.968 → 0.925 once that is removed |
-| **RQ3** | Does the pipeline beat published systems under a rule that respects uncertainty? | 3 wins / 2 ties against LLM-Check on RAGTruth; 8 wins / 5 ties / 8 losses across the 21-dimension matrix |
+| **RQ3** | Does the pipeline beat published systems under a rule that respects uncertainty? | 3 wins / 2 ties against LLM-Check on RAGTruth; 7 wins / 5 ties / 8 losses across the 21-dimension matrix |
 | **RQ4** | Does the mitigation rewrite improve answer quality? | **No measurable effect.** Δ = −0.007, CI [−0.022, +0.007], p = 0.404, n = 16 rewritten rows |
 | **RQ5** | What does the pipeline cost? | Mean 4.18 s/query on HaluEval, 4.12 s on TruthfulQA, 10.01 s on RAGTruth — about 19× slower than LLM-Check |
 
@@ -524,7 +524,6 @@ entirely below; otherwise it is a tie.*
 
 | Metric | Ours | 95% CI | Best published comparable | Verdict |
 |---|---|---|---|---|
-| AUPR | 0.922 | [0.9057, 0.9383] | 0.840 (Decoding Memories) | **WIN** |
 | Detection accuracy | 0.829 | [0.8090, 0.8510] | 0.847 (Halu-NLP) | **TIE** |
 | P@R90 | 0.800 | [0.7732, 0.8443] | 0.703 (Dale 2023 — LaBSE) | **WIN** |
 | ROC-AUC | 0.925 | [0.9113, 0.9401] | 0.987 (Dale 2023 — ALTI+) | **LOSS** |
@@ -643,9 +642,11 @@ drops to 0.865 and recall rises to 0.780. The honest split makes the detector
 fitted on a subset of the same split, so 0.612728 is partly in-sample. The
 held-out figure is **0.6185, CI [0.5371, 0.6943]**, from the half of the fitting
 data the head never saw. The gap is small, which is reassuring. But the held-out
-*lower bound* (0.5371) sits below LLM-Check's strongest anchor (0.5830), so on
-the held-out figure alone the RAGTruth comparison would be a tie against all five
-anchors rather than three wins. Both numbers are reported, side by side.
+*lower bound* (0.5371) sits below LLM-Check's three strongest anchors (Attention
+Score 0.5830, Hidden Score 0.5724, Window Entropy 0.5458), so on the held-out
+figure alone the RAGTruth comparison is **2 wins and 3 ties** rather than 3 wins
+and 2 ties: the lower bound still clears Perplexity (0.5327) and Log Entropy
+(0.5168). Both numbers are reported, side by side.
 
 ### 3.2 Comparison with published work
 
@@ -781,39 +782,41 @@ softened anywhere.
 
 ##### 3.2.5.1 The wins, grouped by what kind of win they are
 
-The 8 wins from the 21-dimension matrix (§3.8) fall into two very different
+The 7 wins from the 21-dimension matrix (§3.8) fall into two very different
 groups. This distinction matters, so it is made explicit here.
 
-**Group A — the score wins (3 of 8).** These are measured numbers where our
+**Group A — the score wins (2 of 7).** These are measured numbers where our
 interval clears a published number.
 
 | Dimension | Comparable | Their number | Ours | Our 95% CI | Why it is a win |
 |---|---|---|---|---|---|
-| **Detection AUPR** | Decoding Memories | 0.840 | **0.922** | [0.9057, 0.9383] | Our whole interval sits above their number. The gap is large — 0.082. |
 | **P@R90** | Dale 2023 — LaBSE | 0.703 | **0.800** | [0.7732, 0.8443] | Our whole interval sits above their number. The gap is 0.097. |
 | **Claim-level F1** | TU Wien — Vectara | 0.710 | **0.811** | not published | Our number is above theirs. No CI is published for this metric, so this is a point comparison, and it is labelled as one. |
 
-Each of the three gets its own diagram below, so a reader can look at one
+Each of the two gets its own diagram below, so a reader can look at one
 comparison without scanning a combined chart for the row that concerns them.
 
-**Figure: Detection AUPR.**
-
-![Detection AUPR: CRISP against the published comparables. CRISP reaches 0.922 with a 95% interval of [0.9057, 0.9383], which sits entirely above the published comparable of 0.840 from Decoding Memories. LLM-Check's SelfCheck variant reaches 0.800. The verdict is WIN.](data/graphs/win_aupr.png)
-
-*How to read it.* The grey diamonds are the published numbers. The blue circle
-with the bar through it is us. The bar is our 95% confidence interval — the range
-of values our system would still produce if we ran it again on a different sample.
-The dashed vertical line is the number we have to beat, 0.840. Our whole bar sits
-to the right of that line, so the win does not depend on a lucky run.
+**One metric that was previously listed here has been removed.** Detection
+AUPR (0.922, CI [0.9057, 0.9383]) was reported as a win against Decoding
+Memories' 0.840. That comparison was wrong: Decoding Memories reports
+**AUROC**, not AUPR — the strings "AUPR", "AUC-PR" and "PR-AUC" do not appear
+anywhere in that paper — and the 0.840 was EigenScore-B's HaluEval **AUROC**,
+not even that paper's best number (that is 84.9, Semantic Entropy + DMP on
+Mistral-7B). We measure AUPR and they measure AUROC; putting the two side by
+side was comparing different quantities. No published paper reports AUPR on
+HaluEval, so AUPR has no published comparable and is reported here as a
+measurement, not as a win.
 
 **Figure: Precision at 90% recall (P@R90).**
 
 ![Precision at 90% recall: CRISP against the published comparables. CRISP reaches 0.800 with a 95% interval of [0.7732, 0.8443], which sits entirely above the published comparable of 0.703 from Dale 2023's LaBSE baseline. The verdict is WIN.](data/graphs/win_pr90.png)
 
-*How to read it.* Same shape as the AUPR figure. The one published comparable is
-Dale's LaBSE baseline at 0.703. Our interval runs from 0.7732 to 0.8443, and its
-left end is still above 0.703. That is why this is a win and not a tie: it is not
-enough for our midpoint to be higher, the whole interval has to be higher.
+*How to read it.* The grey diamonds are the published numbers. The blue circle
+with the bar through it is us. The bar is our 95% confidence interval — the range
+of values our system would still produce if we ran it again on a different sample.
+The dashed vertical line is the number we have to beat, 0.703. Our whole bar sits
+to the right of that line, so the win does not depend on a lucky run. It is not
+enough for our midpoint to be higher; the whole interval has to be higher.
 
 **Figure: Claim-level F1.**
 
@@ -826,15 +829,9 @@ metric, so no bar is drawn on our mark and the figure says so in writing — the
 comparison is between point estimates, and it is labelled as such rather than
 being dressed up with an interval it does not have.
 
-**What these three wins mean for the project.**
+**What these two wins mean for the project.**
 
-- **AUPR is the most meaningful of the three.** ROC-AUC can look strong when the
-  two classes are unbalanced, because a detector that rarely fires can still score
-  well. AUPR does not have that weakness: it asks "when the detector says
-  hallucinated, how often is it right?" Ours answers 0.922. Beating the best
-  published comparable by 0.082 on a measure that punishes false alarms is a real
-  result, not a rounding artefact.
-- **P@R90 is the most *practical* of the three.** It answers the question a real
+- **P@R90 is the most *practical* of the two.** It answers the question a real
   deployment asks: "if I want to catch 90 out of 100 hallucinations, how many false
   alarms will I get?" Ours: 0.800 precision at that recall point. Dale's LaBSE
   baseline: 0.703. So at the same recall, we make roughly 10 fewer false alarms
@@ -845,7 +842,7 @@ being dressed up with an interval it does not have.
   higher on recall (0.810), which is a deliberate trade — a false flag costs one
   rewrite, a missed hallucination ships a wrong answer to the user unchallenged.
 
-**Group B — the structural wins (5 of 8).** These are not numbers. They are
+**Group B — the structural wins (5 of 7).** These are not numbers. They are
 things the system *does* that no paper in the comparison does at all.
 
 | Dimension | What we have | Who else has it |
@@ -916,7 +913,7 @@ as a finding.
    gap is not a failure of the approach. It also tells us the next step is
    something other than a better classifier.
 3. **Ties are where the honest story lives.** If this thesis reported only wins, a
-   reader would assume the comparison was rigged. The 8/5/8 split — 8 wins, 5 ties,
+   reader would assume the comparison was rigged. The 7/5/8 split — 7 wins, 5 ties,
    8 losses — is a believable shape for an honest result, and it is more useful
    than a clean sweep would be.
 4. **Ties protect the wins.** Because the tie rule is applied in both directions
@@ -943,12 +940,12 @@ exactly one thing.
 
 **The honest one-paragraph version of this analysis:**
 
-> Against the eleven systems we compare with, we win 8 of 21 dimensions, tie 5 and
+> Against the eleven systems we compare with, we win 7 of 21 dimensions, tie 5 and
 > lose 8. The five wins that come from *what the system can do* — per-claim
 > citations, working retrieval, real abstention, a pluggable model, and a
 > three-dataset evaluation with question-level intervals — are the ones that
-> survive a change of dataset or model. The three wins that come from *scores* —
-> AUPR 0.922 against 0.840, P@R90 0.800 against 0.703, and claim-level F1 0.811
+> survive a change of dataset or model. The two wins that come from *scores* —
+> P@R90 0.800 against 0.703, and claim-level F1 0.811
 > against 0.710 — are the ones a reviewer can check against the published tables.
 > Where we tie, we say so: on sentence accuracy our interval [0.809, 0.851]
 > straddles Halu-NLP's 0.847, so we are level rather than behind. The only
@@ -1228,7 +1225,7 @@ two-sided interval rule of §2.9.
 |---|---|---|---|---|---|---|
 | 1 | **Mitigation Δ** | Dale 2023 — COMET-QE rerank | +0.60 | **−0.007 [−0.022, +0.007] (n = 16 rewritten) — not positive** | ✗ | Measured on the 16 rows step 10 rewrote; the rewrite does not improve on no mitigation yet |
 | 2 | **Claim-level F1** | TU Wien — Vectara | 0.71 | **0.811** | ✓ | Above the cited comparable (no CI published for this metric) |
-| 3 | **Detection AUPR** | Decoding Memories | 0.840 | **0.922** | ✓ | Our CI's bottom (0.9057) is above their top |
+| 3 | **Detection AUPR** | none published | — | **0.922** | — | No published paper reports AUPR on HaluEval. Decoding Memories reports AUROC, so there is nothing to compare against; this is a measurement, not a win. |
 | 4 | **HRR** | Dale 2023 (implied) | ~0.55 | **0.132** | ✗ | Below the implied baseline |
 | 5 | **VSR** | Halu-NLP | 0.81 | **0.701** | ✗ | Our interval [0.673, 0.726] sits entirely below 0.81 |
 | 6 | **Per-claim provenance** | None | — | **Yes (`doc_id` per claim)** | ✓ | Unique among all cited papers |
@@ -1248,23 +1245,26 @@ two-sided interval rule of §2.9.
 | 20 | **Multi-domain NLG tasks** | SHROOM | 3 tasks | QA + summarization + data-to-text | ≈ | Broader than QA, narrower than SHROOM's MT/DM/PG |
 | 21 | **Evaluation scale** | Dale 2023 | 600 sentences | **1000 rows × 3 datasets** | ✓ | Bigger, and intervals computed over questions not rows |
 
-**Verdict tally: 8 wins / 5 ties / 8 losses** across 21 dimensions.
+**Verdict tally: 7 wins / 5 ties / 8 losses** across 21 dimensions, with one row
+(3, Detection AUPR) carrying no verdict at all because it has no published
+comparable.
 
 | Outcome | Count | Dimensions |
 |---|---|---|
-| **✓ Win** | 8 | 2, 3, 6, 10, 15, 17, 18, 21 |
+| **✓ Win** | 7 | 2, 6, 10, 15, 17, 18, 21 |
 | **≈ Tie / At par** | 5 | 7, 9, 14, 16, 20 |
 | **✗ Loss** | 8 | 1, 4, 5, 8, 11, 12, 13, 19 |
+| **— No comparable** | 1 | 3 |
 
 Separately, and counted against published anchors rather than against the matrix,
 the RAGTruth head-to-head gives **3 wins and 2 ties** out of LLM-Check's five
 published probes. That count is kept apart from the matrix tally on purpose, so
 that each number describes exactly one thing.
 
-**Headline read.** Of the 8 matrix wins, **5 are structural** — per-claim
+**Headline read.** Of the 7 matrix wins, **5 are structural** — per-claim
 provenance, modular backend, retrieval that works, explicit abstention, and
 evaluation scale — properties of the system's design rather than of a single
-score. The **score wins** are claim-level F1, detection AUPR and P@R90. We trail
+score. The **score wins** are claim-level F1 and P@R90. We trail
 on mitigation Δ, HRR, VSR, detection ROC-AUC, Spearman ρ, latency, GPU memory and
 the conformal guarantee, and we are at parity on calibration, sentence accuracy,
 cost, active mitigation and multi-domain coverage.
@@ -1276,7 +1276,6 @@ same run as the tables above):
 Metric                    Best-Cited   Ours    Gap
 ─────────────────────────────────────────────────────────────
 Claim F1                       0.710   0.811   +0.101  ✓ Ahead (no CI)
-Detection AUPR                 0.840   0.922   +0.082  ✓ Ahead
 Detection ROC-AUC              0.987   0.925   -0.062  ✗ Behind
 Sentence accuracy              0.847   0.829   -0.018  ≈ At par
 P@R90                          0.703   0.800   +0.097  ✓ Ahead

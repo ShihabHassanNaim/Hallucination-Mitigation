@@ -344,9 +344,11 @@ lists every RAGTruth paper we found, including the ones we lose to.
 1. **The detection head was fitted on 496 rows of the RAGTruth split.** The
    headline 0.6127 is therefore **in-sample**. The honest generalisation estimate
    is the **held-out** figure: **0.6185, CI [0.5371, 0.6943]**. On the held-out
-   figure alone, the LLM-Check comparison would be **5 ties, 0 wins** — because the
-   held-out lower bound (0.5371) sits below LLM-Check's strongest anchor (0.5830).
-   Both numbers are reported.
+   figure alone, the LLM-Check comparison becomes **2 wins, 3 ties, 0 losses** —
+   the held-out lower bound (0.5371) still clears Perplexity (0.5327) and Log
+   Entropy (0.5168), but sits below Window Entropy (0.5458), Hidden Score
+   (0.5724) and Attention Score (0.5830), so those three become ties rather than
+   wins. Both numbers are reported.
 2. **Splits differ.** Ours is 1000 length-matched rows / 277 unique queries.
    LLM-Check's anchors are a weighted average across four black-box target models.
    The AES and frequency-aware papers use the extended 2,700-example test set.
@@ -366,9 +368,9 @@ lists every RAGTruth paper we found, including the ones we lose to.
 ## Sources
 
 1. Niu, C. et al. (2024). *RAGTruth: A Hallucination Corpus for Developing Trustworthy Retrieval-Augmented Language Models.* arXiv 2401.00396 — Table 5 (response-level F1), Table 6 (span-level F1).
-2. *"LLM-Check: Investigating Detection of Hallucinations in Large Language Models"*, NeurIPS 2024 — Table 4 (detection AUROC on RAGTruth).
-3. Su, W., Wang, Q., Ba, Z., Chu, Z., Zhong, Z., Yan, L. & Ren, K. (2026). *When Attention Escapes: Diagnosing and Mitigating Hallucination in Retrieval-Augmented Generation.* Findings of EMNLP 2026 — Table 1 (RAGTruth AUROC/ACC/PCC/F1), Table 2 (Mistral-7B), Table 12 (Llama-2-70B).
-4. Qi, S., Chen, Y., Zhao, R., Zhu, Q., Hu, Z., Liu, W., He, Y., Yuan, Z. & Gui, L. (2026). *Detecting Contextual Hallucinations in Large Language Models with Frequency-Aware Attention.* arXiv 2602.18145 — Table 1 (token-level), Table 2 (RagTruth-Avg span-level), Table 3 (attention-head ablation).
+2. *"LLM-Check: Investigating Detection of Hallucinations in Large Language Models"*, NeurIPS 2024 Main Conference Track — Table 4 (detection AUROC on RAGTruth).
+3. Su, W., Wang, Q., Ba, Z., Chu, Z., Zhong, Z., Yan, L. & Ren, K. (2026). *When Attention Escapes: Diagnosing and Mitigating Hallucination in Retrieval-Augmented Generation.* Findings of EMNLP 2026, pp. 8678–8696 — Table 1 (RAGTruth AUROC/ACC/PCC/F1), Table 2 (Mistral-7B), Table 12 (Llama-2-70B).
+4. Qi, S., Chen, Y., Zhao, R., Zhu, Q., Hu, Z., Liu, W., He, Y., Yuan, Z. & Gui, L. (2026). *Detecting Contextual Hallucinations in LLMs with Frequency-Aware Attention.* arXiv 2602.18145 — Table 1 (token-level), Table 2 (RagTruth-Avg span-level), Table 3 (attention-head ablation).
 5. Chen, W., Padmanabhan, V., Giyahchi, T., Wong, E. & Akoglu, L. (2026). *Rethinking Evaluation for LLM Hallucination Detection: A Desiderata, A New RAG-based Benchmark, New Insights.* arXiv 2605.11330 — Table 4 (F1/precision/recall/accuracy), Table 7 (ROC-AUC/PR-AUC).
 6. Huang, S. & Lane, I. (2026). *SHAM-Bench: A Span-level Hallucination Benchmark Across Multiple Tasks.* arXiv 2610.27370 — Table 2 (span and sentence F1 by task).
 7. Sinha, D. (2025). *The Semantic Illusion: Certified Limits of Embedding-Based Hallucination Detection in RAG Systems.* arXiv 2512.15068 — Figure 3 (qualitative only).

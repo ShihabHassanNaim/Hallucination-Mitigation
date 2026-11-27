@@ -17,8 +17,7 @@ five-position positioning, and the defence notes into one document.
 We compared our pipeline against eleven published systems across three datasets.
 
 - **We win clearly on the metrics that come from checking claims one at a time.** Claim-level
-  F1 0.811, above the best cited comparable of 0.71. AUPR 0.922, above the best published
-  comparable of 0.84–0.85 with the interval excluding it.
+  F1 0.811, above the best cited comparable of 0.71. AUPR 0.922, with no published comparable -- no paper reports AUPR on HaluEval
 - **We win statistically against three published probes on RAGTruth.** Our detection score
   clears three of LLM-Check's five published anchors and ties the other two.
 - **We win on the things no cited paper does at all.** Per-claim citations, a pluggable
@@ -95,8 +94,8 @@ RAGTruth split, so the 0.613 above was measured on data the model had already se
 honest generalisation estimate is the **held-out** figure: **0.6185, CI [0.5371, 0.6943]**,
 scored on a half of the fitting data it never saw. The gap is small, which is reassuring.
 But the held-out lower bound (0.5371) sits **below** LLM-Check's strongest anchor
-(0.5830), so on the held-out figure alone the RAGTruth comparison would be a tie against
-all five rather than three wins. Both numbers are reported. A reviewer who spots the
+(0.5830), so on the held-out figure alone the RAGTruth comparison is **2 wins, 3 ties**
+rather than 3 wins. It still clears Logit, Perplexity (0.5327), Logit, Log Entropy (0.5168). It does not clear Attention Score (0.5830), Hidden Score (0.5724), Logit, Window Entropy (0.5458), so those turn from wins into ties. Both numbers are reported. A reviewer who spots the
 in-sample figure deserves to see the out-of-sample figure beside it.
 
 **Per task type** (for transparency — the published anchors are pooled averages with no
@@ -149,7 +148,7 @@ same data, and the gap there is much smaller.
 | Metric | Our value | 95% CI | Best published comparable | Verdict |
 |---|---|---|---|---|
 | ROC-AUC | 0.925 | [0.9113, 0.9401] | 0.987 (Dale 2023 — ALTI+) | ✗ |
-| AUPR | 0.922 | [0.9057, 0.9383] | 0.840 (Decoding Memories) | ✓ |
+| AUPR | 0.922 | [0.9057, 0.9383] | no published comparable | — |
 | Detection F1 | 0.820 | [0.7970, 0.8437] | — | Measured |
 | Detection accuracy | 0.829 | [0.8090, 0.8510] | 0.847 (Halu-NLP — SHROOM) | ≈ |
 | P@R90 | 0.800 | [0.7732, 0.8443] | 0.703 (Dale 2023 — LaBSE) | ✓ |
@@ -336,7 +335,7 @@ per-dimension verdict. ✓ wins, ≈ ties, ✗ loses.
 |---|---|---|---|---|---|---|
 | 1 | **Mitigation Δ** | Dale 2023 — COMET-QE rerank | +0.60 | **-0.007 [-0.022, +0.007] (n=16 regenerated) — not positive** | ✗ | Measured on the 16 rows step 10 regenerated; the rewrite does not improve on no mitigation yet |
 | 2 | **Claim-level F1** | TU Wien — Vectara | 0.71 | **0.811** | ✓ | Above the cited comparable (no CI for this metric) |
-| 3 | **Detection AUPR** | Decoding Memories | 0.840 | **0.922** | ✓ | Our CI's bottom is above their top |
+| 3 | **Detection AUPR** | no published comparable | — | **0.922** | — | No published paper reports AUPR on HaluEval. Decoding Memories reports AUROC, so this row is a measurement with no published comparable. |
 | 4 | **HRR** | Dale 2023 (implied) | ~0.55 | **0.132** | ✗ | Below the implied baseline |
 | 5 | **VSR** | Halu-NLP | 0.81 | **0.701** | ✗ | Below the cited comparable |
 | 6 | **Per-claim provenance** | None | — | **Yes (doc_id per claim)** | ✓ | Unique among all cited papers |
@@ -362,7 +361,7 @@ The 21 dimensions of the matrix above, counted by verdict.
 
 | Outcome | Count | Dimensions |
 |---|---|---|
-| **✓ Win** | 8 | 2, 3, 6, 10, 15, 17, 18, 21 |
+| **✓ Win** | 7 | 2, 6, 10, 15, 17, 18, 21 |
 | **≈ Tie / At par** | 5 | 7, 9, 14, 16, 20 |
 | **✗ Loss** | 8 | 1, 4, 5, 8, 11, 12, 13, 19 |
 
@@ -372,13 +371,13 @@ LLM-Check's five published probes. That is the only like-for-like comparison in 
 document, and it is kept apart from the matrix tally rather than added into it, so
 that the two counts each describe one thing.
 
-**Headline read.** Of the 8 matrix wins, 5 are structural (Per-claim provenance,
+**Headline read.** Of the 7 matrix wins, 5 are structural (Per-claim provenance,
 Modular backend, Retrieval that works, Explicit abstention and Evaluation scale) --
 properties of the system's design rather than of a single score. The score wins are
-Claim-level F1, Detection AUPR and P@R90. We trail on Mitigation Δ, HRR, VSR,
-Detection ROC-AUC, Spearman ρ, Per-query latency (GPU), GPU peak memory and Conformal
-coverage guarantee, and we are at parity on Calibrated confidence, Sentence accuracy,
-Cost per 1k queries, Active mitigation and Multi-domain NLG tasks.
+Claim-level F1 and P@R90. We trail on Mitigation Δ, HRR, VSR, Detection ROC-AUC,
+Spearman ρ, Per-query latency (GPU), GPU peak memory and Conformal coverage guarantee,
+and we are at parity on Calibrated confidence, Sentence accuracy, Cost per 1k queries,
+Active mitigation and Multi-domain NLG tasks.
 
 ### Visual Headline Comparison
 
@@ -389,7 +388,6 @@ regenerated from the evaluation run that produced the tables above.
 Metric                    Best-Cited   Ours    Gap
 ─────────────────────────────────────────────────────────────
 Claim F1                       0.710   0.811   +0.101  ✓ Ahead (no CI)
-Detection AUPR                 0.840   0.922   +0.082  ✓ Ahead
 Detection ROC-AUC              0.987   0.925   -0.062  ✗ Behind
 Sentence accuracy              0.847   0.829   -0.018  ≈ At par
 P@R90                          0.703   0.800   +0.097  ✓ Ahead

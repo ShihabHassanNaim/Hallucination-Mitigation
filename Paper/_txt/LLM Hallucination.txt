@@ -1,8 +1,23 @@
-Traceback (most recent call last):
-  File "<string>", line 5, in <module>
-    sys.stdout.write(t)
-    ~~~~~~~~~~~~~~~~^^^
-  File "C:\Python314\Lib\encodings\cp1252.py", line 19, in encode
-    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
-           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-UnicodeEncodeError: 'charmap' codec can't encode character '\u2265' in position 291: character maps to <undefined>
+Start
+User Question
+Query Understanding Module 
+Prompt Construction
+Large Language Model (LLM)
+Initial Generated Response
+Hallucination Detection
+(Embeddings + Similarity + ML Classifier)
+Semantic Similarity Calculation
+ML Hallucination Classifier
+Hallucination Score (0–1)
+Score ≥ Threshold?No
+(Clean)
+Yes (Possible
+Hallucination)
+Return Response Verification Pipeline
+Claim Extraction
+Evidence Retrieval
+(Knowledge Base)
+Fact Verification
+Response Regeneration
+Verified Response
+End

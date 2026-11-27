@@ -6,8 +6,8 @@ Architecture,Verification,NLI per claim (mDeBERTa-xnli),NLI on full sentence,Cos
 Architecture,Mitigation,Evidence regen + PASS/REGEN/ABSTAIN gate,N-best MC-dropout rerank,None,None,None,None,None,None,None,None,Risk-controlled reject,
 Architecture,Calibration,Temperature scaling + Platt,None,None,Linear regression,None,Threshold,None,None,None,None,Conformal (1-alpha),
 Architecture,Access Required,API or local HF,White-box (ALTI) / Black-box,Black-box,Mixed (Vectara + activations),Black-box,Black-box,Black-box,White-box,White-box or surrogate,Black-box,White-box KV-cache,Black-box
-Detection,ROC-AUC,"0.925 [0.911, 0.940]",0.987 (fully detached),-,-,-,0.85-0.90 (Sent-T5 XL),-,0.80-0.82 (EigenScore),0.72 (FAVA),-,-,0.94 (judge)
-Detection,AUPR,"0.922 [0.906, 0.938]",-,-,-,-,-,-,-,0.80 (SelfCheck),-,0.84-0.85 (with DMP),-
+Detection,ROC-AUC,"0.925 [0.911, 0.940]",0.987 (fully detached),-,-,-,0.85-0.90 (Sent-T5 XL),-,0.80-0.82 (EigenScore),0.72 (FAVA),-,"0.849 (AUROC, Semantic Entropy+DMP)",0.94 (judge)
+Detection,AUPR,"0.922 [0.906, 0.938]",-,-,-,-,-,-,-,-,-,-,-
 Detection,P at R=90,"0.800 [0.773, 0.844]",0.703 (LaBSE),-,-,-,-,-,-,-,-,-,-
 Detection,Sentence Accuracy,"0.829 [0.809, 0.851]",-,0.7440 (ensemble),0.817 (mm-linreg),0.847 (Halu-NLP),0.782 (Sent-T5 XL),0.799 (Voting),-,-,-,-,-
 Detection,Spearman rho,"0.736 [0.712, 0.762]",-,0.5285 (T5 + syn),0.737 (mm-linreg),0.770 (Halu-NLP),0.636 (Sent-T5 XL),0.693 (Voting),-,TPR at FPR,-,-,-

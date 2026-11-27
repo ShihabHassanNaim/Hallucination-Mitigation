@@ -37,17 +37,17 @@ explained by answer length.
 
 | metric | value |
 |---|---|
-| **Detection ROC-AUC** | **0.6286** |
-| **95% CI** | **[0.5976, 0.6603]** |
-| Detection accuracy | 0.592 |
-| Detection precision | 0.5804 |
-| Detection recall | 0.664 |
-| Detection F1 | 0.6194 |
-| Detection AUPR | 0.6194 |
-| Spearman rho | 0.2227, CI [0.1691, 0.2776] |
-| Claim precision / recall / F1 | 0.9591 / 0.6364 / 0.7324 |
-| Retrieval recall@5 | 0.906 |
-| Latency mean | 4.16 s |
+| **Detection ROC-AUC** | **0.6127** |
+| **95% CI** | **[0.5494, 0.6581]** |
+| Detection accuracy | 0.610 |
+| Detection precision | 0.6113 |
+| Detection recall | 0.604 |
+| Detection F1 | 0.6076 |
+| Detection AUPR | 0.6112 |
+| Spearman rho | 0.1953, CI [0.0858, 0.2738] |
+| Claim precision / recall / F1 | 0.9642 / 0.6260 / 0.7269 |
+| Retrieval recall@5 | 0.902 |
+| Latency mean | 10.01 s |
 
 Per task type (the published anchors are pooled averages with no per-task
 split, so these are reported for transparency, not as a separate
@@ -55,9 +55,9 @@ comparison):
 
 | task type | n | ROC-AUC |
 |---|---|---|
-| Data2txt | 408 | 0.5718 |
-| QA | 294 | 0.7221 |
-| Summary | 298 | 0.6473 |
+| Data2txt | 408 | 0.5443 |
+| QA | 294 | 0.7225 |
+| Summary | 298 | 0.5984 |
 
 The CI resamples **unique instances** (277 of them), not rows, because the
 rows within a pair share an instance.
@@ -70,7 +70,7 @@ estimate is the **held-out** figure: **0.6185, CI [0.5371, 0.6943]** — the
 head scored on a half of the fit data it never saw
 (`data/detection_head_refit600.json`).
 
-The gap between 0.6185 and 0.6286 is the generalisation gap, and it is
+The gap between 0.6185 and 0.6127 is the generalisation gap, and it is
 small. The held-out figure is reported next to the headline number because
 the headline number's CI is what the published comparison uses, and
 concealing that the head was fitted on this data would be an overclaim.
@@ -99,11 +99,23 @@ overlaps is a tie, not a win.
 
 | system | metric | published | ours | verdict |
 |---|---|---|---|---|
-| LLM-Check (Attention Score) | AUROC | 0.5830 | 0.6286, CI [0.5976, 0.6603] | **WIN** |
-| LLM-Check (Hidden Score) | AUROC | 0.5724 | " | **WIN** |
+| LLM-Check (Attention Score) | AUROC | 0.5830 | 0.6127, CI [0.5494, 0.6581] | **TIE** |
+| LLM-Check (Hidden Score) | AUROC | 0.5724 | " | **TIE** |
 | LLM-Check (Logit, Window Entropy) | AUROC | 0.5458 | " | **WIN** |
 | LLM-Check (Logit, Perplexity) | AUROC | 0.5327 | " | **WIN** |
 | LLM-Check (Logit, Log Entropy) | AUROC | 0.5168 | " | **WIN** |
+
+**Three wins, two ties.** Our lower bound is 0.5494, which clears Window
+Entropy (0.5458), Perplexity (0.5327) and Log Entropy (0.5168), but sits
+below Attention Score (0.5830) and Hidden Score (0.5724), so those two are
+ties rather than wins.
+
+**On the held-out figure the tally drops to two wins and three ties.** The
+held-out lower bound is 0.5371, which still clears Perplexity (0.5327) and
+Log Entropy (0.5168) but no longer clears Window Entropy (0.5458), Hidden
+Score (0.5724) or Attention Score (0.5830). Both tallies are reported: the
+in-sample one in the paper's comparison table, the held-out one here and in
+`Paper/ragtruth_comparison.md`.
 
 **Scope caveat, stated plainly:** LLM-Check's numbers are the "Overall"
 column of its Table 4 — a weighted average across the target models

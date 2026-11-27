@@ -74,7 +74,7 @@ Hu, InternalInspector and Markov chain report **accuracy**; MedICO and
 Teaching-with-Lies report **F1**; Small Agent reports both. Our headline
 number is **ROC-AUC 0.9251**. It can only be set beside another AUROC — which
 among all the HaluEval papers here means only Decoding Memories (400 QA
-examples, AUROC 61–84 for its baselines).
+examples, AUROC 61.2–84.9 for its baselines).
 
 **Sample-size mismatch — the spread is 350 to 35,000.** Our 1000 rows /
 500 unique queries sits in the lower-middle. MedICO's 1,000 and Small Agent's

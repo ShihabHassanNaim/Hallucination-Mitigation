@@ -83,26 +83,42 @@ def test_the_verdict_table_parser_finds_every_matrix_row(md_text):
     The rows are counted by column position, the same way the paper
     counts them, so a row added to the document cannot be dropped by the
     parser without the counts disagreeing.
+
+    One row -- Detection AUPR -- carries a dash instead of a verdict,
+    because no published paper reports AUPR on HaluEval, so there is
+    nothing for it to be compared against. The parser returns that row
+    too; it is counted separately here so a second dash row would fail.
     """
     rows = L._parse_verdict_table(md_text)
     assert rows, "the verdict parser found no rows in comparison.md"
 
     expected = []
+    undecided = []
     for line in md_text.splitlines():
         if not re.match(r"^\|\s*\d+\s*\|", line):
             continue
         cells = [c.strip() for c in line.split("|")]
-        if len(cells) < 8 or cells[6] not in ("✓", "✗", "≈"):
+        if len(cells) < 8:
             continue
         # cells[0] is the empty string before the row's first pipe, so
         # the row number is cells[1].
+        if cells[6] not in ("✓", "✗", "≈"):
+            undecided.append((cells[1], cells[6]))
+            continue
         expected.append((cells[1], cells[6]))
 
-    assert len(rows) == len(expected), (
-        f"the parser returned {len(rows)} rows but the document has "
-        f"{len(expected)}"
+    assert len(undecided) == 1, (
+        f"the document has {len(undecided)} rows with no verdict "
+        f"({undecided}); exactly one is expected, because no published "
+        "paper reports AUPR on HaluEval"
     )
-    for row, (num, mark) in zip(rows, expected):
+
+    decided = [r for r in rows if r["winner"] in ("✓", "✗", "≈")]
+    assert len(decided) == len(expected), (
+        f"the parser returned {len(decided)} decided rows but the document "
+        f"has {len(expected)}"
+    )
+    for row, (num, mark) in zip(decided, expected):
         assert row["num"] == num, (
             f"the parser read row {row['num']} where the document has {num}"
         )
@@ -119,6 +135,11 @@ def test_the_tally_parser_agrees_with_the_matrix_it_sits_below(md_text):
 
     counts = {"win": 0, "tie": 0, "loss": 0}
     for row in rows:
+        # Detection AUPR carries a dash, not a verdict: no published
+        # paper reports AUPR on HaluEval, so it is in none of the three
+        # counts and the tally must not try to place it.
+        if row["winner"] not in ("✓", "✗", "≈"):
+            continue
         counts[{"✓": "win", "≈": "tie", "✗": "loss"}[row["winner"]]] += 1
 
     tally = L._parse_verdict_tally(md_text)

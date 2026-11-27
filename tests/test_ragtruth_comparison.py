@@ -250,6 +250,46 @@ def test_held_out_caveat_is_present(doc):
     assert "held-out" in doc
 
 
+def test_the_held_out_tally_is_recomputed_from_the_interval_rule(doc, anchors):
+    """The held-out tally is the interval rule applied anchor by anchor.
+
+    The held-out interval's *lower* bound is 0.5371. That still clears
+    LLM-Check's two weakest anchors (Perplexity 0.5327 and Log Entropy
+    0.5168) but not Window Entropy (0.5458), Hidden Score (0.5724) or
+    Attention Score (0.5830). So the held-out comparison is two wins
+    and three ties, not "a tie against all five".
+
+    The old wording compared the lower bound only with the strongest
+    anchor and concluded every anchor was tied, which understated the
+    held-out result. This test recomputes the tally so the claim has to
+    follow the rule rather than a hand-written number.
+    """
+    holdout = json.loads(
+        (ROOT / "data" / "detection_head_refit600.json").read_text(encoding="utf-8")
+    )
+    fitted = holdout["models"]["logistic (fitted)"]
+    lower, upper = fitted["roc_auc_holdout_ci95"]
+
+    wins = ties = losses = 0
+    for a in anchors["auroc_family"]["anchors"]:
+        v = verdict(lower, (lower, upper), a["value"])
+        wins += v == "WIN"
+        ties += v == "TIE"
+        losses += v == "LOSS"
+
+    assert (wins, ties, losses) == (2, 3, 0), (
+        "the held-out tally is no longer 2 wins / 3 ties / 0 losses"
+    )
+
+    # The document has to state that tally, and must not claim the
+    # comparison collapsed to all ties.
+    assert f"{wins} wins, {ties} ties" in doc, (
+        "the document does not state the recomputed held-out tally"
+    )
+    assert "5 ties, 0 wins" not in doc
+    assert "tie against all five" not in doc
+
+
 def test_granularity_caveat_is_present(doc):
     assert "span-level" in doc
     assert "token-level" in doc
